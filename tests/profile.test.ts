@@ -107,6 +107,7 @@ const RESULT: ProfileResult = {
 		pixelRatio: 2,
 		samples: 4,
 		frameRate: "vsync",
+		renderScale: "Automatic, 75%",
 		draws: 12,
 		instances: 40,
 		triangles: 2400,
@@ -120,6 +121,20 @@ const RESULT: ProfileResult = {
 	stages: [{ stage: "place", frames: 90, median: 40, p95: 50 }],
 	stageTotal: { median: 90, p95: 110 },
 	stageFrames: 90,
+	base: [
+		{ label: "Empty frame", median: 20, p95: 22 },
+		{ label: "Parts' depth only", median: Number.NaN, p95: Number.NaN },
+	],
+	asSet: { label: "As set", median: 80, p95: 90 },
+	without: [
+		{
+			title: "Shadows",
+			rows: [
+				{ label: "Sky shadows", median: 30, p95: 32, saves: 50 },
+				{ label: "Soft edges", median: 70, p95: 72, saves: 10 },
+			],
+		},
+	],
 	steps: [
 		{ label: "Parts, nothing else", median: 30, p95: 35 },
 		{ label: "+ Shadows", median: 70, p95: 80 },
@@ -136,6 +151,7 @@ describe("what the profile says", () => {
 		expect(profileVerdict(RESULT)).toEqual([
 			"Bound by filling pixels: at a quarter of the pixels the frame is 4.0× as fast.",
 			"The costliest step is + Shadows: 40.0 ms a frame.",
+			"Of the switches tried alone, Sky shadows off saves the most: 50.0 ms a frame.",
 		]);
 		const flat = {
 			...RESULT,
@@ -154,5 +170,8 @@ describe("what the profile says", () => {
 		expect(text).toMatch(/Parts and images\s+40\.0 ms\s+50\.0 ms/);
 		expect(text).toMatch(/\+ Shadows\s+70\.0 ms \+40\.0 ms/);
 		expect(text).toMatch(/25%\s+20\.0 ms\s+50 fps/);
+		expect(text).toMatch(/Empty frame\s+20\.0 ms/);
+		expect(text).toMatch(/Parts' depth only\s+not here/);
+		expect(text).toMatch(/Without Sky shadows\s+30\.0 ms\s+50\.0 ms/);
 	});
 });

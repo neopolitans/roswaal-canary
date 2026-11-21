@@ -65,6 +65,9 @@ export const STAGE_HINTS: Record<Stage, string> = {
 	marks: "The selection, handles and lines drawn over the place.",
 };
 
+/** A profile's base measurements: the frame cleared and nothing drawn, or the parts' depth alone. */
+export type Probe = "empty" | "depth";
+
 /** One profiled frame: milliseconds by stage, for the stages it drew. */
 export type StageFrame = Partial<Record<Stage, number>>;
 
@@ -213,6 +216,8 @@ export interface ProfileFacts {
 	pixelRatio: number;
 	samples: number;
 	frameRate: string;
+	/** Settings' render scale, and the share of the screen's pixels across it comes to here. */
+	renderScale: string;
 	draws: number;
 	instances: number;
 	triangles: number;
@@ -234,6 +239,12 @@ export interface ProfileResult {
 	/** Frames profiled stage by stage: slower than free running, since each stage is waited for. */
 	stageFrames: number;
 	steps: Timed[];
+	/** The frame with nothing drawn, the parts' depth alone, and the parts shaded with nothing on. */
+	base: Timed[];
+	/** Each switch of a group turned off alone: the frame without it, and what that saves. */
+	without: { title: string; rows: (Timed & { saves: number })[] }[];
+	/** The frame as set, measured just before the switches are turned off, which they are compared with. */
+	asSet: Timed | null;
 	resolution: Timed[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
 	clock: number;
@@ -270,6 +281,15 @@ export function profileVerdict(result: ProfileResult): string[] {
 	);
 	if (worst && worst.cost > 1)
 		out.push(`The costliest step is ${worst.label}: ${msText(worst.cost)} a frame.`);
+	const rows = result.without.flatMap((g) => g.rows).filter((r) => Number.isFinite(r.saves));
+	const most = rows.reduce<(typeof rows)[number] | null>(
+		(a, b) => (a === null || b.saves > a.saves ? b : a),
+		null,
+	);
+	if (most && most.saves > 1)
+		out.push(
+			`Of the switches tried alone, ${most.label} off saves the most: ${msText(most.saves)} a frame.`,
+		);
 	return out;
 }
 
@@ -293,7 +313,7 @@ export function profileReport(result: ProfileResult): string {
 		`Renderer: ${facts.renderer} · GPU: ${facts.gpu} · GPU timers: ${facts.gpuTimers ? "yes" : "no"}`,
 	);
 	lines.push(
-		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${facts.pixelRatio}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate}`,
+		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${facts.pixelRatio}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}`,
 	);
 	lines.push(
 		`Last frame: ${facts.draws.toLocaleString("en")} draw calls, ${facts.instances.toLocaleString("en")} instances, ${Math.round(facts.triangles).toLocaleString("en")} triangles, ${facts.beams} beams, ${facts.particles.toLocaleString("en")} particles`,
@@ -320,6 +340,22 @@ export function profileReport(result: ProfileResult): string {
 		`  ${"All stages".padEnd(24)} ${msText(result.stageTotal.median).padStart(9)} ${msText(result.stageTotal.p95).padStart(9)}`,
 	);
 	lines.push("");
+	lines.push("Base, every feature off (frame):");
+	for (const b of result.base)
+		lines.push(
+			`  ${b.label.padEnd(24)} ${Number.isFinite(b.median) ? msText(b.median).padStart(9) : "  not here"}`,
+		);
+	lines.push("");
+	if (result.asSet)
+		lines.push(`As set, just before the switches below: ${msText(result.asSet.median)}`);
+	for (const group of result.without) {
+		lines.push(`${group.title}, each switch off alone (frame, saved):`);
+		for (const r of group.rows)
+			lines.push(
+				`  ${`Without ${r.label}`.padEnd(30)} ${msText(r.median).padStart(9)} ${msText(r.saves).padStart(9)}`,
+			);
+		lines.push("");
+	}
 	lines.push("Steps added one at a time (frame, cost of the step):");
 	for (const s of stepCosts(result.steps))
 		lines.push(

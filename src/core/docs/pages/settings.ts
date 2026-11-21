@@ -264,6 +264,10 @@ export function settingsPage(): DocPage {
 						"The most the 3D view is drawn a second while it moves: 24 to 240, **VSync** to match the display, the default, or **Unlimited**. It is drawn only when something changes either way. The place's Properties has it too.",
 					],
 					[
+						"Render scale",
+						"How many of the screen's pixels the place is drawn at, across and down: **Automatic**, the default, is 75% on a touch screen and 100% elsewhere; or **100%**, **75%** or **50%**. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
+					],
+					[
 						"Selection outline",
 						"How wide the outline round what is picked is drawn: **Thin**, **Medium** or **Thick**.",
 					],

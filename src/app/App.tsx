@@ -476,6 +476,10 @@ export function App() {
 						? sceneView.frameRate
 						: Number(sceneView.frameRate),
 				altClickSteps: sceneView.altClickSteps,
+				renderScale:
+					sceneView.renderScale === "auto" || sceneView.renderScale === undefined
+						? "auto"
+						: Number(sceneView.renderScale) / 100,
 			}),
 		[
 			viewport,
@@ -487,6 +491,7 @@ export function App() {
 			prefs.modifyDataModel,
 			sceneView.frameRate,
 			sceneView.altClickSteps,
+			sceneView.renderScale,
 		],
 	);
 	// The folder from a previous session, when one is waiting on a click.

@@ -9,6 +9,21 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.3",
+		date: "2026-11-21",
+		headline: "The Place Editor is 0.2.0: a deeper profile, and a render scale.",
+		added: [
+			"**Render scale** in Settings › Scene view: the place drawn at 100%, 75% or 50% of the screen's pixels across and down. Automatic is 75% on a touch screen and 100% elsewhere.",
+			"**The profile's base**: with every feature off, the frame with nothing drawn, the parts' depth alone (WebGPU), and the parts shaded.",
+			"**Light and Shadows, each off alone**: each switch of those groups turned off by itself, and what the frame saves without it.",
+		],
+		changed: [
+			"**The Place Editor is 0.2.0.**",
+			"**The profile's report** names the render scale, and a GPU whose browser gives one word for its vendor, architecture and description once.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.2",
 		date: "2026-11-21",
 		headline: "Rendering, Performance and Mesh Debug open on a tablet.",

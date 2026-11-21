@@ -33,6 +33,7 @@ describe("an extension's settings", () => {
 		expect(state.values).toEqual({
 			renderer: "auto",
 			frameRate: "vsync",
+			renderScale: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,
 			altClickSteps: false,

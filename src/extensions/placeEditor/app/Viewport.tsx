@@ -7,6 +7,7 @@
  */
 
 import {
+	Fragment,
 	type PointerEvent as ReactPointerEvent,
 	useEffect,
 	useMemo,
@@ -1161,7 +1162,7 @@ function ProfileSection({
 						<span className="profile-progress">
 							{profiling
 								? `${profiling.phase} · ${Math.round((profiling.done / profiling.of) * 100)}%`
-								: "About half a minute. Keep the view still."}
+								: "About a minute. Keep the view still."}
 						</span>
 					</div>
 					{profiling && (
@@ -1211,6 +1212,42 @@ function ProfileSection({
 								Each stage is waited for on its own, so together they can take longer than one
 								frame.
 							</p>
+							<h4 className="profile-head">
+								Base <span>every feature off</span>
+							</h4>
+							{profile.base.map((b) => (
+								<TimeBar
+									key={b.label}
+									name={b.label}
+									value={b.median}
+									second={Number.isFinite(b.median) ? msText(b.p95) : "WebGPU only"}
+									most={Math.max(
+										...profile.base.map((x) => (Number.isFinite(x.median) ? x.median : 0)),
+									)}
+								/>
+							))}
+							{profile.asSet && profile.without.length > 0 && (
+								<Rows rows={[["As set, just before", msText(profile.asSet.median)]]} />
+							)}
+							{profile.without.map((group) => (
+								<Fragment key={group.title}>
+									<h4 className="profile-head">
+										{group.title}, each off alone <span>saves · frame</span>
+									</h4>
+									{group.rows.map((r) => (
+										<TimeBar
+											key={r.label}
+											name={`Without ${r.label}`}
+											value={r.saves}
+											second={msText(r.median)}
+											most={Math.max(
+												0,
+												...profile.without.flatMap((g) => g.rows.map((x) => x.saves)),
+											)}
+										/>
+									))}
+								</Fragment>
+							))}
 							<h4 className="profile-head">
 								Steps <span>cost · frame</span>
 							</h4>

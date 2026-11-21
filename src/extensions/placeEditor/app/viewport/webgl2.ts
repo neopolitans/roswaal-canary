@@ -30,7 +30,7 @@ import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
-import { type StageSink, WaitingClock } from "./profile.js";
+import { type Probe, type StageSink, WaitingClock } from "./profile.js";
 import { FEATURE_BIT, featureBits, passesOf } from "./renderFeatures.js";
 import { DENSITY_FS_GLSL, DENSITY_GLSL, OVERDRAW_GLSL, VIEWS_GLSL } from "./renderViews.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
@@ -2808,6 +2808,18 @@ export class WebGl2View implements ViewRenderer {
 		const partsMoved = this.skyDirty;
 		const clock = this.clock;
 		clock?.start();
+		if (this.probe === "empty") {
+			// A profile's empty frame: the screen cleared, nothing drawn.
+			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+			gl.viewport(0, 0, this.width, this.height);
+			gl.clearColor(0.16, 0.17, 0.19, 1);
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+			clock?.mark("place");
+			clock?.end();
+			this.lastTally = this.tally;
+			this.cpuMs = performance.now() - started;
+			return;
+		}
 		this.usualDepth(true);
 		const centre = nearSkyCentre(camera.eye);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
@@ -2895,6 +2907,14 @@ export class WebGl2View implements ViewRenderer {
 	finished(): Promise<void> {
 		this.gpuWait();
 		return Promise.resolve();
+	}
+
+	/** A profile's probe: WebGL2 has the empty frame; the parts' depth alone is WebGPU's. */
+	private probe: Probe | null = null;
+
+	setProbe(probe: Probe | null): boolean {
+		this.probe = probe === "empty" ? probe : null;
+		return probe === null || probe === "empty";
 	}
 
 	/** A pixel of its own, cleared and read back to wait for the GPU: see `gpuWait`. */

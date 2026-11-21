@@ -406,7 +406,7 @@ export function placeEditorPerformancePage(): DocPage {
 			{
 				t: "p",
 				text:
-					"**Profile this view** measures the frame in about half a minute, on any device, " +
+					"**Profile this view** measures the frame in about a minute, on any device, " +
 					"including ones whose browser cannot time the GPU, as Safari on an iPad cannot. Keep the " +
 					"view still while it runs; the view is put back as it was when it ends.",
 			},
@@ -419,6 +419,14 @@ export function placeEditorPerformancePage(): DocPage {
 					[
 						"Stages",
 						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under",
+					],
+					[
+						"Base",
+						"With every feature off: the frame cleared and nothing drawn, the parts' depth alone (WebGPU), and the parts shaded. Apart, they say whether the cost is the screen's pixels, the parts or their shading",
+					],
+					[
+						"Light and Shadows",
+						"Each switch of those groups turned off alone, and what the frame saves without it",
 					],
 					[
 						"Steps",

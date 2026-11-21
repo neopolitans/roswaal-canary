@@ -39,10 +39,27 @@ export const VIEWPORT_FRAME_RATES = [
 ] as const;
 export type ViewportFrameRate = (typeof VIEWPORT_FRAME_RATES)[number]["value"];
 
+/**
+ * How many of the screen's pixels the place is drawn at, across and down:
+ * 75% is a little over half the pixels. Automatic is 75% on a touch screen,
+ * where the screen is dense and the GPU a tablet's, and all of them elsewhere.
+ */
+export const VIEWPORT_RENDER_SCALES = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "100", label: "100%" },
+	{ value: "75", label: "75%" },
+	{ value: "50", label: "50%" },
+] as const;
+export type ViewportRenderScale = (typeof VIEWPORT_RENDER_SCALES)[number]["value"];
+
+/** Automatic's scale on a touch screen. */
+export const TOUCH_RENDER_SCALE = 0.75;
+
 /** The settings as the viewer reads them. */
 export interface PlaceEditorSettings {
 	renderer: ViewportRenderer;
 	frameRate: ViewportFrameRate;
+	renderScale: ViewportRenderScale;
 	outlineWidth: OutlineWidth;
 	/** The outline shows through what is in front of it, as Studio's does. */
 	outlineThrough: boolean;
@@ -76,6 +93,14 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "vsync",
 				choices: VIEWPORT_FRAME_RATES,
+			},
+			{
+				key: "renderScale",
+				title: "Render scale",
+				help: "How many of the screen's pixels the place is drawn at, across and down. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is 75% on a touch screen and 100% elsewhere.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_RENDER_SCALES,
 			},
 		],
 	},

@@ -19,7 +19,7 @@ import {
 } from "../../core/scene.js";
 import type { Handles } from "./handles.js";
 import { lookAt, type Mat4, multiply } from "./math.js";
-import type { StageSink } from "./profile.js";
+import type { Probe, StageSink } from "./profile.js";
 import { featureBits, type RenderFeatures, STUDIO_FEATURES } from "./renderFeatures.js";
 
 export interface Camera {
@@ -103,6 +103,12 @@ export interface ViewRenderer {
 	 * whole cost, for a profile. WebGL2 waits there and then.
 	 */
 	finished(): Promise<void>;
+	/**
+	 * For a profile's base measurements: `empty` clears the frame and draws
+	 * nothing; `depth` draws the solid parts' depth alone, no colour. Null
+	 * draws as usual. False where the renderer has no such probe.
+	 */
+	setProbe(probe: Probe | null): boolean;
 	/** The GPU's name, as the browser gives it, and whether its timers are offered. */
 	deviceFacts(): { gpu: string; timers: boolean; samples: number };
 	/**

@@ -30,7 +30,7 @@ import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
-import { QueueClock, type Stage, type StageSink } from "./profile.js";
+import { type Probe, QueueClock, type Stage, type StageSink } from "./profile.js";
 import { FEATURE_BIT, featureBits, passesOf } from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
@@ -1432,9 +1432,11 @@ export class WebGpuView implements ViewRenderer {
 		const info = (
 			adapter as { info?: { vendor?: string; architecture?: string; description?: string } }
 		).info;
+		// Safari gives the same word for all three: "apple".
 		this.gpuName =
-			[info?.vendor, info?.architecture, info?.description].filter((s) => !!s).join(" ") ||
-			"Not given";
+			[...new Set([info?.vendor, info?.architecture, info?.description].filter((s) => !!s))].join(
+				" ",
+			) || "Not given";
 		// Timestamps where the adapter has them, for the Rendering panel's GPU times.
 		const timed = adapter.features.has("timestamp-query");
 		this.device = await adapter.requestDevice(
@@ -2451,6 +2453,10 @@ export class WebGpuView implements ViewRenderer {
 		let encoder = this.device.createCommandEncoder();
 		const clock = this.clock;
 		clock?.start();
+		if (this.probe === "empty") {
+			this.drawEmpty(encoder, started);
+			return;
+		}
 		const partsMoved = this.skyDirty;
 		const centre = nearSkyCentre(camera.eye);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
@@ -2556,6 +2562,10 @@ export class WebGpuView implements ViewRenderer {
 			this.drawDensity(pass);
 			// None drawn: the parts alone; this only clears the last frame's count.
 			this.drawEffects(pass, camera);
+		} else if (this.probe === "depth") {
+			// A profile's: the parts' depth alone, no colour worked out for any pixel.
+			pass.setPipeline(this.solidDepth);
+			this.solids(pass);
 		} else {
 			// The solid parts' depth, unless occlusion's pass has drawn it.
 			if (!load) {
@@ -2685,6 +2695,42 @@ export class WebGpuView implements ViewRenderer {
 
 	finished(): Promise<void> {
 		return this.device.queue.onSubmittedWorkDone();
+	}
+
+	private probe: Probe | null = null;
+
+	setProbe(probe: Probe | null): boolean {
+		this.probe = probe;
+		return true;
+	}
+
+	/** A profile's empty frame: the targets cleared and resolved to the screen, nothing drawn. */
+	private drawEmpty(encoder: GPUCommandEncoder, started: number): void {
+		const pass = encoder.beginRenderPass({
+			colorAttachments: [
+				{
+					view: this.msaa!.createView(),
+					resolveTarget: this.context.getCurrentTexture().createView(),
+					clearValue: { r: 0.16, g: 0.17, b: 0.19, a: 1 },
+					loadOp: "clear",
+					storeOp: "discard",
+				},
+			],
+			depthStencilAttachment: {
+				view: this.depth!.createView(),
+				depthClearValue: 0,
+				depthLoadOp: "clear",
+				depthStoreOp: "discard",
+			},
+		});
+		pass.end();
+		this.device.queue.submit([encoder.finish()]);
+		if (this.clock) {
+			this.clock.submitted("place", this.device.queue.onSubmittedWorkDone());
+			this.clock.end();
+		}
+		this.lastTally = this.tally;
+		this.cpuMs = performance.now() - started;
 	}
 
 	deviceFacts(): { gpu: string; timers: boolean; samples: number } {

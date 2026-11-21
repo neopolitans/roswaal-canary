@@ -15,6 +15,7 @@ import { type LightingParams, SKY_FACES } from "../../core/lighting.js";
 import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
+import { TOUCH_RENDER_SCALE } from "../../settings.js";
 import { type AssetProgress, AssetTally } from "./assetProgress.js";
 import { boxAround } from "./box.js";
 import {
@@ -55,7 +56,7 @@ import {
 	type Timed,
 } from "./profile.js";
 import { startingText } from "./readout.js";
-import { litFor, RENDER_STEPS, upToStep } from "./renderFeatures.js";
+import { FEATURE_GROUPS, litFor, RENDER_STEPS, upToStep } from "./renderFeatures.js";
 import { clampSpeed, SPEED_NOTCH } from "./speed.js";
 import { layersUsed, loadLayer } from "./textures.js";
 import {
@@ -107,6 +108,8 @@ export interface ViewportOptions {
 	frameRate: number | "vsync" | "unlimited";
 	/** Alt and a click, or a long press, picks one Model further in each time, rather than the part. */
 	altClickSteps: boolean;
+	/** The share of the screen's pixels across and down the place is drawn at; Automatic by the screen. */
+	renderScale?: number | "auto";
 }
 
 /**
@@ -650,6 +653,7 @@ export class ViewportController {
 		this.view.setOutline(options.outlineWidth, options.hideBehind);
 		this.view.setGlassHides(options.glassHides);
 		this.view.setPostEffects(options.postEffects);
+		if (was.renderScale !== options.renderScale) this.fit();
 		this.redraw();
 	}
 
@@ -1756,7 +1760,7 @@ export class ViewportController {
 			const canvas = document.createElement("canvas");
 			canvas.className = "vp-canvas";
 			els.holder.append(canvas);
-			const dpr = Math.min(2, devicePixelRatio || 1);
+			const dpr = this.pixelRatio();
 			canvas.width = Math.max(1, Math.round(els.holder.clientWidth * dpr));
 			canvas.height = Math.max(1, Math.round(els.holder.clientHeight * dpr));
 			this.canvas = canvas;
@@ -1809,10 +1813,22 @@ export class ViewportController {
 	/** A share of the canvas's pixels, below 1 only while a profile measures resolution. */
 	private resolutionScale = 1;
 
+	/**
+	 * Canvas pixels to a CSS pixel: the screen's, two at most, by Settings'
+	 * render scale -- Automatic is less on a touch screen -- and by a profile's
+	 * resolution while it measures.
+	 */
+	private pixelRatio(): number {
+		const setting = this.options.renderScale ?? "auto";
+		const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+		const scale = setting === "auto" ? (touch ? TOUCH_RENDER_SCALE : 1) : setting;
+		return Math.min(2, devicePixelRatio || 1) * scale * this.resolutionScale;
+	}
+
 	private fit(): void {
 		const { view, canvas, els } = this;
 		if (!view || !canvas || !els) return;
-		const dpr = Math.min(2, devicePixelRatio || 1) * this.resolutionScale;
+		const dpr = this.pixelRatio();
 		const w = Math.max(1, Math.round(els.holder.clientWidth * dpr));
 		const h = Math.max(1, Math.round(els.holder.clientHeight * dpr));
 		if (canvas.width !== w || canvas.height !== h) {
@@ -1994,8 +2010,18 @@ export class ViewportController {
 		const render = this.state.render;
 		const options = this.options;
 		const pixels = { width: canvas.width, height: canvas.height };
+		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
+		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round((this.pixelRatio() / Math.min(2, devicePixelRatio || 1)) * 100)}%`;
 		const steps = RENDER_STEPS.length;
-		const total = 1 + 1 + 1 + (steps + 1) + 3;
+		// The switches turned off one at a time: those of these groups that are on.
+		const alone = WITHOUT_GROUPS.map((title) => ({
+			title,
+			features: (FEATURE_GROUPS.find((g) => g.title === title)?.features ?? []).filter(
+				(info) => render.features[info.key],
+			),
+		}));
+		const total =
+			1 + 1 + 3 + 1 + 1 + (steps + 1) + 3 + alone.reduce((n, g) => n + g.features.length, 0);
 		let done = 0;
 		const phase = (name: string) =>
 			this.set({ profiling: { phase: name, done: done++, of: total } });
@@ -2005,6 +2031,24 @@ export class ViewportController {
 			const baseline = await this.timeFrames("On screen", 60);
 			phase("One frame");
 			const frame = await this.timeWaited("One frame", 40);
+			// The base: the frame with nothing drawn, the parts' depth alone, and
+			// the parts shaded with every feature off.
+			const baseRows: Timed[] = [];
+			this.setRender({ ...render, mode: "lit", features: upToStep(0) });
+			for (const [probe, label] of [
+				["empty", "Empty frame"],
+				["depth", "Parts' depth only"],
+				[null, "Parts, shaded"],
+			] as const) {
+				phase(label);
+				if (!view.setProbe(probe)) {
+					baseRows.push({ label, median: Number.NaN, p95: Number.NaN });
+					continue;
+				}
+				baseRows.push(await this.timeWaited(label, 30));
+			}
+			view.setProbe(null);
+			this.setRender(render);
 			phase("Stages");
 			const frames: StageFrame[] = [];
 			view.setProfiling((each) => frames.push(each));
@@ -2019,6 +2063,28 @@ export class ViewportController {
 				phase(`Step ${n} of ${steps}`);
 				this.setRender({ ...render, mode: "lit", features: upToStep(n) });
 				timedSteps.push(await this.timeWaited(label, 30));
+			}
+			this.setRender(render);
+			// Each switch of these groups turned off alone, from the view as it is:
+			// what the frame saves without it.
+			const without: ProfileResult["without"] = [];
+			// Measured again just before: a frame that drifts over the profile
+			// -- a slow device warming, effects building up -- is compared with
+			// itself as it is now, not as it was at the start.
+			let asSet: Timed | null = null;
+			if (alone.some((g) => g.features.length > 0)) {
+				phase("As set");
+				asSet = await this.timeWaited("As set", 30);
+			}
+			for (const group of alone) {
+				const rows: ProfileResult["without"][number]["rows"] = [];
+				for (const info of group.features) {
+					phase(`Without ${info.label}`);
+					this.setRender({ ...render, features: { ...render.features, [info.key]: false } });
+					const timed = await this.timeWaited(info.label, 30);
+					rows.push({ ...timed, saves: (asSet?.median ?? frame.median) - timed.median });
+				}
+				if (rows.length > 0) without.push({ title: group.title, rows });
 			}
 			this.setRender(render);
 			const resolution: Timed[] = [];
@@ -2043,6 +2109,7 @@ export class ViewportController {
 					pixelRatio: devicePixelRatio || 1,
 					samples: facts.samples,
 					frameRate: String(options.frameRate),
+					renderScale,
 					draws: stats.draws,
 					instances: stats.instances,
 					triangles: stats.triangles,
@@ -2057,11 +2124,15 @@ export class ViewportController {
 				stageTotal: stagesTotal(frames),
 				stageFrames: frames.length,
 				steps: timedSteps,
+				base: baseRows,
+				without,
+				asSet,
 				resolution,
 				clock: clockStep(),
 			};
 		} finally {
 			view.setProfiling(null);
+			view.setProbe(null);
 			this.counting = null;
 			this.resolutionScale = 1;
 			this.setRender(render);
@@ -2787,6 +2858,9 @@ export class ViewportController {
 		};
 	}
 }
+
+/** The Rendering panel's groups whose switches a profile turns off one at a time. */
+const WITHOUT_GROUPS = ["Light", "Shadows"];
 
 /** How long one of a profile's measurements may take, and the fewest frames it times. */
 const PROFILE_BUDGET = 1500;

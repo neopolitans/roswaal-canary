@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.2",
+		date: "2026-11-21",
+		headline: "Rendering, Performance and Mesh Debug open on a tablet.",
+		fixed: [
+			"**Rendering, Performance and Mesh Debug** open in the right-hand drawer on an iPad or a phone. Opened from the Panels menu there, they dimmed the view and showed nothing.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.1",
 		date: "2026-11-21",
 		headline: "The Performance panel profiles the frame stage by stage, on any device.",

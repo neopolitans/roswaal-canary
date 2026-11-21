@@ -379,7 +379,14 @@ export function Workspace({
 						}
 						return;
 					}
-					setDrawer(openPanel === id ? null : id);
+					if (openPanel === id) {
+						setDrawer(null);
+						return;
+					}
+					// A panel shut in the layout -- Rendering, Performance and Mesh
+					// Debug start shut -- is in no drawer until it is opened.
+					if (!layout.panels[id].open) onLayout?.((l) => reopenPanel(l, id));
+					setDrawer(id);
 				},
 				available: (id) => contents[id] !== undefined,
 			}
@@ -471,15 +478,17 @@ export function Workspace({
 					)}
 				</div>
 
-				{compact && openPanel && (
-					<div
-						className="drawer-backdrop"
-						onPointerDown={() => {
-							setDrawer(null);
-							swallowNextClick();
-						}}
-					/>
-				)}
+				{compact &&
+					openPanel &&
+					(drawers.left.includes(openPanel) || drawers.right.includes(openPanel)) && (
+						<div
+							className="drawer-backdrop"
+							onPointerDown={() => {
+								setDrawer(null);
+								swallowNextClick();
+							}}
+						/>
+					)}
 
 				{(["left", "right"] as const).map((side) =>
 					compact && drawers[side].length > 0 ? (

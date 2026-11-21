@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.5",
+		date: "2026-11-21",
+		headline: "The Place Editor's shader is smaller on WebGPU, for a tablet's GPU.",
+		changed: [
+			"**The parts' shader leaves out what the place has none of**: the lights' code where it has no PointLight, SpotLight or SurfaceLight, and Neon's and CrackedLava's where it has neither. The picture is unchanged.",
+			"**The sun's shadow is read in one place** rather than once a cascade, and the far shadow's four taps in a loop. The picture is unchanged.",
+			"**The Place Editor is 0.2.2.**",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.4",
 		date: "2026-11-21",
 		headline:

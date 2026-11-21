@@ -530,14 +530,22 @@ fn sunSees(p: vec3f, n: vec3f) -> f32 {
 	if (skyU.info.w < 0.5 || cascU.texel.w > 1.5) { return 1.0; }
 	if (cascU.texel.w > 0.5) {
 		let d = length(p - u.camPos.xyz);
-		if (d < cascU.far.x) { return cascadeSees(0, p, n); }
-		if (d < cascU.far.y) { return cascadeSees(1, p, n); }
-		if (d < cascU.far.z) { return cascadeSees(2, p, n); }
+		// One call, the cascade chosen first: written once, not once a cascade,
+		// which a tablet's GPU pays for in every pixel whichever is taken.
+		if (d < cascU.far.z) {
+			let k = select(select(2, 1, d < cascU.far.y), 0, d < cascU.far.x);
+			return cascadeSees(k, p, n);
+		}
 	}
 	if (!has(${FEATURE_BIT.farShadows}u)) { return 1.0; }
 	let q = p + n * skyU.info.x * 1.5;
 	let s = skyU.info.x * 0.5;
-	return 0.25 * (skySees(8, q + vec3f(s, 0.0, s)) + skySees(8, q + vec3f(-s, 0.0, s)) + skySees(8, q + vec3f(s, 0.0, -s)) + skySees(8, q + vec3f(-s, 0.0, -s)));
+	// The four corners, (s, s), (-s, s), (s, -s) and (-s, -s), in a loop for the same reason.
+	var sum = 0.0;
+	for (var j = 0; j < 4; j++) {
+		sum = sum + skySees(8, q + vec3f(select(-s, s, (j & 1) == 0), 0.0, select(-s, s, j < 2)));
+	}
+	return 0.25 * sum;
 }
 struct VIn {
 	@location(0) pos: vec3f, @location(1) nrm: vec3f,
@@ -1418,13 +1426,34 @@ export class WebGpuView implements ViewRenderer {
 	private litPending = new Map<number, Promise<void>>();
 
 	pipelinesReady(): Promise<void> {
-		const bits = featureBits(this.render.features);
+		const bits = this.litBits();
 		this.litFor(bits);
 		return this.litPending.get(bits) ?? Promise.resolve();
 	}
 
 	/** Asked for when something it waited for is ready: a pipeline built for the switches. */
 	onRedraw?: () => void;
+
+	/** Whether the place has any PointLight, SpotLight or SurfaceLight: see setLights. */
+	private hasLights = true;
+
+	/**
+	 * The switches' bits the lit pipelines are built for: those on, less the
+	 * ones for what the place has none of -- lights, Neon, CrackedLava -- whose
+	 * code would only take room.
+	 */
+	private litBits(): number {
+		let bits = featureBits(this.render.features);
+		if (!this.hasLights)
+			bits &= ~(
+				FEATURE_BIT.pointLights |
+				FEATURE_BIT.spotLights |
+				FEATURE_BIT.surfaceLights |
+				FEATURE_BIT.lightHighlights
+			);
+		if (!this.glowing) bits &= ~(FEATURE_BIT.neon | FEATURE_BIT.neonGlow | FEATURE_BIT.lava);
+		return bits;
+	}
 
 	private lit(kind: LitKind, desc: GPURenderPipelineDescriptor): GPURenderPipelineDescriptor {
 		this.litDescs[kind] = desc;
@@ -2535,7 +2564,7 @@ export class WebGpuView implements ViewRenderer {
 		this.shape = glowShape(this.lighting?.post, postOn);
 		this.setCamera(camera);
 		let encoder = this.device.createCommandEncoder();
-		const lit = this.litFor(featureBits(this.render.features));
+		const lit = this.litFor(this.litBits());
 		const clock = this.clock;
 		clock?.start();
 		if (this.probe === "empty") {
@@ -3359,6 +3388,7 @@ export class WebGpuView implements ViewRenderer {
 		// The same lights again, after an edit elsewhere: the grid already holds them.
 		const key = fingerprint(lights);
 		if (key === this.lightKey && this.lightKey !== -1) return;
+		this.hasLights = !!lights && lights.length > 0;
 		this.lightKey = key;
 		const old = this.lightBuffers;
 		const grid = lightGridFor(lights);

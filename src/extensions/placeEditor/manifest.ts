@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.2.1",
+	version: "0.2.2",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.2.2",
+			roswaal: "1.1.0-canary.5",
+			date: "2026-11-21",
+			text: "A smaller shader on WebGPU: the lights' code left out where the place has no lights, Neon's and CrackedLava's where it has none, and the sun's shadow read once rather than once a cascade. The picture is unchanged.",
+		},
 		{
 			version: "0.2.1",
 			roswaal: "1.1.0-canary.4",

@@ -109,6 +109,13 @@ export interface ViewRenderer {
 	 * draws as usual. False where the renderer has no such probe.
 	 */
 	setProbe(probe: Probe | null): boolean;
+	/**
+	 * Resolves once the pipelines for the switches as they are now are built,
+	 * so a profile measures those rather than the ones drawing meanwhile.
+	 */
+	pipelinesReady(): Promise<void>;
+	/** Set by the view's owner: asked when something the renderer waited for is ready to draw. */
+	onRedraw?: () => void;
 	/** The GPU's name, as the browser gives it, and whether its timers are offered. */
 	deviceFacts(): { gpu: string; timers: boolean; samples: number };
 	/**

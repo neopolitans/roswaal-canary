@@ -1796,6 +1796,8 @@ export class ViewportController {
 		view.setPostEffects(this.options.postEffects);
 		view.setRender(this.state.render);
 		this.view = view;
+		// A pipeline built for the Rendering panel's switches is ready: draw with it.
+		view.onRedraw = () => this.redraw();
 		this.set({ backend: view.backend, fellBack, error: null });
 		if (this.place !== place) view.setScene(this.place ?? place);
 		this.tally.begin();
@@ -1931,6 +1933,8 @@ export class ViewportController {
 
 	/** What one frame costs at whatever is set now: a few to settle, then up to `n` timed. */
 	private async timeWaited(label: string, n: number): Promise<Timed> {
+		// The pipelines for these switches, not the ones drawing while they compile.
+		await this.view?.pipelinesReady();
 		await this.waitedFrames(3, 400);
 		return { label, ...spread(await this.waitedFrames(n, PROFILE_BUDGET)) };
 	}

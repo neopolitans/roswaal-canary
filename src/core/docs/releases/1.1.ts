@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.4",
+		date: "2026-11-21",
+		headline:
+			"The Place Editor draws faster on a tablet: a shader for the switches in use, and cheaper sky shadows.",
+		changed: [
+			"**The parts are shaded by a shader built for the Rendering panel's switches as they are**, with the code for what is off left out. It is built the first time a set of switches is used, and kept; the picture is unchanged.",
+			"**Sky shadows** read the lighting cells first, and the sky's maps only where the cells' edge needs them. The picture is unchanged.",
+			"**The Place Editor is 0.2.1.**",
+		],
+		fixed: ["**The profile's report** rounds the pixel ratio."],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.3",
 		date: "2026-11-21",
 		headline: "The Place Editor is 0.2.0: a deeper profile, and a render scale.",

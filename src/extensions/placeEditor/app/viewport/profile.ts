@@ -313,7 +313,7 @@ export function profileReport(result: ProfileResult): string {
 		`Renderer: ${facts.renderer} · GPU: ${facts.gpu} · GPU timers: ${facts.gpuTimers ? "yes" : "no"}`,
 	);
 	lines.push(
-		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${facts.pixelRatio}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}`,
+		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${Number(facts.pixelRatio.toFixed(2))}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}`,
 	);
 	lines.push(
 		`Last frame: ${facts.draws.toLocaleString("en")} draw calls, ${facts.instances.toLocaleString("en")} instances, ${Math.round(facts.triangles).toLocaleString("en")} triangles, ${facts.beams} beams, ${facts.particles.toLocaleString("en")} particles`,

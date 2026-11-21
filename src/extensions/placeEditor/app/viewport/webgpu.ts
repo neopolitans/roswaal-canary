@@ -227,6 +227,9 @@ ${OVERDRAW_WGSL}
 `;
 
 const SAMPLES = 4;
+
+/** The pipelines built again for one set of switches: see WebGpuView.litFor. */
+type LitKind = "solid" | "blended" | "glassBlended";
 /** Where the material table starts in the frame's uniforms, in bytes: after `U`'s two matrices and fourteen vec4s. */
 const UNIFORM_MATERIALS = 352;
 const SHADER = /* wgsl */ `
@@ -245,8 +248,13 @@ struct U {
 	mats: array<vec4f, ${MATERIALS.length * 3}>,
 };
 @group(0) @binding(0) var<uniform> u: U;
-// Whether a Rendering panel switch is on: its bit in debug.y (see renderFeatures.ts).
-fn has(bit: u32) -> bool { return (u32(u.debug.y) & bit) != 0u; }
+// Whether a Rendering panel switch is on: its bit in debug.y (see renderFeatures.ts),
+// and in FEATURES, a pipeline's own constant. Every bit, unless a pipeline is
+// built for one set of switches (see WebGpuView.litFor): then what is off is
+// known when it compiles, and the code for it is left out, which on a tablet's
+// GPU is most of the shader's cost even when its branches are not taken.
+override FEATURES: u32 = 0xffffffffu;
+fn has(bit: u32) -> bool { return (FEATURES & bit) != 0u && (u32(u.debug.y) & bit) != 0u; }
 // The material textures, a layer each, tinted by the part's Color.
 @group(0) @binding(1) var looks: texture_2d_array<f32>;
 @group(0) @binding(2) var lookSampler: sampler;
@@ -432,17 +440,19 @@ fn cellOrigin() -> vec3f { return skyU.nearAt.xyz - vec3f(${(SKY_CELLS[0] * SKY_
 // How much of the sky reaches p: the maps', and at least what the lighting
 // cells round it see, blended between their middles, as Studio's lighting is.
 fn skyVisibility(p: vec3f, n: vec3f) -> f32 {
-	let v = skyVisibilityMaps(p, n);
-	if (!has(${FEATURE_BIT.leak}u) || skyU.near.w < 0.5) { return v; }
+	if (!has(${FEATURE_BIT.leak}u) || skyU.near.w < 0.5) { return skyVisibilityMaps(p, n); }
 	// Read half a cell out from the face, where the light it gathers is.
 	let uvw = (p + n * ${SKY_CELL / 2}.0 - cellOrigin()) / vec3f(${SKY_CELLS[0] * SKY_CELL}.0, ${SKY_CELLS[1] * SKY_CELL}.0, ${SKY_CELLS[2] * SKY_CELL}.0);
-	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) { return v; }
-	let seen = textureSampleLevel(skyCells, skyCellSampler, vec3f(uvw.x, uvw.z, uvw.y), 0.0).r;
+	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) { return skyVisibilityMaps(p, n); }
+	let seen = textureSampleLevel(skyCells, skyCellSampler, vec3f(uvw.x, uvw.z, uvw.y), 0.0).r * ${SKY_LEAK.toFixed(3)};
 	// Studio's sky light is its cells', blended between their middles, so a
 	// beam overhead casts no sharp sky shadow: the cells' alone, then, easing
-	// to the maps at the cells' edge.
+	// to the maps at the cells' edge. The maps are read only where they show:
+	// sixteen taps a pixel, which inside the cells were read and thrown away.
 	let edge = min(min(uvw.x, 1.0 - uvw.x), min(min(uvw.y, 1.0 - uvw.y), min(uvw.z, 1.0 - uvw.z)));
-	return mix(v, seen * ${SKY_LEAK.toFixed(3)}, smoothstep(0.0, 0.08, edge));
+	let k = smoothstep(0.0, 0.08, edge);
+	if (k >= 1.0) { return seen; }
+	return mix(skyVisibilityMaps(p, n), seen, k);
 }
 // A lighting cell: the share of the sky its middle sees, a slice of cells a draw.
 struct CellOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) slice: u32 };
@@ -1397,6 +1407,71 @@ export class WebGpuView implements ViewRenderer {
 		return this.outlineWidth * (this.width / (this.canvas?.clientWidth || this.width));
 	}
 
+	/**
+	 * The lit pipelines -- the solid parts, the see-through ones and Glass --
+	 * as described, to build them again for one set of switches; and those
+	 * built, by the switches' bits. Null while one compiles: the pipelines
+	 * built for every switch draw meanwhile.
+	 */
+	private litDescs: Partial<Record<LitKind, GPURenderPipelineDescriptor>> = {};
+	private litBuilt = new Map<number, Record<LitKind, GPURenderPipeline> | null>();
+	private litPending = new Map<number, Promise<void>>();
+
+	pipelinesReady(): Promise<void> {
+		const bits = featureBits(this.render.features);
+		this.litFor(bits);
+		return this.litPending.get(bits) ?? Promise.resolve();
+	}
+
+	/** Asked for when something it waited for is ready: a pipeline built for the switches. */
+	onRedraw?: () => void;
+
+	private lit(kind: LitKind, desc: GPURenderPipelineDescriptor): GPURenderPipelineDescriptor {
+		this.litDescs[kind] = desc;
+		return desc;
+	}
+
+	/**
+	 * The lit pipelines for these switches: built for them once compiled, the
+	 * ones for every switch until then. A set built is kept, so turning a
+	 * switch back is no wait.
+	 */
+	private litFor(bits: number): Record<LitKind, GPURenderPipeline> {
+		const generic = { solid: this.solid, blended: this.blended, glassBlended: this.glassBlended };
+		const built = this.litBuilt.get(bits);
+		if (built) return built;
+		if (built === undefined) {
+			this.litBuilt.set(bits, null);
+			const d = this.device;
+			const kinds = Object.keys(this.litDescs) as LitKind[];
+			const pending = Promise.all(
+				kinds.map((kind) => {
+					const desc = this.litDescs[kind]!;
+					const fragment = desc.fragment!;
+					return d.createRenderPipelineAsync({
+						...desc,
+						fragment: { ...fragment, constants: { ...fragment.constants, FEATURES: bits } },
+					});
+				}),
+			).then(
+				(pipes) => {
+					this.litBuilt.set(
+						bits,
+						Object.fromEntries(kinds.map((k, i) => [k, pipes[i]])) as Record<
+							LitKind,
+							GPURenderPipeline
+						>,
+					);
+					this.onRedraw?.();
+				},
+				// Not built: the pipelines for every switch go on drawing.
+				(err) => console.warn("Place Editor: the pipelines for these switches did not build.", err),
+			);
+			this.litPending.set(bits, pending);
+		}
+		return generic;
+	}
+
 	/** The pipelines init asked for, compiling side by side: see pipeline. */
 	private compiling: Promise<void>[] = [];
 
@@ -1549,36 +1624,42 @@ export class WebGpuView implements ViewRenderer {
 			multisample: { count: SAMPLES },
 		});
 		// Lit only where the pre-pass found it nearest.
-		this.pipeline((p) => (this.solid = p), {
-			layout: pipelineLayout,
-			vertex: { module, entryPoint: "vs", buffers },
-			fragment: { module, entryPoint: "fs", targets: [{ format: this.format }] },
-			primitive: { topology: "triangle-list", cullMode: "back" },
-			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "equal" },
-			multisample: { count: SAMPLES },
-		});
+		this.pipeline(
+			(p) => (this.solid = p),
+			this.lit("solid", {
+				layout: pipelineLayout,
+				vertex: { module, entryPoint: "vs", buffers },
+				fragment: { module, entryPoint: "fs", targets: [{ format: this.format }] },
+				primitive: { topology: "triangle-list", cullMode: "back" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "equal" },
+				multisample: { count: SAMPLES },
+			}),
+		);
 		// The see-through parts: blended over what is behind them, hidden by
 		// what is in front, and hiding nothing themselves.
-		this.pipeline((p) => (this.blended = p), {
-			layout: pipelineLayout,
-			vertex: { module, entryPoint: "vs", buffers },
-			fragment: {
-				module,
-				entryPoint: "fs",
-				targets: [
-					{
-						format: this.format,
-						blend: {
-							color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
-							alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+		this.pipeline(
+			(p) => (this.blended = p),
+			this.lit("blended", {
+				layout: pipelineLayout,
+				vertex: { module, entryPoint: "vs", buffers },
+				fragment: {
+					module,
+					entryPoint: "fs",
+					targets: [
+						{
+							format: this.format,
+							blend: {
+								color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+								alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+							},
 						},
-					},
-				],
-			},
-			primitive: { topology: "triangle-list", cullMode: "back" },
-			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-			multisample: { count: SAMPLES },
-		});
+					],
+				},
+				primitive: { topology: "triangle-list", cullMode: "back" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
+				multisample: { count: SAMPLES },
+			}),
+		);
 		// The heatmaps' see-through parts: each one's share added to what is behind it.
 		this.pipeline((p) => (this.heatAdded = p), {
 			layout: pipelineLayout,
@@ -1714,30 +1795,33 @@ export class WebGpuView implements ViewRenderer {
 			depthStencil: depth,
 			multisample: { count: SAMPLES },
 		});
-		this.pipeline((p) => (this.glassBlended = p), {
-			layout: pipelineLayout,
-			vertex: { module, entryPoint: "vs", buffers },
-			fragment: {
-				module,
-				entryPoint: "fs",
-				targets: [
-					{
-						format: this.format,
-						blend: {
-							color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
-							alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+		this.pipeline(
+			(p) => (this.glassBlended = p),
+			this.lit("glassBlended", {
+				layout: pipelineLayout,
+				vertex: { module, entryPoint: "vs", buffers },
+				fragment: {
+					module,
+					entryPoint: "fs",
+					targets: [
+						{
+							format: this.format,
+							blend: {
+								color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+								alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+							},
 						},
-					},
-				],
-			},
-			primitive: { topology: "triangle-list", cullMode: "back" },
-			depthStencil: {
-				format: "depth32float",
-				depthWriteEnabled: false,
-				depthCompare: "greater-equal",
-			},
-			multisample: { count: SAMPLES },
-		});
+					],
+				},
+				primitive: { topology: "triangle-list", cullMode: "back" },
+				depthStencil: {
+					format: "depth32float",
+					depthWriteEnabled: false,
+					depthCompare: "greater-equal",
+				},
+				multisample: { count: SAMPLES },
+			}),
+		);
 		// Over everything, as Studio's selection box is.
 		// Through everything, as Studio's selection box is, or hidden by what is in front.
 		const line = (set: (p: GPURenderPipeline) => void, depthCompare: GPUCompareFunction) =>
@@ -2451,6 +2535,7 @@ export class WebGpuView implements ViewRenderer {
 		this.shape = glowShape(this.lighting?.post, postOn);
 		this.setCamera(camera);
 		let encoder = this.device.createCommandEncoder();
+		const lit = this.litFor(featureBits(this.render.features));
 		const clock = this.clock;
 		clock?.start();
 		if (this.probe === "empty") {
@@ -2572,7 +2657,7 @@ export class WebGpuView implements ViewRenderer {
 				pass.setPipeline(this.solidDepth);
 				this.solids(pass);
 			}
-			pass.setPipeline(this.solid);
+			pass.setPipeline(lit.solid);
 			this.solids(pass);
 			this.count(this.draws);
 			if (images) this.drawImages(pass, "solid", camera.eye);
@@ -2587,13 +2672,13 @@ export class WebGpuView implements ViewRenderer {
 				if (this.glass.length > 0) {
 					pass.setPipeline(this.glassDepth);
 					this.solids(pass, this.glass);
-					pass.setPipeline(this.glassBlended);
+					pass.setPipeline(lit.glassBlended);
 					this.solids(pass, this.glass);
 					this.count(this.glass);
 				}
 				if (this.clear.length > 0) {
 					this.sortClear(camera.eye);
-					pass.setPipeline(this.blended);
+					pass.setPipeline(lit.blended);
 					this.solids(pass, this.clear);
 					this.count(this.clear);
 				}

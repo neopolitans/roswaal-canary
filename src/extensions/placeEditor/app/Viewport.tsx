@@ -1280,7 +1280,7 @@ function ProfileSection({
 									["GPU timers", profile.facts.gpuTimers ? "Offered" : "Not offered"],
 									[
 										"Canvas",
-										`${profile.facts.canvas.width}×${profile.facts.canvas.height} at ${profile.facts.pixelRatio}×`,
+										`${profile.facts.canvas.width}×${profile.facts.canvas.height} at ${Number(profile.facts.pixelRatio.toFixed(2))}×`,
 									],
 									["Antialiasing", `${profile.facts.samples}×`],
 									["Clock step", msText(profile.clock)],

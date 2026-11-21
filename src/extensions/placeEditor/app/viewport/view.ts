@@ -19,6 +19,7 @@ import {
 } from "../../core/scene.js";
 import type { Handles } from "./handles.js";
 import { lookAt, type Mat4, multiply } from "./math.js";
+import type { StageSink } from "./profile.js";
 import { featureBits, type RenderFeatures, STUDIO_FEATURES } from "./renderFeatures.js";
 
 export interface Camera {
@@ -91,6 +92,19 @@ export interface ViewRenderer {
 	setRender(render: RenderSettings): void;
 	/** What the last frame cost, for the Rendering panel. */
 	stats(): RenderStats;
+	/**
+	 * Profiling, stage by stage: each frame drawn while a sink is set waits for
+	 * the GPU at the end of each stage and hands the sink its times (see
+	 * `profile.ts`). Null stops it.
+	 */
+	setProfiling(sink: StageSink | null): void;
+	/**
+	 * Resolves once the GPU has finished everything drawn so far: a frame's
+	 * whole cost, for a profile. WebGL2 waits there and then.
+	 */
+	finished(): Promise<void>;
+	/** The GPU's name, as the browser gives it, and whether its timers are offered. */
+	deviceFacts(): { gpu: string; timers: boolean; samples: number };
 	/**
 	 * Whether the next frame would look different though nothing else moved:
 	 * particles alive or coming, or a beam's texture scrolling, in the last frame drawn.

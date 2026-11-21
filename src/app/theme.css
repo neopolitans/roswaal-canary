@@ -24120,6 +24120,120 @@ textarea.tb:where(:disabled) {
 	--render-graph-key: var(--render-graph-page);
 }
 
+/* Performance › Profile: a button and its progress, then rows of times, each
+   with a bar of its share of the longest. */
+.profile-run {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 10px;
+	padding: 4px 6px;
+}
+
+.profile-progress {
+	font-size: var(--text-sm);
+	color: var(--fg-muted);
+}
+
+.profile-meter {
+	height: 4px;
+	margin: 2px 6px 6px;
+	border-radius: 2px;
+	background: var(--bg-hover);
+	overflow: hidden;
+}
+
+.profile-meter > span {
+	display: block;
+	height: 100%;
+	background: var(--accent);
+	transition: width 0.2s;
+}
+
+.profile-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	margin: 10px 6px 2px;
+	font-size: var(--text-sm);
+	font-weight: 600;
+}
+
+.profile-head > span {
+	font-weight: 400;
+	color: var(--fg-faint);
+}
+
+/* The name and the times on a line, the bar under them across the row. */
+.place-prop.profile-row {
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	grid-template-areas:
+		"name time second"
+		"bar bar bar";
+	row-gap: 2px;
+	padding-bottom: 4px;
+	cursor: default;
+}
+
+.profile-row .place-prop-name {
+	grid-area: name;
+}
+
+.profile-row .profile-time {
+	grid-area: time;
+}
+
+.profile-row .profile-second {
+	grid-area: second;
+}
+
+.profile-bar {
+	grid-area: bar;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--bg-hover);
+	overflow: hidden;
+}
+
+.profile-bar > span {
+	display: block;
+	height: 100%;
+	border-radius: 2px;
+	background: var(--accent);
+}
+
+.profile-time {
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+}
+
+.profile-second {
+	min-width: 5.5em;
+	font-size: var(--text-sm);
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-faint);
+	text-align: right;
+}
+
+.profile-verdict {
+	color: var(--fg);
+}
+
+.profile-report {
+	box-sizing: border-box;
+	width: calc(100% - 12px);
+	margin: 4px 6px 6px;
+	padding: 6px 8px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-xs);
+	background: var(--bg-hover);
+	color: var(--fg-muted);
+	font: var(--text-xs) / 1.45 var(--mono, ui-monospace, monospace);
+	white-space: pre;
+	resize: vertical;
+}
+
 /* Heaviest: the costliest meshes, each a row that picks its copies. */
 .render-heavy-list {
 	display: grid;

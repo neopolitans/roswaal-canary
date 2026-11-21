@@ -9,6 +9,7 @@
 import {
 	type PointerEvent as ReactPointerEvent,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -51,6 +52,16 @@ import {
 } from "./viewport/frameGraph.js";
 import { type HeavyMesh, shortCount } from "./viewport/heaviest.js";
 import { prepareScene } from "./viewport/prepare.js";
+import {
+	fpsText,
+	msText,
+	type ProfileResult,
+	profileReport,
+	profileVerdict,
+	STAGE_HINTS,
+	STAGE_LABELS,
+	stepCosts,
+} from "./viewport/profile.js";
 import {
 	changedFrom,
 	DEBUG_PRESETS,
@@ -1065,12 +1076,217 @@ function RenderToolSwitch({
 	);
 }
 
+/** A row with a bar: a name, a time and its share of the longest. */
+function TimeBar({
+	name,
+	hint,
+	value,
+	second,
+	most,
+}: {
+	name: string;
+	hint?: string;
+	value: number;
+	second?: string;
+	most: number;
+}) {
+	const share = Number.isFinite(value) && most > 0 ? Math.max(0, Math.min(1, value / most)) : 0;
+	return (
+		<div className="place-prop profile-row" title={hint}>
+			<span className="place-prop-name">{name}</span>
+			<span className="profile-bar" aria-hidden="true">
+				<span style={{ width: `${share * 100}%` }} />
+			</span>
+			<span className="place-prop-value profile-time">{msText(value)}</span>
+			{second !== undefined && <span className="profile-second">{second}</span>}
+		</div>
+	);
+}
+
+/** Puts the report where it can be pasted, or selects it to copy by hand. */
+async function copyReport(text: string, area: HTMLTextAreaElement | null): Promise<boolean> {
+	try {
+		await navigator.clipboard.writeText(text);
+		return true;
+	} catch {
+		area?.focus();
+		area?.select();
+		return false;
+	}
+}
+
+/**
+ * Profile: the frame measured stage by stage, step by step and at fewer
+ * pixels, for a device whose browser has no GPU timers -- see `profile.ts`.
+ */
+function ProfileSection({
+	controller,
+	profiling,
+	profile,
+}: {
+	controller: ViewportController;
+	profiling: { phase: string; done: number; of: number } | null;
+	profile: ProfileResult | null;
+}) {
+	const [open, toggle] = useFold(true);
+	const [copied, setCopied] = useState<"yes" | "select" | null>(null);
+	const area = useRef<HTMLTextAreaElement>(null);
+	const report = useMemo(() => (profile ? profileReport(profile) : ""), [profile]);
+	const stagesMost = Math.max(0, ...(profile?.stages.map((r) => r.p95) ?? []));
+	const costs = profile ? stepCosts(profile.steps) : [];
+	const costMost = Math.max(0, ...costs.map((c) => (Number.isFinite(c.cost) ? c.cost : 0)));
+	const resMost = Math.max(0, ...(profile?.resolution.map((r) => r.median) ?? []));
+	return (
+		<div className="place-group">
+			<SectionHead
+				title="Profile"
+				open={open}
+				onToggle={toggle}
+				hint="The frame measured stage by stage, step by step, and at fewer pixels, on any device."
+			/>
+			{open && (
+				<>
+					<div className="profile-run">
+						<button
+							type="button"
+							className="tb"
+							disabled={profiling !== null}
+							onClick={() => {
+								setCopied(null);
+								void controller.runProfile();
+							}}
+						>
+							{profiling ? "Profiling…" : profile ? "Profile again" : "Profile this view"}
+						</button>
+						<span className="profile-progress">
+							{profiling
+								? `${profiling.phase} · ${Math.round((profiling.done / profiling.of) * 100)}%`
+								: "About half a minute. Keep the view still."}
+						</span>
+					</div>
+					{profiling && (
+						<div className="profile-meter" aria-hidden="true">
+							<span style={{ width: `${(profiling.done / profiling.of) * 100}%` }} />
+						</div>
+					)}
+					{profile && !profiling && (
+						<>
+							<Rows
+								rows={[
+									[
+										"On screen",
+										`${fpsText(profile.baseline.median)} · ${msText(profile.baseline.median)}`,
+									],
+									[
+										"One frame",
+										`${msText(profile.frame.median)} · slow ${msText(profile.frame.p95)}`,
+									],
+								]}
+							/>
+							{profileVerdict(profile).map((line) => (
+								<p className="place-summary profile-verdict" key={line}>
+									{line}
+								</p>
+							))}
+							<h4 className="profile-head">
+								Stages <span>median · slow frames</span>
+							</h4>
+							{profile.stages.map((row) => (
+								<TimeBar
+									key={row.stage}
+									name={STAGE_LABELS[row.stage]}
+									hint={STAGE_HINTS[row.stage]}
+									value={row.median}
+									second={msText(row.p95)}
+									most={stagesMost}
+								/>
+							))}
+							<TimeBar
+								name="All stages"
+								value={profile.stageTotal.median}
+								second={msText(profile.stageTotal.p95)}
+								most={Math.max(stagesMost, profile.stageTotal.median)}
+							/>
+							<p className="place-summary">
+								Each stage is waited for on its own, so together they can take longer than one
+								frame.
+							</p>
+							<h4 className="profile-head">
+								Steps <span>cost · frame</span>
+							</h4>
+							{costs.map((c) => (
+								<TimeBar
+									key={c.label}
+									name={c.label}
+									value={Number.isFinite(c.cost) ? c.cost : c.frame}
+									second={Number.isFinite(c.cost) ? msText(c.frame) : "the start"}
+									most={Number.isFinite(c.cost) ? costMost : resMost}
+								/>
+							))}
+							<h4 className="profile-head">
+								Resolution <span>frame · rate</span>
+							</h4>
+							{profile.resolution.map((r) => (
+								<TimeBar
+									key={r.label}
+									name={r.label}
+									value={r.median}
+									second={fpsText(r.median)}
+									most={resMost}
+								/>
+							))}
+							<h4 className="profile-head">Device</h4>
+							<Rows
+								rows={[
+									["Renderer", profile.facts.renderer],
+									["GPU", profile.facts.gpu],
+									["GPU timers", profile.facts.gpuTimers ? "Offered" : "Not offered"],
+									[
+										"Canvas",
+										`${profile.facts.canvas.width}×${profile.facts.canvas.height} at ${profile.facts.pixelRatio}×`,
+									],
+									["Antialiasing", `${profile.facts.samples}×`],
+									["Clock step", msText(profile.clock)],
+								]}
+							/>
+							<div className="profile-run">
+								<button
+									type="button"
+									className="tb"
+									onClick={async () =>
+										setCopied((await copyReport(report, area.current)) ? "yes" : "select")
+									}
+								>
+									Copy report
+								</button>
+								{copied && (
+									<span className="profile-progress">
+										{copied === "yes" ? "Copied." : "Selected below: copy it from there."}
+									</span>
+								)}
+							</div>
+							<textarea
+								ref={area}
+								className="profile-report"
+								readOnly
+								value={report}
+								aria-label="The profile as text"
+								rows={6}
+							/>
+						</>
+					)}
+				</>
+			)}
+		</div>
+	);
+}
+
 /**
  * Performance: what the last frame took, and the last 240 frames' times.
  * Polled only while the panel is mounted.
  */
 export function PerformancePanel({ controller }: { controller: ViewportController }) {
-	const { backend, assets } = useViewport(controller);
+	const { backend, assets, profiling, profile } = useViewport(controller);
 	const [stats, setStats] = useState<RenderStats | null>(null);
 	useEffect(() => {
 		setStats(controller.renderStats());
@@ -1128,6 +1344,7 @@ export function PerformancePanel({ controller }: { controller: ViewportControlle
 							/>
 						)}
 					</div>
+					<ProfileSection controller={controller} profiling={profiling} profile={profile} />
 				</div>
 			</div>
 		</div>

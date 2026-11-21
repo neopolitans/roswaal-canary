@@ -30,6 +30,7 @@ import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
+import { QueueClock, type Stage, type StageSink } from "./profile.js";
 import { FEATURE_BIT, featureBits, passesOf } from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
@@ -1428,6 +1429,12 @@ export class WebGpuView implements ViewRenderer {
 		this.canvas = canvas;
 		const adapter = await navigator.gpu?.requestAdapter({ powerPreference: "high-performance" });
 		if (!adapter) throw new Error("no WebGPU adapter");
+		const info = (
+			adapter as { info?: { vendor?: string; architecture?: string; description?: string } }
+		).info;
+		this.gpuName =
+			[info?.vendor, info?.architecture, info?.description].filter((s) => !!s).join(" ") ||
+			"Not given";
 		// Timestamps where the adapter has them, for the Rendering panel's GPU times.
 		const timed = adapter.features.has("timestamp-query");
 		this.device = await adapter.requestDevice(
@@ -2441,11 +2448,14 @@ export class WebGpuView implements ViewRenderer {
 		const postOn = this.postOn && show.post && !heat && !wire && !tinted;
 		this.shape = glowShape(this.lighting?.post, postOn);
 		this.setCamera(camera);
-		const encoder = this.device.createCommandEncoder();
+		let encoder = this.device.createCommandEncoder();
+		const clock = this.clock;
+		clock?.start();
 		const partsMoved = this.skyDirty;
 		const centre = nearSkyCentre(camera.eye);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
-		if (this.skyDirty || this.sunDirty || nearMoved)
+		const mapsDue = this.skyDirty || this.sunDirty || nearMoved;
+		if (mapsDue)
 			this.drawSkyMaps(
 				encoder,
 				{
@@ -2455,7 +2465,9 @@ export class WebGpuView implements ViewRenderer {
 				},
 				centre,
 			);
+		if (mapsDue) encoder = this.cut(encoder, "skyMaps");
 		this.drawCascades(encoder, camera, partsMoved);
+		encoder = this.cut(encoder, "shadows");
 		// The camera's passes from here draw only the chunks in view.
 		this.cull(camera, [...this.draws, ...this.glass]);
 		// Occlusion: the solid parts' depth first, in a pass of its own.
@@ -2495,9 +2507,11 @@ export class WebGpuView implements ViewRenderer {
 		if (glowing) {
 			if (this.clear.length > 0) this.sortClear(camera.eye);
 			this.drawGlow(encoder);
+			encoder = this.cut(encoder, "glowSources");
 		}
 		// After the glow, which clears the same depth for its own pass.
 		const readBack = early && this.drawFar(encoder);
+		if (early) encoder = this.cut(encoder, "occlusion");
 		let pass = encoder.beginRenderPass({
 			timestampWrites: this.stamp("scene"),
 			colorAttachments: [
@@ -2583,6 +2597,7 @@ export class WebGpuView implements ViewRenderer {
 		// marks the place goes over it, against the place's own depth.
 		if (glow) {
 			pass.end();
+			encoder = this.cut(encoder, "place");
 			if (glowing) {
 				const b = this.lighting?.post.bloom;
 				q.writeBuffer(
@@ -2640,6 +2655,10 @@ export class WebGpuView implements ViewRenderer {
 		pass.end();
 		const read = this.readStamps(encoder);
 		this.device.queue.submit([encoder.finish()]);
+		if (clock) {
+			clock.submitted(glow ? "composite" : "place", this.device.queue.onSubmittedWorkDone());
+			clock.end();
+		}
 		read?.();
 		if (readBack) this.readFar();
 		this.lastTally = this.tally;
@@ -2649,6 +2668,36 @@ export class WebGpuView implements ViewRenderer {
 
 	settled(): Promise<void> {
 		return this.device.queue.onSubmittedWorkDone();
+	}
+
+	/**
+	 * Profiling, stage by stage: see `profile.ts`. Each stage's commands are
+	 * submitted on their own, and the queue says when each is done. The sky,
+	 * the parts, the images and the effects share one pass here, so they are
+	 * one stage; the steps sweep tells them apart.
+	 */
+	private clock: QueueClock | null = null;
+	private gpuName = "";
+
+	setProfiling(sink: StageSink | null): void {
+		this.clock = sink ? new QueueClock(sink) : null;
+	}
+
+	finished(): Promise<void> {
+		return this.device.queue.onSubmittedWorkDone();
+	}
+
+	deviceFacts(): { gpu: string; timers: boolean; samples: number } {
+		return { gpu: this.gpuName, timers: !!this.timing, samples: SAMPLES };
+	}
+
+	/** While profiling, ends a stage: what it encoded is submitted, and drawing goes on in a new encoder. */
+	private cut(encoder: GPUCommandEncoder, stage: Stage): GPUCommandEncoder {
+		const clock = this.clock;
+		if (!clock) return encoder;
+		this.device.queue.submit([encoder.finish()]);
+		clock.submitted(stage, this.device.queue.onSubmittedWorkDone());
+		return this.device.createCommandEncoder();
 	}
 
 	/** The place's Beams and ParticleEmitters: see `effectsGpu.ts`. */

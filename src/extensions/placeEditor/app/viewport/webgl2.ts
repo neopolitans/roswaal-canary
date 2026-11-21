@@ -30,6 +30,7 @@ import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
+import { type StageSink, WaitingClock } from "./profile.js";
 import { FEATURE_BIT, featureBits, passesOf } from "./renderFeatures.js";
 import { DENSITY_FS_GLSL, DENSITY_GLSL, OVERDRAW_GLSL, VIEWS_GLSL } from "./renderViews.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
@@ -2805,11 +2806,13 @@ export class WebGl2View implements ViewRenderer {
 		this.bloomAll = bloom;
 		const glowing = (this.glowing || bloom) && show.glow && !heat && !wire && !tinted;
 		const partsMoved = this.skyDirty;
+		const clock = this.clock;
+		clock?.start();
 		this.usualDepth(true);
 		const centre = nearSkyCentre(camera.eye);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
 		const nearDrawn = this.skyDirty || nearMoved;
-		if (this.skyDirty || this.sunDirty || nearMoved)
+		if (this.skyDirty || this.sunDirty || nearMoved) {
 			this.drawSkyMaps(
 				{
 					far: this.skyDirty,
@@ -2818,18 +2821,28 @@ export class WebGl2View implements ViewRenderer {
 				},
 				centre,
 			);
+			clock?.mark("skyMaps");
+		}
 		this.drawCascades(camera, partsMoved);
-		if (nearDrawn) this.fillCells(camera);
+		clock?.mark("shadows");
+		if (nearDrawn) {
+			this.fillCells(camera);
+			clock?.mark("skyCells");
+		}
 		// The camera's passes from here draw only the chunks in view.
 		this.cull(camera, [...this.draws, ...this.glass]);
 		const culling = passesOf(this.render.features);
-		if (culling.occlusion) this.drawFar(camera);
+		if (culling.occlusion) {
+			this.drawFar(camera);
+			clock?.mark("occlusion");
+		}
 		this.usualDepth(false);
 		gl.clearDepth(this.farDepth);
 		this.shape = glowShape(this.lighting?.post, postOn);
 		if (glowing) {
 			if (this.clear.length > 0) this.sortClear(camera.eye);
 			this.drawGlow(camera);
+			clock?.mark("glowSources");
 		}
 		// The place is drawn off screen first when anything is added to it
 		// after: Neon's glow, or a post effect; and always where depth is
@@ -2844,6 +2857,7 @@ export class WebGl2View implements ViewRenderer {
 		else gl.clearColor(0.16, 0.17, 0.19, 1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		if (show.sky && !heat && !wire) this.drawSky(camera);
+		clock?.mark("sky");
 		const images = show.images && !heat;
 		if (wire)
 			this.drawWires(
@@ -2853,15 +2867,87 @@ export class WebGl2View implements ViewRenderer {
 		else if (mode === "overdraw") this.drawOverdraw(camera);
 		else if (mode === "density") this.drawDensity(camera);
 		else this.drawPlace(camera, images, show.seeThrough, heat);
+		clock?.mark("place");
 		// Beams and particles, over everything see-through, farthest first; none in the wireframe.
 		this.drawEffects(camera);
+		clock?.mark("effects");
 		// The glow is part of the place, added once the place is drawn: what
 		// marks the place is drawn over it.
-		if (composite) this.addGlow(camera, post, glowing, postOn, sharesComposite(mode));
+		if (composite) {
+			this.addGlow(camera, post, glowing, postOn, sharesComposite(mode));
+			clock?.mark("composite");
+		}
 		this.drawMarks(camera);
+		clock?.mark("marks");
+		clock?.end();
 		this.lastTally = this.tally;
 		this.runs.clear();
 		this.cpuMs = performance.now() - started;
+	}
+
+	/** Profiling, stage by stage: see `profile.ts`. WebGL2 waits for its GPU with `finish`. */
+	private clock: WaitingClock | null = null;
+
+	setProfiling(sink: StageSink | null): void {
+		this.clock = sink ? new WaitingClock(() => this.gpuWait(), sink) : null;
+	}
+
+	finished(): Promise<void> {
+		this.gpuWait();
+		return Promise.resolve();
+	}
+
+	/** A pixel of its own, cleared and read back to wait for the GPU: see `gpuWait`. */
+	private waitPixel: { fbo: WebGLFramebuffer; texture: WebGLTexture; read: Uint8Array } | null =
+		null;
+
+	/**
+	 * Waits for the GPU to finish everything asked of it so far. `finish` is
+	 * not enough: Chrome's returns before the GPU is done. So a pixel of its own
+	 * is cleared, after everything else, and read back, which cannot happen
+	 * until the clear is done, and so all before it: the GPU works in order.
+	 */
+	private gpuWait(): void {
+		const gl = this.gl;
+		if (!this.waitPixel) {
+			const texture = gl.createTexture()!;
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+			const fbo = gl.createFramebuffer()!;
+			const was = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, was);
+			this.waitPixel = { fbo, texture, read: new Uint8Array(4) };
+		}
+		const { fbo, read } = this.waitPixel;
+		const draw = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+		const readFrom = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+		const scissor = gl.isEnabled(gl.SCISSOR_TEST);
+		const mask = gl.getParameter(gl.COLOR_WRITEMASK) as boolean[];
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+		gl.disable(gl.SCISSOR_TEST);
+		gl.colorMask(true, true, true, true);
+		gl.clear(gl.COLOR_BUFFER_BIT);
+		gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, read);
+		gl.colorMask(mask[0], mask[1], mask[2], mask[3]);
+		if (scissor) gl.enable(gl.SCISSOR_TEST);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, draw);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, readFrom);
+	}
+
+	deviceFacts(): { gpu: string; timers: boolean; samples: number } {
+		const gl = this.gl;
+		const info = gl.getExtension("WEBGL_debug_renderer_info");
+		const gpu = info
+			? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))
+			: String(gl.getParameter(gl.RENDERER));
+		return {
+			gpu,
+			timers: gl.getExtension("EXT_disjoint_timer_query_webgl2") !== null,
+			// The off-screen frame's, which the place is drawn into: see `resize`.
+			samples: Math.min(4, gl.getParameter(gl.MAX_SAMPLES) as number),
+		};
 	}
 
 	/** The sky behind the place. */

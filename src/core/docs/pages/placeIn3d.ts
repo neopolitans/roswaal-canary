@@ -364,7 +364,8 @@ export function placeEditorPerformancePage(): DocPage {
 		slug: "place-editor-performance",
 		narrow: true,
 		title: "The Performance panel",
-		summary: "What drawing the place costs: frame times and the last frame's counts.",
+		summary:
+			"What drawing the place costs: frame times, the last frame's counts, and a profile of each stage.",
 		blocks: [
 			{
 				t: "p",
@@ -400,6 +401,46 @@ export function placeEditorPerformancePage(): DocPage {
 						"How many of the place's assets are loaded, and any that failed or need signing in",
 					],
 				],
+			},
+			{ t: "h", level: 2, text: "Profile" },
+			{
+				t: "p",
+				text:
+					"**Profile this view** measures the frame in about half a minute, on any device, " +
+					"including ones whose browser cannot time the GPU, as Safari on an iPad cannot. Keep the " +
+					"view still while it runs; the view is put back as it was when it ends.",
+			},
+			{
+				t: "table",
+				head: ["Part", "What it measures"],
+				rows: [
+					["On screen", "The frame rate the view gets, at the display's pace"],
+					["One frame", "One frame drawn and waited for until the GPU has finished it"],
+					[
+						"Stages",
+						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under",
+					],
+					[
+						"Steps",
+						"The frame with the Rendering panel's steps added one at a time; each step's cost is how much slower it got",
+					],
+					[
+						"Resolution",
+						"The frame at all, half and a quarter of the pixels. Much faster with fewer means filling pixels is the cost",
+					],
+					["Device", "The renderer, the GPU's name, the canvas size and antialiasing"],
+				],
+			},
+			{
+				t: "note",
+				kind: "info",
+				text:
+					"Waiting for each stage stops the CPU and GPU working at once, so the stages can add up " +
+					"to more than one frame. Compare stages with each other, not with the frame.",
+			},
+			{
+				t: "p",
+				text: "**Copy report** copies the whole profile as text, to paste into an issue or a message.",
 			},
 			{ t: "h", level: 2, text: "Finding a spike" },
 			{

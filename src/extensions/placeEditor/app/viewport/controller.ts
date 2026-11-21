@@ -6,6 +6,7 @@
  */
 
 import { addTo, sameItems } from "../../../../app/placeSelection.js";
+import { RELEASES } from "../../../../core/docs/releases.js";
 import type { PlaceOutline } from "../../../../core/rbx/browse.js";
 import type { RbxInstance } from "../../../../core/rbx/dom.js";
 import { isSubclassOf } from "../../../../core/roblox.js";
@@ -45,8 +46,16 @@ import {
 	type ViewShot,
 } from "./marquee.js";
 import { loadMeshes } from "./meshes.js";
+import {
+	type ProfileResult,
+	type StageFrame,
+	spread,
+	stageRows,
+	stagesTotal,
+	type Timed,
+} from "./profile.js";
 import { startingText } from "./readout.js";
-import { litFor } from "./renderFeatures.js";
+import { litFor, RENDER_STEPS, upToStep } from "./renderFeatures.js";
 import { clampSpeed, SPEED_NOTCH } from "./speed.js";
 import { layersUsed, loadLayer } from "./textures.js";
 import {
@@ -156,6 +165,10 @@ export interface ViewportState {
 	editable: boolean;
 	/** The Rendering panel's mode and switches: the view's alone, for this session. */
 	render: RenderSettings;
+	/** A profile running: what it is measuring, and how far along. See `runProfile`. */
+	profiling: { phase: string; done: number; of: number } | null;
+	/** The last profile finished, for the Performance panel. */
+	profile: ProfileResult | null;
 	/** Which gizmos are drawn over the view: see `visualGizmos.ts`. The view's alone, for this session. */
 	gizmos: GizmoSettings;
 	/** The meshes costing the most triangles, and drawn most often: null until meshes are drawn. */
@@ -343,6 +356,8 @@ export class ViewportController {
 		space: "object",
 		editable: false,
 		render: DEFAULT_RENDER,
+		profiling: null,
+		profile: null,
 		gizmos: DEFAULT_GIZMOS,
 		heaviest: null,
 		assets: null,
@@ -1791,10 +1806,13 @@ export class ViewportController {
 		this.fit();
 	}
 
+	/** A share of the canvas's pixels, below 1 only while a profile measures resolution. */
+	private resolutionScale = 1;
+
 	private fit(): void {
 		const { view, canvas, els } = this;
 		if (!view || !canvas || !els) return;
-		const dpr = Math.min(2, devicePixelRatio || 1);
+		const dpr = Math.min(2, devicePixelRatio || 1) * this.resolutionScale;
 		const w = Math.max(1, Math.round(els.holder.clientWidth * dpr));
 		const h = Math.max(1, Math.round(els.holder.clientHeight * dpr));
 		if (canvas.width !== w || canvas.height !== h) {
@@ -1846,15 +1864,9 @@ export class ViewportController {
 			}
 			this.lastDraw = now;
 			this.pending = false;
-			const camera = this.camera();
-			if ((showsHandles(this.state.tool) || this.state.pivotEdit) && this.selection.length > 0)
-				this.drawHandles(camera.eye);
-			this.followGizmos(camera.eye);
-			this.view.draw(camera);
+			this.drawOnce(now);
 			if (rate === "unlimited") this.inFlight = [this.inFlight[1], this.view.settled()];
-			this.drawPivot();
-			this.frames.push(now);
-			this.recordFrame(now);
+			this.countFrame(now);
 			this.showRotation();
 			// Beams and particles that move keep the view drawing, at the frame
 			// rate's pace, until nothing moves, the Rendering panel turns them
@@ -1862,6 +1874,201 @@ export class ViewportController {
 			if (this.view.animates() && !document.hidden) this.redraw();
 		};
 		this.nextFrame(draw);
+	}
+
+	/** One frame: the handles and gizmos where the camera is, the place, and its time in the graph. */
+	private drawOnce(now: number): void {
+		const view = this.view;
+		if (!view) return;
+		const camera = this.camera();
+		if ((showsHandles(this.state.tool) || this.state.pivotEdit) && this.selection.length > 0)
+			this.drawHandles(camera.eye);
+		this.followGizmos(camera.eye);
+		view.draw(camera);
+		this.drawPivot();
+		this.frames.push(now);
+		this.recordFrame(now);
+	}
+
+	/**
+	 * Frames drawn one at a time, each waited for until the GPU has finished
+	 * it: from the start of drawing it to the end of the wait is what the frame
+	 * costs, with nothing left over from the frame before. Up to `n`, fewer on
+	 * a slow device, which stops after `budget` milliseconds.
+	 */
+	private async waitedFrames(n: number, budget: number): Promise<number[]> {
+		const times: number[] = [];
+		const from = performance.now();
+		for (let i = 0; i < n; i++) {
+			const view = this.view;
+			if (!view) break;
+			const start = performance.now();
+			this.drawOnce(start);
+			await view.finished();
+			times.push(performance.now() - start);
+			if (times.length >= PROFILE_FEWEST && performance.now() - from > budget) break;
+			// The page's turn, between frames: the progress shows, and nothing waits on this.
+			await new Promise((r) => setTimeout(r, 0));
+		}
+		return times;
+	}
+
+	/** What one frame costs at whatever is set now: a few to settle, then up to `n` timed. */
+	private async timeWaited(label: string, n: number): Promise<Timed> {
+		await this.waitedFrames(3, 400);
+		return { label, ...spread(await this.waitedFrames(n, PROFILE_BUDGET)) };
+	}
+
+	/**
+	 * Frames the profile counts on screen: drawn at the display's pace, as
+	 * the view is, each one's time since the last noted.
+	 */
+	private counting: {
+		left: number;
+		last: number;
+		/** When the first frame was drawn, and how long it may go on past its fewest. */
+		from: number;
+		budget: number;
+		times: number[];
+		done: () => void;
+	} | null = null;
+
+	private countFrame(now: number): void {
+		const c = this.counting;
+		if (!c) return;
+		if (c.last > 0) c.times.push(now - c.last);
+		else c.from = now;
+		c.last = now;
+		c.left--;
+		// A slow device stops at its budget, once it has enough frames to go on.
+		const spent = c.times.length >= PROFILE_FEWEST && now - c.from > c.budget;
+		if (c.left > 0 && !spent) this.redraw();
+		else {
+			this.counting = null;
+			c.done();
+		}
+	}
+
+	/**
+	 * Draws up to `n` frames back to back, and the times between them: fewer
+	 * on a slow device, which stops after `budget` milliseconds.
+	 */
+	private drawFrames(n: number, budget = Number.POSITIVE_INFINITY): Promise<number[]> {
+		return new Promise((resolve) => {
+			const c = {
+				left: n + 1,
+				last: 0,
+				from: 0,
+				budget,
+				times: [] as number[],
+				done: () => resolve(c.times),
+			};
+			this.counting = c;
+			this.redraw();
+			// The view closed, or stopped drawing: what was timed is what there is.
+			setTimeout(() => {
+				if (this.counting !== c) return;
+				this.counting = null;
+				resolve(c.times);
+			}, 30000);
+		});
+	}
+
+	/** The frame on screen, at the display's pace: a few frames to settle, then up to `n` timed. */
+	private async timeFrames(label: string, n: number): Promise<Timed> {
+		await this.drawFrames(4, 400);
+		const times = await this.drawFrames(n, PROFILE_BUDGET);
+		return { label, ...spread(times) };
+	}
+
+	/**
+	 * Profiles the view: the free-running frame, each stage of it with the GPU
+	 * waited for at the end of each (see `profile.ts`), the Rendering panel's
+	 * steps added one at a time, and the frame at a half and a quarter of the
+	 * pixels. Everything changed is put back, however it ends.
+	 */
+	async runProfile(): Promise<ProfileResult | null> {
+		const view = this.view;
+		const canvas = this.canvas;
+		if (!view || !canvas || this.state.profiling) return null;
+		const render = this.state.render;
+		const options = this.options;
+		const pixels = { width: canvas.width, height: canvas.height };
+		const steps = RENDER_STEPS.length;
+		const total = 1 + 1 + 1 + (steps + 1) + 3;
+		let done = 0;
+		const phase = (name: string) =>
+			this.set({ profiling: { phase: name, done: done++, of: total } });
+		let result: ProfileResult | null = null;
+		try {
+			phase("On screen");
+			const baseline = await this.timeFrames("On screen", 60);
+			phase("One frame");
+			const frame = await this.timeWaited("One frame", 40);
+			phase("Stages");
+			const frames: StageFrame[] = [];
+			view.setProfiling((each) => frames.push(each));
+			await this.waitedFrames(60, PROFILE_BUDGET * 2);
+			view.setProfiling(null);
+			// WebGPU's last stages are timed when its queue says they are done.
+			await view.settled();
+			await new Promise((r) => setTimeout(r, 50));
+			const timedSteps: Timed[] = [];
+			for (let n = 0; n <= steps; n++) {
+				const label = n === 0 ? "Parts, nothing else" : `+ ${RENDER_STEPS[n - 1][0]}`;
+				phase(`Step ${n} of ${steps}`);
+				this.setRender({ ...render, mode: "lit", features: upToStep(n) });
+				timedSteps.push(await this.timeWaited(label, 30));
+			}
+			this.setRender(render);
+			const resolution: Timed[] = [];
+			for (const scale of [1, 0.5, 0.25]) {
+				phase(`Resolution ${Math.round(scale * 100)}%`);
+				this.resolutionScale = Math.sqrt(scale);
+				this.fit();
+				const w = this.canvas?.width ?? 0;
+				const h = this.canvas?.height ?? 0;
+				resolution.push(await this.timeWaited(`${Math.round(scale * 100)}% (${w}×${h})`, 30));
+			}
+			const stats = view.stats();
+			const facts = view.deviceFacts();
+			const box = canvas.getBoundingClientRect();
+			result = {
+				facts: {
+					renderer: view.backend,
+					gpu: facts.gpu,
+					gpuTimers: facts.timers,
+					canvas: pixels,
+					css: { width: Math.round(box.width), height: Math.round(box.height) },
+					pixelRatio: devicePixelRatio || 1,
+					samples: facts.samples,
+					frameRate: String(options.frameRate),
+					draws: stats.draws,
+					instances: stats.instances,
+					triangles: stats.triangles,
+					beams: stats.beams,
+					particles: stats.particles,
+					userAgent: navigator.userAgent,
+					version: RELEASES[0]?.version ?? "",
+				},
+				baseline,
+				frame,
+				stages: stageRows(frames),
+				stageTotal: stagesTotal(frames),
+				stageFrames: frames.length,
+				steps: timedSteps,
+				resolution,
+				clock: clockStep(),
+			};
+		} finally {
+			view.setProfiling(null);
+			this.counting = null;
+			this.resolutionScale = 1;
+			this.setRender(render);
+			this.fit();
+			this.set({ profiling: null, ...(result ? { profile: result } : {}) });
+		}
+		return result;
 	}
 
 	/** The Performance panel's frame-time graph: see `frameGraph.ts`. */
@@ -2579,4 +2786,25 @@ export class ViewportController {
 			down = null;
 		};
 	}
+}
+
+/** How long one of a profile's measurements may take, and the fewest frames it times. */
+const PROFILE_BUDGET = 1500;
+const PROFILE_FEWEST = 8;
+
+/**
+ * The smallest step the page's clock takes: Safari rounds `performance.now`
+ * to a coarse step, which a single short stage cannot be measured under.
+ */
+function clockStep(): number {
+	let smallest = Number.POSITIVE_INFINITY;
+	let last = performance.now();
+	for (let i = 0; i < 2000 && smallest > 0.001; i++) {
+		const now = performance.now();
+		if (now > last) {
+			smallest = Math.min(smallest, now - last);
+			last = now;
+		}
+	}
+	return Number.isFinite(smallest) ? smallest : Number.NaN;
 }

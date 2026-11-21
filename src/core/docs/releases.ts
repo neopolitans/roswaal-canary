@@ -21,6 +21,7 @@
  */
 
 import { RELEASES_1_0 } from "./releases/1.0.js";
+import { RELEASES_1_1 } from "./releases/1.1.js";
 import { RELEASES_0_0 } from "./releases/minor0.js";
 import { RELEASES_0_10 } from "./releases/minor10.js";
 import { RELEASES_0_20 } from "./releases/minor20.js";
@@ -127,6 +128,7 @@ export function taglineFor(version: string): string | undefined {
  * a tenth of the minor versions each, are kept as they were.
  */
 export const RELEASES: Release[] = [
+	...RELEASES_1_1,
 	...RELEASES_1_0,
 	...RELEASES_0_120,
 	...RELEASES_0_110,

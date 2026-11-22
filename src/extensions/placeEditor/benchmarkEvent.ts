@@ -11,7 +11,7 @@ export type BenchmarkKind = "current" | "sweep" | "ab";
 /** What a run is asked for: its kind, and whether each station is measured twice. */
 export interface BenchmarkRequest {
 	kind: BenchmarkKind;
-	/** 2: each station measured again in a second pass, for its own noise; twice as long. */
+	/** 2: each station measured again after the whole first pass, warm; twice as long. */
 	passes: 1 | 2;
 	/** For an A/B run: the render switch measured on and off, by its key ("occlusionCulling"). */
 	ab?: string;
@@ -33,7 +33,7 @@ export function startBenchmark(
 
 const TWICE = "roswaal.benchmark.twice";
 
-/** Settings' "Each station twice", kept in this browser. */
+/** Settings' "Warm pass", kept in this browser. */
 export function twiceWanted(): boolean {
 	try {
 		return localStorage.getItem(TWICE) === "1";

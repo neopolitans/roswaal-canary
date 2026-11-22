@@ -29,7 +29,10 @@ export interface BenchmarkStationResult {
 	variant: string;
 	/** Still frames, waited for: the waited time, the GPU's and the CPU's. */
 	still: Timed;
-	/** The same, measured again in a second pass over the stations, where the run measured each twice. */
+	/**
+	 * The same, measured again after the whole first pass: the device warm.
+	 * Shown beside the first, never scored or compared: see the warm pass.
+	 */
 	repeat?: Timed;
 	/** An A/B run's measurements: its switch on, off, on, off, in that order. */
 	ab?: { on: Timed[]; off: Timed[] };
@@ -54,7 +57,7 @@ export interface BenchmarkResult {
 	benchmark: number;
 	seed: number;
 	kind: BenchmarkKind;
-	/** 2 where each station was measured twice (its `repeat`); absent in a run of one pass. */
+	/** 2 where each station was measured again, warm (its `repeat`); absent in a run of one pass. */
 	passes?: number;
 	/** The render switches that were off for the run, by their names in the Rendering panel. */
 	switchedOff?: string[];
@@ -140,7 +143,7 @@ export function benchmarkReport(result: BenchmarkResult): string {
 			"Measured with the GPU kept busy, two frames in flight: the time between frames, and the GPU's own time for one, at its full clock.",
 		);
 	lines.push(
-		`Seed ${result.seed} · ${result.date}${(result.passes ?? 1) > 1 ? " · each station twice" : ""}${result.cancelled ? " · stopped before the end" : ""}`,
+		`Seed ${result.seed} · ${result.date}${(result.passes ?? 1) > 1 ? " · with a warm pass" : ""}${result.cancelled ? " · stopped before the end" : ""}`,
 	);
 	lines.push(
 		`Score: ${score(total.gpu)} by the GPU's time, ${score(total.waited)} by the ${result.measure === "busy" ? "frame interval" : "waited frame"}`,
@@ -151,21 +154,26 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	}
 	for (const level of result.levels) {
 		const ls = levelScore(level);
+		const warm = warmDrift(level, result.gpuTimers);
 		lines.push("");
 		lines.push(
 			`${level.label} · ${level.canvas.width}×${level.canvas.height} · ${level.antialias} · score ${score(ls.gpu)} / ${score(ls.waited)}`,
 		);
 		lines.push(
-			`  ${"Station".padEnd(28)}${"GPU".padStart(10)}${(result.measure === "busy" ? "Interval" : "Waited").padStart(10)}${"CPU".padStart(10)}${"Orbit".padStart(10)}${"Score".padStart(17)}`,
+			`  ${"Station".padEnd(28)}${"GPU".padStart(10)}${(result.measure === "busy" ? "Interval" : "Waited").padStart(10)}${"CPU".padStart(10)}${"Orbit".padStart(10)}${"Score".padStart(17)}${warm === null ? "" : "      Warm"}`,
 		);
 		for (const s of level.stations) {
 			const sc = stationScore(s);
 			const orbit = s.moving[0];
 			const name = `${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`;
 			lines.push(
-				`  ${name.padEnd(28)}${msText(s.still.gpuMs ?? Number.NaN).padStart(10)}${msText(s.still.median).padStart(10)}${msText(s.still.cpuMs ?? Number.NaN).padStart(10)}${msText(orbit ? (orbit.gpu.length > 0 ? orbit.gpuTotal.median : orbit.median) : Number.NaN).padStart(10)}${`${score(sc.gpu)} / ${score(sc.waited)}`.padStart(17)}${cpuBound(s) ? "  CPU-bound" : ""}`,
+				`  ${name.padEnd(28)}${msText(s.still.gpuMs ?? Number.NaN).padStart(10)}${msText(s.still.median).padStart(10)}${msText(s.still.cpuMs ?? Number.NaN).padStart(10)}${msText(orbit ? (orbit.gpu.length > 0 ? orbit.gpuTotal.median : orbit.median) : Number.NaN).padStart(10)}${`${score(sc.gpu)} / ${score(sc.waited)}`.padStart(17)}${warm === null ? "" : warmText(s, result.gpuTimers).padStart(10)}${cpuBound(s) ? "  CPU-bound" : ""}`,
 			);
 		}
+		if (warm !== null)
+			lines.push(
+				`  Warm: each station again after the whole first pass, ${pctText(warm)} across the stations (the median). The scores are the first pass's.`,
+			);
 		lines.push("");
 		lines.push(
 			`  Each station's GPU stages, and its CPU's steps (${result.measure === "busy" ? "the middle 80%'s means" : "medians"}):`,
@@ -190,6 +198,31 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	}
 	return lines.join("\n");
 }
+
+/** A station's time by the GPU, where it has timers, else by the frame. */
+function stationTime(t: Timed, gpu: boolean): number {
+	return gpu ? (t.gpuMs ?? Number.NaN) : t.median;
+}
+
+/** How much slower the warm pass was than the first across a level's stations (the median change), or null with none. */
+export function warmDrift(level: BenchmarkLevelResult, gpu: boolean): number | null {
+	const changes = level.stations
+		.filter((s) => s.repeat)
+		.map((s) => stationTime(s.repeat as Timed, gpu) / stationTime(s.still, gpu))
+		.filter(Number.isFinite)
+		.sort((a, b) => a - b);
+	if (changes.length === 0) return null;
+	const m = Math.floor(changes.length / 2);
+	return (changes.length % 2 ? changes[m] : (changes[m - 1] + changes[m]) / 2) - 1;
+}
+
+function warmText(s: BenchmarkStationResult, gpu: boolean): string {
+	if (!s.repeat) return "";
+	const change = stationTime(s.repeat, gpu) / stationTime(s.still, gpu) - 1;
+	return Number.isFinite(change) ? pctText(change) : "";
+}
+
+const pctText = (share: number) => `${share >= 0 ? "+" : "−"}${Math.abs(Math.round(share * 100))}%`;
 
 /** What an A/B run found at a station: the switch's saving (positive) or cost, and whether it is clear. */
 export interface AbFinding {

@@ -9,9 +9,8 @@
  * taken as the run's drift: the one or two stations a release changed do not
  * move a median. Each station's change is judged after that drift, against a
  * band of how far the stations scatter round it (three deviations, from
- * their median absolute deviation, 5% at least), widened by a station's own
- * two passes where it was measured twice: a run of one pass is taken to be as
- * noisy as the other's, and the two noises add.
+ * their median absolute deviation, 5% at least). Each run is compared by its
+ * first pass: a second, where there is one, is the device warm.
  *
  * Three deviations, not two: canary.21 against canary.22 on an iPad, where
  * nothing drawn had changed, called two of eighteen stations changed at two.
@@ -69,20 +68,13 @@ function median(values: number[]): number {
 	return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 }
 
-/** A station's time: both passes' mean where it was measured twice. */
+/**
+ * A station's time: its first pass's. The second, where there is one, is
+ * the device warm (after the whole first pass at full clock, an iPad's GPU
+ * was 14 to 33% slower at most stations), said apart rather than averaged in.
+ */
 function timeOf(s: BenchmarkStationResult, gpu: boolean): number {
-	const one = gpu ? (s.still.gpuMs ?? Number.NaN) : s.still.median;
-	const two = s.repeat ? (gpu ? (s.repeat.gpuMs ?? Number.NaN) : s.repeat.median) : Number.NaN;
-	return Number.isFinite(two) ? (one + two) / 2 : one;
-}
-
-/** How far a station's two passes were apart, as a share: 0 where it was measured once. */
-function passSpread(s: BenchmarkStationResult, gpu: boolean): number {
-	if (!s.repeat) return 0;
-	const one = gpu ? s.still.gpuMs : s.still.median;
-	const two = gpu ? s.repeat.gpuMs : s.repeat.median;
-	if (!one || !two || !Number.isFinite(one) || !Number.isFinite(two)) return 0;
-	return Math.exp(Math.abs(Math.log(two / one))) - 1;
+	return gpu ? (s.still.gpuMs ?? Number.NaN) : s.still.median;
 }
 
 const keyOf = (s: BenchmarkStationResult) => `${s.n}|${s.variant}`;
@@ -113,13 +105,10 @@ function compareLevel(
 		by: gpu ? "GPU" : "waited frame",
 		drift,
 		band,
-		stations: pairs.map(({ s, t, before, after }) => {
+		stations: pairs.map(({ s, before, after }) => {
 			const ratio = after / before;
 			const adjusted = ratio / drift;
-			// Each run's own noise: a run measured once taken as noisy as the other; the two add.
-			const ownBefore = s.repeat ? passSpread(s, gpu) : passSpread(t, gpu);
-			const ownAfter = t.repeat ? passSpread(t, gpu) : passSpread(s, gpu);
-			const own = Math.max(band, Math.hypot(ownBefore, ownAfter));
+			const own = band;
 			return {
 				n: s.n,
 				name: s.name,
@@ -205,7 +194,7 @@ export function comparisonReport(c: Comparison): string {
 		);
 		if (level.band > 0.15)
 			lines.push(
-				`  Noise this wide hides changes under about ${Math.round(level.band * 100)}%. Each station twice, or a cooler device, narrows it.`,
+				`  Noise this wide hides changes under about ${Math.round(level.band * 100)}%. A device as cool at the start of each run narrows it.`,
 			);
 		lines.push(
 			`  ${"Station".padEnd(28)}${"Before".padStart(10)}${"After".padStart(10)}${"Change".padStart(9)}${"After drift".padStart(13)}  Verdict`,

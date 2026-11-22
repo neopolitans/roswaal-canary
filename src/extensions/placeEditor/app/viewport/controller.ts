@@ -82,8 +82,10 @@ import {
 	type FeatureKey,
 	featureOn,
 	litFor,
+	onThisDevice,
 	RENDER_STEPS,
 	type RenderFeatures,
+	setOffOnThisDevice,
 	upToStep,
 } from "./renderFeatures.js";
 import { clampSpeed, SPEED_NOTCH } from "./speed.js";
@@ -1835,13 +1837,21 @@ export class ViewportController {
 			return canvas;
 		};
 		const gl2 = this.options.renderer === "webgl2";
+		if (this.gpuSeen === null) {
+			this.gpuSeen = await gpuName(gl2);
+			setOffOnThisDevice(/apple/i.test(this.gpuSeen) ? ["occlusionCulling"] : []);
+			// The level's own switches, as this device has them.
+			const q = this.level();
+			if (changedFrom(this.state.render.features, q.features).length === 0)
+				this.setRender({ ...this.state.render, features: this.levelFeatures(q) });
+		}
 		// Automatic's first level, from the device, before the view is made at it.
 		if (this.auto && !this.classed) {
 			this.classed = true;
 			const level = startLevel({
 				touch: typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
 				shortSide: Math.min(screen.width, screen.height),
-				gpu: await gpuName(gl2),
+				gpu: this.gpuSeen,
 			});
 			this.auto = new AutoQuality(level);
 			void this.toLevel(level, true);
@@ -1951,6 +1961,20 @@ export class ViewportController {
 		return qualityLevel(this.state.quality.level);
 	}
 
+	/** The GPU's name, asked for once. */
+	private gpuSeen: string | null = null;
+
+	/**
+	 * A quality level's switches on this device. On Apple's GPUs, Occlusion
+	 * culling is off: they already skip what is hidden, tile by tile, and the
+	 * depth pass occlusion needs cost an iPad Mini 0.7 to 2.6 ms at every
+	 * Benchmark 3 station and saved nothing at any (its A/B run, 22 Nov
+	 * 2026). It can still be turned on by hand.
+	 */
+	private levelFeatures(q: QualityLevel): RenderFeatures {
+		return onThisDevice(q.features);
+	}
+
 	/** Antialiasing: Settings', or the quality level's. */
 	private antialiasMode(): AntialiasMode {
 		return this.options.antialias ?? this.level().antialias;
@@ -1997,7 +2021,7 @@ export class ViewportController {
 		await new Promise((r) => setTimeout(r, 50));
 		const q = qualityLevel(n);
 		const features = this.state.render.features;
-		const below = n > 1 ? qualityLevel(n - 1).features : null;
+		const below = n > 1 ? this.levelFeatures(qualityLevel(n - 1)) : null;
 		const facts = view.deviceFacts();
 		const stats = view.stats();
 		return {
@@ -2010,7 +2034,9 @@ export class ViewportController {
 			blobs: q.blobWidth !== null,
 			distance: q.distance,
 			glow: !features.neonGlow && !features.lavaGlow ? "off" : facts.glowHalf ? "half" : "full",
-			adds: FEATURES.filter((i) => q.features[i.key] && below && !below[i.key]).map((i) => i.label),
+			adds: FEATURES.filter((i) => this.levelFeatures(q)[i.key] && below && !below[i.key]).map(
+				(i) => i.label,
+			),
 			stages: stageRows(frames),
 			stageTotal: stagesTotal(frames),
 			gpu: stageRows(gpuFrames),
@@ -2229,7 +2255,7 @@ export class ViewportController {
 	async runBenchmark(run: {
 		stations: readonly Station[];
 		kind: BenchmarkKind;
-		/** 2: a second pass over each level's stations, still frames again, for each station's own noise. */
+		/** 2: a second pass over each level's stations, still frames again: the device warm. */
 		passes?: 1 | 2;
 		/** "busy": frames timed with the GPU kept busy (Benchmark 2); "waited", one at a time (Benchmark 1). */
 		measure?: "waited" | "busy";
@@ -2411,7 +2437,7 @@ export class ViewportController {
 						done++;
 					}
 				// Again, still frames only, after the whole first pass: what changed
-				// between them is each station's own noise, warming included.
+				// between them is mostly the device warming: said as the warm pass.
 				if (passes > 1) {
 					let i = 0;
 					for (const station of run.stations)
@@ -2456,7 +2482,11 @@ export class ViewportController {
 		const q = qualityLevel(level);
 		this.set({ quality: { level: q.level, auto: this.auto !== null } });
 		if (reset)
-			this.setRender({ ...this.state.render, preset: levelPreset(q.level), features: q.features });
+			this.setRender({
+				...this.state.render,
+				preset: levelPreset(q.level),
+				features: this.levelFeatures(q),
+			});
 		const view = this.view;
 		if (!view) return;
 		if (view.antialias !== this.antialiasMode() || view.shadowMap !== q.shadowMap) {
@@ -2482,7 +2512,7 @@ export class ViewportController {
 		if (!auto || this.state.profiling || this.starting) return;
 		const render = this.state.render;
 		if (presetLevel(render.preset) !== auto.level) return;
-		if (changedFrom(render.features, this.level().features).length > 0) return;
+		if (changedFrom(render.features, this.levelFeatures(this.level())).length > 0) return;
 		const gpuMs = gpu ? gpu.shadows + gpu.scene + gpu.post : Number.NaN;
 		const ms = !run ? 0 : Number.isFinite(gpuMs) && gpuMs > 0 ? gpuMs : interval;
 		const next = auto.frame(ms);
@@ -2739,7 +2769,7 @@ export class ViewportController {
 		// The level and the camera the profile began from, for its head.
 		const startQ = this.state.quality;
 		const startedAt = `${startQ.auto ? "Automatic, " : ""}Level ${startQ.level}${
-			changedFrom(render.features, qualityLevel(startQ.level).features).length > 0
+			changedFrom(render.features, this.levelFeatures(qualityLevel(startQ.level))).length > 0
 				? ", switches changed by hand"
 				: ""
 		}`;

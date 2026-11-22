@@ -249,6 +249,24 @@ export const STUDIO_FEATURES: RenderFeatures = Object.fromEntries(
 	FEATURES.map((i) => [i.key, !i.fix]),
 ) as unknown as RenderFeatures;
 
+/** Switches a quality level leaves off on this device, whatever the level: see setOffOnThisDevice. */
+let offHere: readonly FeatureKey[] = [];
+
+/**
+ * The switches no quality level turns on here, once the view knows the GPU:
+ * Occlusion culling on Apple's (see ViewportController.levelFeatures). Each
+ * can still be turned on by hand.
+ */
+export function setOffOnThisDevice(keys: readonly FeatureKey[]): void {
+	offHere = keys;
+}
+
+/** A level's or Studio's switches as this device has them. */
+export function onThisDevice(features: RenderFeatures): RenderFeatures {
+	if (!offHere.some((k) => features[k])) return features;
+	return { ...features, ...Object.fromEntries(offHere.map((k) => [k, false])) };
+}
+
 /** Whether a switch takes effect: on, and every switch it sits under on. */
 export function featureOn(features: RenderFeatures, key: FeatureKey): boolean {
 	const info = BY_KEY.get(key);
@@ -278,7 +296,7 @@ export function upToStep(n: number): RenderFeatures {
 /** The switches set apart from `base`, by key. */
 export function changedFrom(
 	features: RenderFeatures,
-	base: RenderFeatures = STUDIO_FEATURES,
+	base: RenderFeatures = onThisDevice(STUDIO_FEATURES),
 ): FeatureKey[] {
 	return FEATURES.filter((i) => features[i.key] !== base[i.key]).map((i) => i.key);
 }
@@ -403,7 +421,9 @@ export const RENDER_PRESETS: readonly RenderPreset[] = [...QUALITY_PRESETS, ...D
 
 /** The preset by its id; Level 21, As Studio, for one that is gone. */
 export function presetById(id: string): RenderPreset {
-	return RENDER_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[0];
+	const p = RENDER_PRESETS.find((r) => r.id === id) ?? QUALITY_PRESETS[0];
+	// A quality level's switches as this device has them; the debug views' as they are.
+	return p.id.startsWith("level-") ? { ...p, features: onThisDevice(p.features) } : p;
 }
 
 /**

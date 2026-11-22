@@ -13,11 +13,14 @@ import {
 	featureBits,
 	featureOn,
 	litFor,
+	onThisDevice,
 	passesOf,
+	presetById,
 	QUALITY_PRESETS,
 	RENDER_PRESETS,
 	RENDER_STEPS,
 	STUDIO_FEATURES,
+	setOffOnThisDevice,
 	stepOf,
 	upToStep,
 } from "../src/extensions/placeEditor/app/viewport/renderFeatures.js";
@@ -157,5 +160,26 @@ describe("the Rendering panel's switches", () => {
 		for (const p of DEBUG_PRESETS.filter((x) => x.id !== "debug-no-culling"))
 			expect(p.features.frustumCulling && p.features.occlusionCulling).toBe(true);
 		expect(new Set(RENDER_PRESETS.map((p) => p.id)).size).toBe(RENDER_PRESETS.length);
+	});
+});
+
+describe("switches a device leaves off", () => {
+	it("leave Occlusion culling off at every level on Apple's GPUs, without calling the level changed", () => {
+		setOffOnThisDevice(["occlusionCulling"]);
+		try {
+			const level21 = presetById("level-21");
+			expect(level21.features.occlusionCulling).toBe(false);
+			expect(changedFrom(level21.features)).toEqual([]);
+			expect(changedFrom(onThisDevice(STUDIO_FEATURES))).toEqual([]);
+			// Turned on by hand, it is a change from the level.
+			expect(
+				changedFrom({ ...level21.features, occlusionCulling: true }, level21.features),
+			).toEqual(["occlusionCulling"]);
+			// The debug views keep their own switches.
+			expect(presetById(DEBUG_PRESETS[0].id).features).toBe(DEBUG_PRESETS[0].features);
+		} finally {
+			setOffOnThisDevice([]);
+		}
+		expect(presetById("level-21").features.occlusionCulling).toBe(true);
 	});
 });

@@ -150,6 +150,16 @@ describe("a benchmark's scores", () => {
 		expect(busy).toContain("Measured with the GPU kept busy, two frames in flight");
 		expect(busy).toMatch(/Station\s+GPU\s+Interval/);
 		expect(busy).toContain("by the frame interval");
+		const warmLevel = {
+			...result.levels[0],
+			stations: result.levels[0].stations.map((s) => ({ ...s, repeat: { ...s.still, gpuMs: 5 } })),
+		};
+		const warm = benchmarkReport({ ...result, passes: 2, levels: [warmLevel] });
+		expect(warm).toContain("with a warm pass");
+		expect(warm).toMatch(/Score\s+Warm/);
+		expect(warm).toContain(
+			"Warm: each station again after the whole first pass, +25% across the stations",
+		);
 		const off = benchmarkReport({ ...result, switchedOff: ["Occlusion culling"] });
 		expect(off).toContain("Switched off in the Rendering panel: Occlusion culling");
 	});

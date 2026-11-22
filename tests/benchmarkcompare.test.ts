@@ -87,16 +87,14 @@ describe("comparing two benchmark runs", () => {
 		expect(level.stations.filter((s) => s.verdict !== "within noise")).toHaveLength(1);
 	});
 
-	it("widens a station's band by how far its own two passes were apart", () => {
+	it("compares each run by its first pass: a second is the device warm, not noise", () => {
 		const before: (number | [number, number])[] = [...BEFORE];
 		before[2] = [8, 12];
 		const after = BEFORE.map((t) => t * 1.0);
 		after[2] = 7;
 		const level = compareRuns(run("a", before), run("b", after)).levels[0];
-		// Its passes were 50% apart, and the other run, measured once, is taken as as noisy: the two add.
-		expect(level.stations[2].band).toBeCloseTo(Math.hypot(0.5, 0.5), 6);
-		expect(level.stations[2].before).toBe(10);
-		expect(level.stations[2].verdict).toBe("within noise");
+		expect(level.stations[2].before).toBe(8);
+		expect(level.stations[2].band).toBe(level.band);
 	});
 
 	it("calls no change under what the GPU's timer resolves", () => {

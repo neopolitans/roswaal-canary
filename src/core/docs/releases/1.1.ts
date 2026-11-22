@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.28",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.21.0: Occlusion culling starts off on Apple's GPUs, and a benchmark's second pass is its warm pass.",
+		changed: [
+			"**Occlusion culling starts off on Apple's GPUs** at every quality level. Measured on an iPad, it cost 0.7 to 2.6 ms at almost every benchmark station and saved nothing at any. It can still be turned on in the Rendering panel.",
+			"**Each station twice is now Warm pass.** Scores and comparisons come from the first pass, and the report shows how much slower each station was once the device had warmed up.",
+			"**The Place Editor is 0.21.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.27",
 		date: "2026-11-22",
 		headline:

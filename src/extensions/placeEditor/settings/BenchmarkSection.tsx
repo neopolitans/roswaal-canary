@@ -51,8 +51,8 @@ export function BenchmarkSection() {
 				</button>
 			</Row>
 			<Row
-				label="Each station twice"
-				help="Measures every station again in a second pass, so a comparison can tell a station's own noise from a change. Steadier; twice as long."
+				label="Warm pass"
+				help="Measures every station again after the whole first pass, when the device has warmed up, and shows how much slower each is warm. Scores and comparisons stay the first pass's. Twice as long."
 			>
 				<button
 					type="button"

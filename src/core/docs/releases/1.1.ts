@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.13",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.9.1: Apple's GPUs draw the parts' depth first again, as it measured faster.",
+		changed: [
+			"**Every GPU draws the parts' depth first again.** On an iPad the one-draw path measured 9 ms a frame to the pre-pass's 6. The profile's Depth path rows still time both.",
+			"**The Place Editor is 0.9.1.**",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.12",
 		date: "2026-11-22",
 		headline:

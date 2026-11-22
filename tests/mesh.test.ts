@@ -157,6 +157,18 @@ describe("a mesh as a row draws it", () => {
 		expect(Math.hypot(...vertices.slice(3, 6))).toBeCloseTo(1, 5);
 	});
 
+	it("gives a DoubleSided MeshPart's mesh its back faces, wound and facing the other way", () => {
+		const one = meshGeometry(mesh, { asset: "1" });
+		const both = meshGeometry(mesh, { asset: "1", doubleSided: true });
+		expect(both.vertices).toHaveLength(one.vertices.length * 2);
+		expect([...both.indices]).toEqual([0, 1, 2, 1, 3, 2, 4, 6, 5, 5, 6, 7]);
+		// The same corners, each normal reversed.
+		expect([...both.vertices.slice(4 * 6, 4 * 6 + 3)]).toEqual([...one.vertices.slice(0, 3)]);
+		expect([...both.vertices.slice(4 * 6 + 3, 4 * 6 + 6)]).toEqual(
+			[...one.vertices.slice(3, 6)].map((v) => -v),
+		);
+	});
+
 	it("keeps a FileMesh's own studs times its Scale over the part's size", () => {
 		const { vertices } = meshGeometry(mesh, { asset: "1", scale: [0.5, 1, 2] });
 		expect([...vertices.slice(3 * 6, 3 * 6 + 3)]).toEqual([1, 4, 12]);
@@ -191,6 +203,21 @@ describe("a place's meshes", () => {
 		const ids = new Map(parts.map((p, i) => [p, i]));
 		const scene = buildPlaceScene(workspace, (i) => ids.get(i));
 		expect(scene.meshes).toEqual([{ asset: "11" }, { asset: "11", scale: [0.5, 0.25, 0.125] }]);
+		// DoubleSided is a MeshPart's own, and a way of drawing its mesh of its own.
+		const sided = [
+			inst("MeshPart", {
+				CFrame: at,
+				size: [2, 2, 2],
+				MeshId: "rbxassetid://11",
+				DoubleSided: true,
+			}),
+			inst("MeshPart", { CFrame: at, size: [2, 2, 2], MeshId: "rbxassetid://11" }),
+		];
+		const sidedIds = new Map(sided.map((p, i) => [p, i]));
+		expect(buildPlaceScene(inst("Workspace", {}, sided), (i) => sidedIds.get(i)).meshes).toEqual([
+			{ asset: "11", doubleSided: true },
+			{ asset: "11" },
+		]);
 		const words = new Uint32Array(scene.kinds.mesh.data.buffer);
 		const slots = Array.from(
 			{ length: scene.kinds.mesh.count },

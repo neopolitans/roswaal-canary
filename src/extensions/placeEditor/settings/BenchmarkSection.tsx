@@ -20,7 +20,7 @@ export function BenchmarkSection() {
 	return (
 		<Group title="Benchmark">
 			<Row
-				label="Roswaal Benchmark 3"
+				label="Roswaal Benchmark 4"
 				help="Draws fifteen test scenes made by Roswaal, the same on every device, and times each on the GPU and the CPU, with the GPU kept busy so it runs at full speed. The editor is hidden while it runs; the Roswaal logo or Esc stops it. Current settings takes about 2 minutes; Full sweep runs every quality level, about 40 minutes."
 			>
 				<button type="button" className="tb" onClick={() => startBenchmark("current")}>

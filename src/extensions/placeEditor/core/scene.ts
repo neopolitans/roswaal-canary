@@ -303,6 +303,8 @@ export interface SceneMesh {
 	/** The mesh's asset id; empty for one made here (`made`). */
 	asset: string;
 	scale?: number[];
+	/** A MeshPart's DoubleSided: its faces drawn from behind too, as their own back faces. */
+	doubleSided?: boolean;
 	/**
 	 * A mesh made here rather than downloaded, as a union's parts drawn as one
 	 * surface are (see `seams.ts`): position and normal a vertex, in the unit
@@ -581,13 +583,20 @@ export function buildPlaceScene(
 		if (kind === "mesh") {
 			const asset = sceneAssetOf((stringProp(modifier ?? inst, "MeshId") ?? "").trim());
 			const scale = modifier && (vec3(modifier, "Scale") ?? [1, 1, 1]).map((v, a) => v / size[a]);
+			// A MeshPart's own; a SpecialMesh has no DoubleSided.
+			const doubleSided =
+				!modifier && inst.className === "MeshPart" && inst.props.get("DoubleSided")?.value === true;
 			if (asset && (!scale || scale.every(Number.isFinite))) {
-				const key = scale ? `${asset}|${scale.map((v) => v.toFixed(6)).join(",")}` : asset;
+				const key = `${scale ? `${asset}|${scale.map((v) => v.toFixed(6)).join(",")}` : asset}${doubleSided ? "|both" : ""}`;
 				let slot = meshSlots.get(key);
 				if (slot === undefined) {
 					slot = meshes.length;
 					meshSlots.set(key, slot);
-					meshes.push(scale ? { asset, scale } : { asset });
+					meshes.push({
+						asset,
+						...(scale ? { scale } : {}),
+						...(doubleSided ? { doubleSided: true } : {}),
+					});
 				}
 				mesh = slot + 1;
 			}

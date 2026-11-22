@@ -38,8 +38,8 @@ beforeAll(() => {
 afterAll(() => vi.unstubAllGlobals());
 
 describe("Roswaal Benchmark's places", () => {
-	it("is version 3, with fifteen stations in run order", () => {
-		expect(BENCHMARK_VERSION).toBe(3);
+	it("is version 4, with fifteen stations in run order", () => {
+		expect(BENCHMARK_VERSION).toBe(4);
 		expect(STATIONS.map((s) => s.n)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
 		expect(STATIONS.map((s) => s.id).slice(0, 5)).toEqual([
 			"empty",

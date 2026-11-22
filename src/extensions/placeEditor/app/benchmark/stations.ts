@@ -1,5 +1,5 @@
 /**
- * Roswaal Benchmark 3: the places the benchmark draws, generated here from a
+ * Roswaal Benchmark 4: the places the benchmark draws, generated here from a
  * fixed seed rather than stored, a station at a time, with the models and
  * textures it carries (see assets.ts).
  *
@@ -28,13 +28,17 @@ import { loadTanks, loadTextures, TANK_NAMES, TEXTURE_NAMES } from "./assets.js"
  * flight) rather than one frame at a time: an iPad's GPU set its clock by
  * the gaps, so its timers timed the clock as much as the scenes.
  */
-export const BENCHMARK_VERSION = 3;
+export const BENCHMARK_VERSION = 4;
 /**
  * 3: Benchmark 2, with two stations of real assets: Textures (Kenney's
  * prototype textures as Texture instances) and Meshes (96 tanks of
  * MayLizbeth's, 1,788 MeshParts).
  */
-/** How Benchmarks 2 and 3 time their frames: see ViewportController.busyFrames. */
+/**
+ * 4: Benchmark 3, the tanks' skirts and tracks DoubleSided, as their models
+ * have them: the Meshes station draws their back faces too.
+ */
+/** How Benchmarks 2 to 4 time their frames: see ViewportController.busyFrames. */
 export const BENCHMARK_MEASURE = "busy" as const;
 export const BENCHMARK_SEED = 1;
 
@@ -546,6 +550,9 @@ function airPlace(): ViewportPlace {
 /** How many studs a metre is: Roblox's own guide has a stud at 0.28 m. */
 const STUDS_PER_METRE = 1 / 0.28;
 
+/** The parts made as single sheets, DoubleSided in the models' own places. */
+const DOUBLE_SIDED = /skirt|track/i;
+
 /** Its tracks and wheels darker than its hull, as the part names say. */
 const RUNNING_GEAR = /track|suspension|hubcap|wheel|roadwheel/i;
 
@@ -595,6 +602,9 @@ async function meshesPlace(): Promise<ViewportPlace> {
 					material: "SmoothPlastic",
 				});
 				mesh.props.set("MeshId", { type: "Content", value: benchmarkContent(asset) });
+				// Skirts and tracks are single sheets, seen from both sides: their models' own DoubleSided.
+				if (DOUBLE_SIDED.test(piece.name))
+					mesh.props.set("DoubleSided", { type: "Bool", value: true });
 				parts.push(mesh);
 			});
 		});

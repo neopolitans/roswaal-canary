@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.29",
+		date: "2026-11-22",
+		headline: "The Place Editor is 0.22.0: DoubleSided MeshParts, and Roswaal Benchmark 4.",
+		changed: [
+			"**A MeshPart with DoubleSided on is drawn from behind too**, in both renderers, as Studio draws it: a single sheet, such as a tank's side skirt, no longer disappears when seen from its back.",
+			"**Roswaal Benchmark 4** is Benchmark 3 with the tanks' skirts and tracks DoubleSided, as their models have them. Its scores do not compare with Benchmark 3's.",
+			"**The Place Editor is 0.22.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.28",
 		date: "2026-11-22",
 		headline:

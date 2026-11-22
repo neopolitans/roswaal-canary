@@ -504,7 +504,7 @@ export function placeEditorPerformancePage(): DocPage {
 			{
 				t: "p",
 				text:
-					"**Roswaal Benchmark 3** draws fifteen test scenes that Roswaal makes for itself, the same on " +
+					"**Roswaal Benchmark 4** draws fifteen test scenes that Roswaal makes for itself, the same on " +
 					"every device, and times each on the GPU and the CPU, with the GPU kept busy, two frames in " +
 					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Scene view or " +
 					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
@@ -519,7 +519,10 @@ export function placeEditorPerformancePage(): DocPage {
 					["Materials", "Every material in three colours, at three Reflectances"],
 					["Textures", "Kenney's prototype textures as Textures on every face, and a tiled floor"],
 					["Shapes", "1,200 parts of every shape"],
-					["Meshes", "96 tanks of MayLizbeth's, 1,788 MeshParts and 386,520 triangles"],
+					[
+						"Meshes",
+						"96 tanks of MayLizbeth's, 1,788 MeshParts, their skirts and tracks DoubleSided",
+					],
 					["Sky light", "Closed rooms with walls 1 to 8 studs thick, high roofs, struts and rails"],
 					["Sun shadows", "Towers to 400 studs and a field of thin poles"],
 					["Lights", "10, 20, 50 and 100 lights in one area"],

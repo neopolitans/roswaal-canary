@@ -1120,7 +1120,23 @@ export function meshGeometry(mesh: FileMesh, use: SceneMesh): MeshGeometry {
 			vertices[v * 6 + 3 + a] = length > 1e-6 ? n[a] / length : a === 1 ? 1 : 0;
 		}
 	}
-	return { vertices, indices: mesh.indices };
+	if (!use.doubleSided) return { vertices, indices: mesh.indices };
+	// DoubleSided: each face again, wound the other way and facing the other
+	// way, so every pass draws it from behind as it culls the rest.
+	const both = new Float32Array(count * 12);
+	both.set(vertices);
+	for (let v = 0; v < count; v++)
+		for (let a = 0; a < 6; a++)
+			both[(count + v) * 6 + a] = a < 3 ? vertices[v * 6 + a] : -vertices[v * 6 + a];
+	const n = mesh.indices.length;
+	const indices = new Uint32Array(n * 2);
+	indices.set(mesh.indices);
+	for (let i = 0; i < n; i += 3) {
+		indices[n + i] = mesh.indices[i] + count;
+		indices[n + i + 1] = mesh.indices[i + 2] + count;
+		indices[n + i + 2] = mesh.indices[i + 1] + count;
+	}
+	return { vertices: both, indices };
 }
 
 /** A mesh made here (`SceneMesh.made`), already in the space a row is scaled from. */

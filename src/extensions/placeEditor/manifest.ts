@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.6.0",
+	version: "0.7.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.7.0",
+			roswaal: "1.1.0-canary.10",
+			date: "2026-11-22",
+			text: "Antialiasing modes: Off, FXAA, SMAA, MSAA 2×, 4× and 8× where the renderer has them, and still-frame TAA, in Settings and the Rendering panel. Quality levels use FXAA and SMAA before MSAA, and the profile times every mode the device draws.",
+		},
 		{
 			version: "0.6.0",
 			roswaal: "1.1.0-canary.9",

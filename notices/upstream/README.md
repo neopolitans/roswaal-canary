@@ -15,6 +15,7 @@ is written by hand, edited, reformatted, or reconstructed from a template.
 | `vt323.txt` | [`google/fonts` · `ofl/vt323/OFL.txt`](https://github.com/google/fonts/blob/main/ofl/vt323/OFL.txt) | 2026-10-20 |
 | `bakinglab.txt` | [`TheRealMJP/BakingLab` · `LICENSE`](https://github.com/TheRealMJP/BakingLab/blob/master/LICENSE) | 2026-11-05 |
 | `ambientcg.txt` | [Creative Commons · CC0 1.0 legal code](https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt) | 2026-11-06 |
+| `smaa.txt` | [`iryoku/smaa` · `LICENSE.txt`](https://github.com/iryoku/smaa/blob/master/LICENSE.txt) | 2026-11-22 |
 
 `luau-site.txt` covers the Luau logo, whose two squares are the `.luau` file icon. It was fetched
 directly, and reaches a user under **Settings → Licences** as the theme licences do.
@@ -67,3 +68,6 @@ that is not here fails the build rather than shipping a scheme whose terms resol
 These are copies, and copies go stale — an upstream can relicense, move, or correct its own file.
 The build checks that each one is present and reaches the panel; it cannot check them against the
 internet. When a theme's `source` URL changes, re-fetch the licence at the same time.
+`smaa.txt` covers the viewport's SMAA antialiasing: `src/extensions/placeEditor/app/viewport/smaaTables.ts` carries
+the reference's `Textures/AreaTex.h` and `Textures/SearchTex.h` tables, compressed but byte for byte, and
+`antialias.ts` its edge detection, searches, area lookups and blending, carried over to WGSL and GLSL.

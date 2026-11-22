@@ -98,5 +98,15 @@
 		"source": "creativecommons.org · publicdomain/zero/1.0/legalcode.txt",
 		"url": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
 		"retrieved": "2026-11-06"
+	},
+	{
+		"file": "smaa.txt",
+		"name": "SMAA",
+		"holder": "Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez",
+		"spdx": "MIT",
+		"covers": "The viewport's SMAA antialiasing: its area and search tables, and its passes carried over to WGSL and GLSL.",
+		"source": "iryoku/smaa · LICENSE.txt",
+		"url": "https://github.com/iryoku/smaa/blob/master/LICENSE.txt",
+		"retrieved": "2026-11-22"
 	}
 ]

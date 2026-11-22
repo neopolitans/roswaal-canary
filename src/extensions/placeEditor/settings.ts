@@ -7,6 +7,7 @@
  */
 
 import type { SettingGroup } from "../manifest.js";
+import type { AntialiasMode } from "./app/viewport/antialias.js";
 
 /** The place's selection outline, by name, in CSS pixels. */
 export const OUTLINE_WIDTHS = { thin: 2, medium: 3.5, thick: 5 } as const;
@@ -65,12 +66,27 @@ export const VIEWPORT_RENDER_SCALES = [
 ] as const;
 export type ViewportRenderScale = (typeof VIEWPORT_RENDER_SCALES)[number]["value"];
 
-/** Antialiasing: the quality level's, four samples a pixel, or one. */
+/**
+ * Antialiasing: the quality level's, or a mode (see antialias.ts). MSAA's
+ * values are its counts, as canary.7's 4× was stored.
+ */
 export const VIEWPORT_ANTIALIAS = [
 	{ value: "auto", label: "Automatic" },
-	{ value: "4", label: "4×" },
 	{ value: "off", label: "Off" },
+	{ value: "fxaa", label: "FXAA" },
+	{ value: "smaa", label: "SMAA" },
+	{ value: "2", label: "MSAA 2×" },
+	{ value: "4", label: "MSAA 4×" },
+	{ value: "8", label: "MSAA 8×" },
+	{ value: "taa", label: "Still-frame TAA" },
 ] as const;
+
+/** A setting's value as the view's mode; Automatic, none. */
+export function antialiasSetting(value: string | undefined): AntialiasMode | undefined {
+	if (value === "2" || value === "4" || value === "8") return `msaa${value}`;
+	if (value === "off" || value === "fxaa" || value === "smaa" || value === "taa") return value;
+	return undefined;
+}
 export type ViewportAntialias = (typeof VIEWPORT_ANTIALIAS)[number]["value"];
 
 /** The settings as the viewer reads them. */
@@ -134,7 +150,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "antialiasing",
 				title: "Antialiasing",
-				help: "Smooths parts' edges by drawing four samples a pixel. Off draws one, which is faster where filling pixels is the cost. Automatic is the quality level's: off below Level 13, 4× from it. The view is made again when it changes.",
+				help: "Smooths parts' edges. FXAA and SMAA are a pass over the finished frame, cheap on a tablet; MSAA draws 2, 4 or 8 samples a pixel, as the renderer allows; Still-frame TAA averages 16 frames a fraction of a pixel apart once the view is still. Automatic is the quality level's: off below Level 10, FXAA to 12, SMAA to 17, MSAA 4× from 18. The view is made again when it changes.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_ANTIALIAS,

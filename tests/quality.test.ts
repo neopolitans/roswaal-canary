@@ -33,7 +33,7 @@ describe("quality levels", () => {
 		const top = qualityLevel(21);
 		expect(top.features).toEqual(STUDIO_FEATURES);
 		expect(top.distance).toBeNull();
-		expect(top.antialias).toBe(4);
+		expect(top.antialias).toBe("msaa4");
 		expect(top.scale).toBe(1);
 		expect(top.reach).toBe(578);
 	});
@@ -89,9 +89,17 @@ describe("quality levels", () => {
 		for (const q of QUALITY_LEVELS) expect(q.features.sunShadows).toBe(true);
 	});
 
-	it("antialias from 13 and draw fewer pixels below 10", () => {
-		expect(qualityLevel(12).antialias).toBe(1);
-		expect(qualityLevel(13).antialias).toBe(4);
+	it("antialias by a pass from 10, SMAA from 13, MSAA from 18, and draw fewer pixels below 10", () => {
+		expect([1, 9, 10, 12, 13, 17, 18, 21].map((n) => qualityLevel(n).antialias)).toEqual([
+			"off",
+			"off",
+			"fxaa",
+			"fxaa",
+			"smaa",
+			"smaa",
+			"msaa4",
+			"msaa4",
+		]);
 		expect([1, 2, 3, 9, 10].map((n) => qualityLevel(n).scale)).toEqual([0.5, 0.5, 0.75, 0.75, 1]);
 	});
 

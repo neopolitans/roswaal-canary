@@ -13,6 +13,15 @@ import { type LightingParams, lightingBlock } from "../../core/lighting.js";
 import { MATERIAL_TEXTURES, MATERIALS, materialBlock } from "../../core/materials.js";
 import { LIGHT_STRIDE, type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import {
+	AA_GLSL,
+	AA_VS,
+	type AntialiasMode,
+	antialiasInfo,
+	antialiasModes,
+	jitterClip,
+	StillFrames,
+} from "./antialias.js";
+import {
 	boxHidden,
 	boxInView,
 	type Chunk,
@@ -33,6 +42,7 @@ import { lightGridFor } from "./prepare.js";
 import { type Probe, type StageSink, WaitingClock } from "./profile.js";
 import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
 import { DENSITY_FS_GLSL, DENSITY_GLSL, OVERDRAW_GLSL, VIEWS_GLSL } from "./renderViews.js";
+import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
 import {
 	BLOOM_STEEP,
@@ -1141,14 +1151,26 @@ interface WireSource {
 export class WebGl2View implements ViewRenderer {
 	readonly backend = "WebGL2" as const;
 
+	/** Samples a pixel asked for: as far as the GPU goes, see drawnSamples. */
+	readonly samples: number;
+	/** A pipeline or table the view waited on is ready: draw again. */
+	onRedraw?: () => void;
+
 	/**
-	 * Samples a pixel asked for: 4, antialiased, or 1, Settings' Antialiasing
-	 * off; and each sun shadow map's side, in texels, as the quality level sets it.
+	 * The antialiasing asked for (see antialias.ts), and each sun shadow
+	 * map's side, in texels, as the quality level sets them.
 	 */
 	constructor(
-		readonly samples: number = 4,
+		readonly antialias: AntialiasMode = "msaa4",
 		readonly shadowMap: number = CASCADE_MAP,
-	) {}
+	) {
+		this.samples = antialiasInfo(antialias).samples;
+	}
+
+	/** The modes this renderer draws: MSAA as far as the GPU's MAX_SAMPLES. */
+	antialiasModes(): AntialiasMode[] {
+		return antialiasModes("WebGL2", (this.gl?.getParameter(this.gl.MAX_SAMPLES) as number) ?? 4);
+	}
 	private gl!: WebGL2RenderingContext;
 	/**
 	 * Where the browser has EXT_clip_control, depth runs 0 to 1 and is
@@ -1389,7 +1411,238 @@ export class WebGl2View implements ViewRenderer {
 	}
 
 	animates(): boolean {
-		return (this.effects?.last.moving ?? false) || this.occlusionStale;
+		return (
+			(this.effects?.last.moving ?? false) ||
+			this.occlusionStale ||
+			(antialiasInfo(this.antialias).pass === "taa" && this.still.settling)
+		);
+	}
+
+	// -- antialiasing by a pass over the frame: see antialias.ts --------------------------
+
+	/** Where the frame is drawn: the passes' input while one is on, else the canvas. */
+	private outFbo: WebGLFramebuffer | null = null;
+	private aaFbo: WebGLFramebuffer | null = null;
+	private aaColour: WebGLTexture | null = null;
+	private aaDepth: WebGLRenderbuffer | null = null;
+	private aaEdges: { tex: WebGLTexture; fbo: WebGLFramebuffer } | null = null;
+	private aaWeights: { tex: WebGLTexture; fbo: WebGLFramebuffer } | null = null;
+	private aaHistory: { tex: WebGLTexture; fbo: WebGLFramebuffer }[] = [];
+	private aaHistoryRead = 0;
+	private aaArea: WebGLTexture | null = null;
+	private aaSearch: WebGLTexture | null = null;
+	private aaPrograms: Partial<Record<keyof typeof AA_GLSL, WebGLProgram>> = {};
+	private still = new StillFrames();
+	private jitter: [number, number] = [0, 0];
+	private taaWeight = 1;
+
+	/** The passes' programs, and SMAA's tables once they are unpacked; the targets come with resize. */
+	private makeAntialias(): void {
+		const gl = this.gl;
+		const pass = antialiasInfo(this.antialias).pass;
+		if (pass === "none") return;
+		const program = (fs: string) => {
+			const compile = (type: number, src: string) => {
+				const s = gl.createShader(type)!;
+				gl.shaderSource(s, src);
+				gl.compileShader(s);
+				if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+					throw new Error(gl.getShaderInfoLog(s) ?? "antialiasing shader");
+				return s;
+			};
+			const prog = gl.createProgram()!;
+			gl.attachShader(prog, compile(gl.VERTEX_SHADER, AA_VS));
+			gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+			gl.linkProgram(prog);
+			if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+				throw new Error(gl.getProgramInfoLog(prog) ?? "antialiasing program");
+			// The passes' textures on units of their own, past the ones the place keeps.
+			gl.useProgram(prog);
+			const names = ["colourTex", "edgesTex", "blendTex", "areaTex", "searchTex", "historyTex"];
+			names.forEach((n, k) => gl.uniform1i(gl.getUniformLocation(prog, n), 16 + k));
+			return prog;
+		};
+		const wanted: (keyof typeof AA_GLSL)[] =
+			pass === "fxaa"
+				? ["copy", "fxaa"]
+				: pass === "smaa"
+					? ["copy", "edges", "weights", "blend"]
+					: ["copy", "taa"];
+		for (const name of wanted) this.aaPrograms[name] = program(AA_GLSL[name]);
+		if (pass === "smaa")
+			void smaaTables().then(({ area, search }) => {
+				const upload = (
+					bytes: Uint8Array,
+					size: { width: number; height: number },
+					internal: number,
+					format: number,
+					filter: number,
+				) => {
+					const tex = gl.createTexture()!;
+					gl.activeTexture(gl.TEXTURE16);
+					gl.bindTexture(gl.TEXTURE_2D, tex);
+					gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+					gl.texImage2D(
+						gl.TEXTURE_2D,
+						0,
+						internal,
+						size.width,
+						size.height,
+						0,
+						format,
+						gl.UNSIGNED_BYTE,
+						bytes,
+					);
+					gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+					gl.bindTexture(gl.TEXTURE_2D, null);
+					gl.activeTexture(gl.TEXTURE0);
+					return tex;
+				};
+				this.aaArea = upload(area, SMAA_AREA, gl.RG8, gl.RG, gl.LINEAR);
+				this.aaSearch = upload(search, SMAA_SEARCH, gl.R8, gl.RED, gl.NEAREST);
+				this.onRedraw?.();
+			});
+	}
+
+	/** The passes' targets, the canvas's size: the frame's, with depth, and SMAA's or TAA's own. */
+	private makeAaTargets(): void {
+		const gl = this.gl;
+		const pass = antialiasInfo(this.antialias).pass;
+		if (pass === "none") return;
+		for (const t of [
+			this.aaColour,
+			this.aaEdges?.tex,
+			this.aaWeights?.tex,
+			...this.aaHistory.map((h) => h.tex),
+		])
+			if (t) gl.deleteTexture(t);
+		for (const f of [
+			this.aaFbo,
+			this.aaEdges?.fbo,
+			this.aaWeights?.fbo,
+			...this.aaHistory.map((h) => h.fbo),
+		])
+			if (f) gl.deleteFramebuffer(f);
+		if (this.aaDepth) gl.deleteRenderbuffer(this.aaDepth);
+		const texture = (internal: number, filter: number) => {
+			const tex = gl.createTexture()!;
+			gl.activeTexture(gl.TEXTURE16);
+			gl.bindTexture(gl.TEXTURE_2D, tex);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, internal, this.width, this.height);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			gl.activeTexture(gl.TEXTURE0);
+			return tex;
+		};
+		const target = (internal: number, filter: number) => {
+			const tex = texture(internal, filter);
+			const fbo = gl.createFramebuffer()!;
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+			return { tex, fbo };
+		};
+		const frame = target(gl.RGBA8, gl.LINEAR);
+		this.aaColour = frame.tex;
+		this.aaFbo = frame.fbo;
+		this.aaDepth = gl.createRenderbuffer();
+		gl.bindRenderbuffer(gl.RENDERBUFFER, this.aaDepth);
+		gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, this.width, this.height);
+		gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.aaDepth);
+		this.aaEdges = pass === "smaa" ? target(gl.RG8, gl.LINEAR) : null;
+		this.aaWeights = pass === "smaa" ? target(gl.RGBA8, gl.LINEAR) : null;
+		const half = gl.getExtension("EXT_color_buffer_float") !== null;
+		this.aaHistory =
+			pass === "taa" ? [0, 1].map(() => target(half ? gl.RGBA16F : gl.RGBA8, gl.NEAREST)) : [];
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		this.still.reset();
+	}
+
+	/** The pass over the frame, onto the canvas: FXAA's, SMAA's three, or TAA's average and its copy. */
+	private antialiasPasses(): void {
+		const gl = this.gl;
+		const pass = antialiasInfo(this.antialias).pass;
+		gl.disable(gl.DEPTH_TEST);
+		gl.disable(gl.BLEND);
+		gl.disable(gl.CULL_FACE);
+		gl.depthMask(false);
+		gl.viewport(0, 0, this.width, this.height);
+		const bind = (textures: (WebGLTexture | null)[]) =>
+			textures.forEach((tex, k) => {
+				gl.activeTexture(gl.TEXTURE16 + k);
+				gl.bindTexture(gl.TEXTURE_2D, tex);
+			});
+		const run = (
+			prog: WebGLProgram | undefined,
+			into: WebGLFramebuffer | null,
+			textures: (WebGLTexture | null)[],
+		): boolean => {
+			if (!prog) return false;
+			gl.bindFramebuffer(gl.FRAMEBUFFER, into);
+			gl.clearColor(0, 0, 0, 0);
+			gl.clear(gl.COLOR_BUFFER_BIT);
+			gl.useProgram(prog);
+			gl.uniform4f(
+				gl.getUniformLocation(prog, "rt"),
+				1 / this.width,
+				1 / this.height,
+				this.width,
+				this.height,
+			);
+			gl.uniform1f(gl.getUniformLocation(prog, "taa"), this.taaWeight);
+			bind(textures);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+			return true;
+		};
+		const p = this.aaPrograms;
+		const colour = this.aaColour;
+		const copy = () => run(p.copy, null, [colour]);
+		if (pass === "fxaa") {
+			if (!run(p.fxaa, null, [colour])) copy();
+		} else if (pass === "smaa") {
+			if (
+				!p.edges ||
+				!p.weights ||
+				!p.blend ||
+				!this.aaArea ||
+				!this.aaSearch ||
+				!this.aaEdges ||
+				!this.aaWeights
+			)
+				copy();
+			else {
+				run(p.edges, this.aaEdges.fbo, [colour]);
+				run(p.weights, this.aaWeights.fbo, [
+					null,
+					this.aaEdges.tex,
+					null,
+					this.aaArea,
+					this.aaSearch,
+				]);
+				run(p.blend, null, [colour, null, this.aaWeights.tex]);
+			}
+		} else {
+			const from = this.aaHistory[this.aaHistoryRead];
+			const into = this.aaHistory[1 - this.aaHistoryRead];
+			if (!p.taa || !from || !into) copy();
+			else {
+				run(p.taa, into.fbo, [colour, null, null, null, null, from.tex]);
+				this.aaHistoryRead = 1 - this.aaHistoryRead;
+				run(p.copy, null, [into.tex]);
+			}
+		}
+		bind([null, null, null, null, null, null]);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.depthMask(true);
+		gl.enable(gl.DEPTH_TEST);
+		gl.enable(gl.CULL_FACE);
 	}
 
 	// -- the lighting cells: see SKY_CELL, and WebGpuView's fillCells ------------------
@@ -1791,7 +2044,7 @@ export class WebGl2View implements ViewRenderer {
 	): Promise<void> {
 		this.canvas = canvas;
 		const gl = canvas.getContext("webgl2", {
-			antialias: this.samples > 1,
+			antialias: this.samples === 4,
 			powerPreference: "high-performance",
 		});
 		if (!gl) throw new Error("no WebGL2");
@@ -1814,6 +2067,7 @@ export class WebGl2View implements ViewRenderer {
 			FS.replace("#version 300 es\n", "#version 300 es\n#define REFL_PASS\n"),
 		);
 		this.makeReflections();
+		this.makeAntialias();
 		if (clip) this.pre = this.link(VS, FS_DEPTH);
 		// The material table: the same for every frame, so set once.
 		gl.useProgram(this.main.program);
@@ -2257,6 +2511,7 @@ export class WebGl2View implements ViewRenderer {
 		const gl = this.gl;
 		this.width = Math.max(1, width);
 		this.height = Math.max(1, height);
+		this.makeAaTargets();
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.pickColour);
 		gl.renderbufferStorage(gl.RENDERBUFFER, gl.R32UI, this.width, this.height);
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.pickDepth);
@@ -2519,7 +2774,12 @@ export class WebGl2View implements ViewRenderer {
 			}
 			gl.bindTexture(gl.TEXTURE_2D, null);
 		}
-		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFbo);
+		// As the canvas is each frame, which what is drawn over the place is tested against.
+		if (this.outFbo) {
+			gl.clearDepth(1);
+			gl.clear(gl.DEPTH_BUFFER_BIT);
+		}
 		gl.useProgram(this.compositeProgram.program);
 		const at = (name: string) => gl.getUniformLocation(this.compositeProgram.program, name);
 		gl.uniform4f(at("p"), 0, 0, glowing ? this.shape.gain : 0, heat);
@@ -2909,7 +3169,7 @@ export class WebGl2View implements ViewRenderer {
 				perspective(FOV, this.width / this.height, camera.near, camera.far, reverse, reverse),
 				lookAt(camera.eye, camera.at),
 			);
-		const vp = projection(reversed);
+		const vp = jitterClip(projection(reversed), this.jitter, this.width, this.height);
 		gl.uniformMatrix4fv(prog.viewProj, false, vp);
 		gl.uniform4fv(gl.getUniformLocation(prog.program, "R"), renderDebug(this.render));
 		gl.uniform1f(gl.getUniformLocation(prog.program, "logFar"), 1 / Math.log2(camera.far + 1));
@@ -2978,9 +3238,24 @@ export class WebGl2View implements ViewRenderer {
 		return Promise.resolve();
 	}
 
-	draw(camera: Camera): void {
+	draw(camera: Camera, still = false): void {
 		const gl = this.gl;
 		const started = performance.now();
+		// Still-frame TAA, as WebGpuView's.
+		const aaPass = antialiasInfo(this.antialias).pass;
+		this.taaWeight = 1;
+		this.jitter = [0, 0];
+		if (aaPass === "taa") {
+			const moving = this.effects?.last.moving ?? false;
+			const step = this.still.next(
+				still,
+				`${camera.eye.join(",")} ${camera.at.join(",")} ${this.width}x${this.height}`,
+				moving,
+			);
+			this.jitter = step.jitter;
+			this.taaWeight = step.weight;
+		}
+		this.outFbo = aaPass !== "none" && this.aaFbo ? this.aaFbo : null;
 		this.tally = { draws: 0, instances: 0, triangles: 0 };
 		const { mode } = this.render;
 		const show = passesOf(this.render.features);
@@ -3052,8 +3327,14 @@ export class WebGl2View implements ViewRenderer {
 		// after: Neon's glow, or a post effect; and always where depth is
 		// reversed, which needs the float depth only a target of its own has.
 		const post = postActive(this.lighting?.post, postOn);
-		const composite = glowing || post || heat || this.clipControl !== null;
-		gl.bindFramebuffer(gl.FRAMEBUFFER, composite ? this.sceneFbo : null);
+		// MSAA other than the canvas's own 4x is drawn in the scene's target.
+		const composite =
+			glowing ||
+			post ||
+			heat ||
+			this.clipControl !== null ||
+			(this.samples !== 1 && this.samples !== 4);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, composite ? this.sceneFbo : this.outFbo);
 		gl.viewport(0, 0, this.width, this.height);
 		if (heat) gl.clearColor(0, 0, 0, 1);
 		else if (wire) gl.clearColor(0.06, 0.07, 0.09, 1);
@@ -3082,6 +3363,7 @@ export class WebGl2View implements ViewRenderer {
 			clock?.mark("composite");
 		}
 		this.drawMarks(camera);
+		if (this.outFbo) this.antialiasPasses();
 		clock?.mark("marks");
 		clock?.end();
 		this.lastTally = this.tally;

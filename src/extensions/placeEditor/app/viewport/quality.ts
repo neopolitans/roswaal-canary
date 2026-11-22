@@ -10,6 +10,7 @@
  * and antialiasing are this viewer's own: they are a tablet's biggest costs.
  */
 
+import type { AntialiasMode } from "./antialias.js";
 import { featuresAtLevel, type RenderFeatures } from "./renderFeatures.js";
 import type { ViewQuality } from "./view.js";
 
@@ -19,8 +20,11 @@ export interface QualityLevel {
 	distance: number | null;
 	/** The share of the screen's pixels across and down. */
 	scale: number;
-	/** Samples a pixel: 1, or 4 antialiased. */
-	antialias: 1 | 4;
+	/**
+	 * Antialiasing: none, then a pass over the frame, which costs a tablet
+	 * least, then four samples a pixel.
+	 */
+	antialias: AntialiasMode;
 	/** How far from the camera the sun's sharp shadows reach, in studs. */
 	reach: number;
 	/** Each sun shadow map's side, in texels. */
@@ -81,7 +85,7 @@ function makeLevel(level: number): QualityLevel {
 		level,
 		distance: stepped(DISTANCE, level),
 		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : 1,
-		antialias: level >= 13 ? 4 : 1,
+		antialias: level >= 18 ? "msaa4" : level >= 13 ? "smaa" : level >= 10 ? "fxaa" : "off",
 		reach: stepped(REACH, level),
 		shadowMap: level <= 9 ? 512 : level <= 12 ? 1024 : 2048,
 		blobWidth: level <= 9 ? 3 : null,

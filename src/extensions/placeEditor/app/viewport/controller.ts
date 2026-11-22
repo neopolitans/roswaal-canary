@@ -15,6 +15,7 @@ import { type LightingParams, SKY_FACES } from "../../core/lighting.js";
 import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
+import { type AntialiasMode, antialiasInfo } from "./antialias.js";
 import { type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import { boxAround } from "./box.js";
 import {
@@ -119,8 +120,8 @@ export interface ViewportOptions {
 	altClickSteps: boolean;
 	/** The share of the screen's pixels across and down the place is drawn at; Automatic, the quality level's. */
 	renderScale?: number | "auto";
-	/** Samples a pixel: 4, antialiased, or 1, off; unset, the quality level's. Changing it builds the view again. */
-	antialias?: number;
+	/** Antialiasing: see antialias.ts; unset, the quality level's. Changing it builds the view again. */
+	antialias?: AntialiasMode;
 	/** Settings' Quality: a level, 1 to 21, or Automatic. Unset, Level 21. */
 	quality?: number | "auto";
 }
@@ -183,6 +184,8 @@ export interface ViewportState {
 	render: RenderSettings;
 	/** The quality level drawn at, and whether Automatic chose it. */
 	quality: { level: number; auto: boolean };
+	/** The antialiasing modes the view can draw: see antialias.ts. */
+	antialiasModes: AntialiasMode[];
 	/** A profile running: what it is measuring, and how far along. See `runProfile`. */
 	profiling: { phase: string; done: number; of: number } | null;
 	/** The last profile finished, for the Performance panel. */
@@ -375,6 +378,7 @@ export class ViewportController {
 		editable: false,
 		render: DEFAULT_RENDER,
 		quality: { level: TOP_LEVEL, auto: false },
+		antialiasModes: ["off", "fxaa", "smaa", "msaa4", "taa"],
 		profiling: null,
 		profile: null,
 		gizmos: DEFAULT_GIZMOS,
@@ -660,7 +664,7 @@ export class ViewportController {
 			return;
 		}
 		if (!this.view) return;
-		if (was.renderer !== options.renderer || this.view.samples !== this.samples()) {
+		if (was.renderer !== options.renderer || this.view.antialias !== this.antialiasMode()) {
 			void this.restartView();
 			return;
 		}
@@ -1792,7 +1796,7 @@ export class ViewportController {
 			this.auto = new AutoQuality(level);
 			void this.toLevel(level, true);
 		}
-		const samples = this.samples();
+		const samples = this.antialiasMode();
 		const map = this.level().shadowMap;
 		let view: ViewRenderer = gl2 ? new WebGl2View(samples, map) : new WebGpuView(samples, map);
 		let fellBack = false;
@@ -1826,7 +1830,12 @@ export class ViewportController {
 		this.view = view;
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
 		view.onRedraw = () => this.redraw();
-		this.set({ backend: view.backend, fellBack, error: null });
+		this.set({
+			backend: view.backend,
+			fellBack,
+			error: null,
+			antialiasModes: view.antialiasModes(),
+		});
 		if (this.place !== place) view.setScene(this.place ?? place);
 		this.tally.begin();
 		this.loadLooks(view, this.place ?? place);
@@ -1886,8 +1895,8 @@ export class ViewportController {
 		return qualityLevel(this.state.quality.level);
 	}
 
-	/** Samples a pixel: Settings' Antialiasing, or the quality level's. */
-	private samples(): number {
+	/** Antialiasing: Settings', or the quality level's. */
+	private antialiasMode(): AntialiasMode {
 		return this.options.antialias ?? this.level().antialias;
 	}
 
@@ -1920,7 +1929,7 @@ export class ViewportController {
 			this.setRender({ ...this.state.render, preset: levelPreset(q.level), features: q.features });
 		const view = this.view;
 		if (!view) return;
-		if (view.samples !== this.samples() || view.shadowMap !== q.shadowMap) {
+		if (view.antialias !== this.antialiasMode() || view.shadowMap !== q.shadowMap) {
 			await this.restartView();
 			return;
 		}
@@ -1971,6 +1980,8 @@ export class ViewportController {
 	}
 
 	/** Draws at the next frame, once however many things asked. */
+	/** The frame asked for is only the view's own animation's: see redraw. */
+	private stillNext = false;
 	/** When the last frame was drawn, for a frame rate's cap. */
 	private lastDraw = 0;
 
@@ -1994,9 +2005,16 @@ export class ViewportController {
 	/** The GPU's work for the frame before last and the last, under Unlimited. */
 	private inFlight: [Promise<void>, Promise<void>] = [Promise.resolve(), Promise.resolve()];
 
-	private redraw(): void {
+	/**
+	 * Draws at the next frame, once however many things asked. `still`: only
+	 * the view's own animation asked (still-frame TAA's average, beams), so
+	 * the frame shows what the last did.
+	 */
+	private redraw(still = false): void {
+		if (!still) this.stillNext = false;
 		if (this.pending || !this.view) return;
 		this.pending = true;
+		this.stillNext = still;
 		this.wantedAt = performance.now();
 		const draw = (now: number) => {
 			if (!this.view) {
@@ -2018,7 +2036,7 @@ export class ViewportController {
 			// Beams and particles that move keep the view drawing, at the frame
 			// rate's pace, until nothing moves, the Rendering panel turns them
 			// off, or the tab is hidden; shown again, it carries on.
-			if (this.view.animates() && !document.hidden) this.redraw();
+			if (this.view.animates() && !document.hidden) this.redraw(true);
 		};
 		this.nextFrame(draw);
 	}
@@ -2031,7 +2049,8 @@ export class ViewportController {
 		if ((showsHandles(this.state.tool) || this.state.pivotEdit) && this.selection.length > 0)
 			this.drawHandles(camera.eye);
 		this.followGizmos(camera.eye);
-		view.draw(camera);
+		view.draw(camera, this.stillNext);
+		this.stillNext = false;
 		this.drawPivot();
 		this.frames.push(now);
 		this.recordFrame(now);
@@ -2163,7 +2182,7 @@ export class ViewportController {
 			1 +
 			(steps + 1) +
 			3 +
-			2 +
+			view.antialiasModes().length +
 			TOP_LEVEL +
 			alone.reduce((n, g) => n + g.features.length, 0);
 		// The level drawn at, and Automatic's steps, put back after the quality sweep.
@@ -2247,21 +2266,19 @@ export class ViewportController {
 			// Before the antialiasing sweep builds the view again: this one's counts and device.
 			const stats = view.stats();
 			const facts = view.deviceFacts();
-			// Antialiasing: the view built again at one sample a pixel, then at four,
-			// each measured once it has its assets and pipelines, so the two compare.
+			// Antialiasing: the view built again in each mode this device draws,
+			// each measured once it has its assets and pipelines, so they compare.
 			const antialias: Timed[] = [];
-			for (const [samples, label] of [
-				[1, "Off"],
-				[4, "4×"],
-			] as const) {
+			for (const mode of view.antialiasModes()) {
+				const { label } = antialiasInfo(mode);
 				phase(`Antialiasing ${label}`);
-				this.options = { ...options, antialias: samples };
+				this.options = { ...options, antialias: mode };
 				await this.restartView();
 				await this.viewSettled();
 				antialias.push(await this.timeWaited(label, 30));
 			}
 			this.options = options;
-			if (this.samples() !== 4) {
+			if (this.view?.antialias !== this.antialiasMode()) {
 				await this.restartView();
 				await this.viewSettled();
 			}

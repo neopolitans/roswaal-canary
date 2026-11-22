@@ -17,6 +17,7 @@ import {
 	type SceneKind,
 	type SceneMesh,
 } from "../../core/scene.js";
+import type { AntialiasMode } from "./antialias.js";
 import type { Handles } from "./handles.js";
 import { lookAt, type Mat4, multiply } from "./math.js";
 import type { Probe, StageSink } from "./profile.js";
@@ -36,6 +37,9 @@ export interface ViewRenderer {
 	/** Samples a pixel, and each sun shadow map's side: fixed for the view's life. */
 	readonly samples: number;
 	readonly shadowMap: number;
+	/** The antialiasing asked for when the view was made, and those it can draw: see antialias.ts. */
+	readonly antialias: AntialiasMode;
+	antialiasModes(): AntialiasMode[];
 	/** `progress` hears the share of the shaders compiled, 0 to 1, as they are. */
 	init(
 		canvas: HTMLCanvasElement,
@@ -65,7 +69,8 @@ export interface ViewRenderer {
 	 * are drawn again only at the next call without it, when the drag is let go.
 	 */
 	setScene(scene: PlaceScene, moving?: boolean): void;
-	draw(camera: Camera): void;
+	/** `still`: nothing but still-frame TAA's average asked for this frame. */
+	draw(camera: Camera, still?: boolean): void;
 	/** Resolves once the GPU has finished the frames drawn so far. */
 	settled(): Promise<void>;
 	/** The instance id under a pixel, or -1 for the sky. */

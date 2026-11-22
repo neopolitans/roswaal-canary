@@ -23,6 +23,8 @@ import { Ident, SectionHead, useFold } from "../../../app/PanelParts.jsx";
 import { useWorkspaceControls } from "../../../app/Workspace.jsx";
 import { errorMessage } from "../../../core/errorMessage.js";
 import {
+	antialiasSetting,
+	VIEWPORT_ANTIALIAS,
 	VIEWPORT_FRAME_RATES,
 	VIEWPORT_RENDERERS,
 	type ViewportFrameRate,
@@ -30,6 +32,7 @@ import {
 } from "../settings.js";
 import { GizmoSection } from "./GizmoSection.jsx";
 import { placeScene, type SceneSince } from "./sceneApi.js";
+import { antialiasInfo } from "./viewport/antialias.js";
 import {
 	type AssetProgress,
 	assetsMissing,
@@ -63,7 +66,7 @@ import {
 	STAGE_LABELS,
 	stepCosts,
 } from "./viewport/profile.js";
-import { presetLevel } from "./viewport/quality.js";
+import { presetLevel, qualityLevel } from "./viewport/quality.js";
 import {
 	changedFrom,
 	DEBUG_PRESETS,
@@ -1431,12 +1434,17 @@ export function PerformancePanel({ controller }: { controller: ViewportControlle
 export function RenderPanel({
 	controller,
 	onQuality,
+	antialias,
+	onAntialias,
 }: {
 	controller: ViewportController;
 	/** Settings' Quality, chosen here too: "auto" or a level, "1" to "21". */
 	onQuality: (quality: string) => void;
+	/** Settings' Antialiasing, chosen here too: "auto", or a mode's setting value. */
+	antialias: string;
+	onAntialias: (antialias: string) => void;
 }) {
-	const { render, quality } = useViewport(controller);
+	const { render, quality, antialiasModes } = useViewport(controller);
 	const apply = (next: RenderSettings) => controller.setRender(next);
 	const legend = HEAT_LEGEND[render.mode];
 	const viewLegend = renderLegend(render.mode);
@@ -1516,6 +1524,26 @@ export function RenderPanel({
 										</option>
 									))}
 								</optgroup>
+							</select>
+						</label>
+						<label className="render-heat">
+							<span>Antialiasing</span>
+							<select
+								className="tb place-edit-field"
+								value={antialias}
+								onChange={(e) => onAntialias(e.target.value)}
+							>
+								<option value="auto">
+									{`Automatic · ${antialiasInfo(qualityLevel(quality.level).antialias).label}`}
+								</option>
+								{VIEWPORT_ANTIALIAS.filter((a) => {
+									const mode = antialiasSetting(a.value);
+									return mode !== undefined && antialiasModes.includes(mode);
+								}).map((a) => (
+									<option key={a.value} value={a.value}>
+										{a.label}
+									</option>
+								))}
 							</select>
 						</label>
 						{render.mode === "lit" && (

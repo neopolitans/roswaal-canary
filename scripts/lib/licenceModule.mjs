@@ -41,9 +41,9 @@ export async function loadCarried(root) {
 			problems.push(`sources.json names ${source.file}, which is not in notices/upstream/`);
 			continue;
 		}
-		// LF whatever the checkout did, though `.gitattributes` keeps these
-		// files as fetched: the hash is of the text as published.
-		const text = lf(await readFile(join(dir, source.file), "utf8"));
+		// As published, line endings and all: `.gitattributes` keeps these files
+		// as fetched (SMAA's ends its lines CRLF), and the hash is of that text.
+		const text = await readFile(join(dir, source.file), "utf8");
 		const sha256 = createHash("sha256").update(text, "utf8").digest("hex");
 		carried.push({ ...source, path: `notices/upstream/${source.file}`, sha256, text });
 	}

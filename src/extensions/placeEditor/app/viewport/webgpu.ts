@@ -13,6 +13,15 @@ import { type LightingParams, lightingBlock } from "../../core/lighting.js";
 import { MATERIAL_TEXTURES, MATERIALS, materialBlock } from "../../core/materials.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import {
+	AA_WGSL,
+	type AntialiasMode,
+	antialiasFor,
+	antialiasInfo,
+	antialiasModes,
+	jitterClip,
+	StillFrames,
+} from "./antialias.js";
+import {
 	boxHidden,
 	boxInView,
 	type Chunk,
@@ -33,6 +42,7 @@ import { lightGridFor } from "./prepare.js";
 import { type Probe, QueueClock, type Stage, type StageSink } from "./profile.js";
 import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
+import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
 import {
 	BLOOM_STEEP,
@@ -1204,14 +1214,29 @@ struct FarU { invViewProj: mat4x4f, eye: vec4f, size: vec4f };
 export class WebGpuView implements ViewRenderer {
 	readonly backend = "WebGPU" as const;
 
+	/** Samples a pixel the place is drawn with: 1, or 4, WebGPU's only other. */
+	readonly samples: number;
+
 	/**
-	 * Samples a pixel: 4, antialiased, or 1, Settings' Antialiasing off; and
-	 * each sun shadow map's side, in texels, as the quality level sets it.
+	 * The antialiasing asked for (MSAA 2x or 8x is drawn at 4x, the only
+	 * other WebGPU has), and each sun shadow map's side, in texels, as the
+	 * quality level sets them.
 	 */
 	constructor(
-		readonly samples: number = SAMPLES,
+		readonly antialias: AntialiasMode = "msaa4",
 		readonly shadowMap: number = CASCADE_MAP,
-	) {}
+	) {
+		this.aaMode = antialiasFor(antialias, "WebGPU", SAMPLES);
+		this.samples = antialiasInfo(this.aaMode).samples;
+	}
+
+	/** The antialiasing drawn. */
+	private aaMode: AntialiasMode;
+
+	/** The modes this renderer draws: see antialias.ts. */
+	antialiasModes(): AntialiasMode[] {
+		return antialiasModes("WebGPU", SAMPLES);
+	}
 
 	/**
 	 * A pass's colour going to `target`: drawn antialiased and resolved into
@@ -1728,6 +1753,7 @@ export class WebGpuView implements ViewRenderer {
 		});
 		this.layout = layout;
 		this.makeReflections(module, layout, buffers);
+		this.makeAntialias();
 		// The lighting cells, two: one read while the other is filled. See fillCells.
 		this.cells = [0, 1].map(() =>
 			d.createTexture({
@@ -2377,6 +2403,7 @@ export class WebGpuView implements ViewRenderer {
 	resize(width: number, height: number): void {
 		this.width = Math.max(1, width);
 		this.height = Math.max(1, height);
+		this.makeAaTargets();
 		for (const t of [
 			this.msaa,
 			this.depth,
@@ -2628,9 +2655,14 @@ export class WebGpuView implements ViewRenderer {
 	}
 
 	private setCamera(camera: Camera): void {
-		const vp = multiply(
-			perspective(FOV, this.width / this.height, camera.near, camera.far, true, true),
-			lookAt(camera.eye, camera.at),
+		const vp = jitterClip(
+			multiply(
+				perspective(FOV, this.width / this.height, camera.near, camera.far, true, true),
+				lookAt(camera.eye, camera.at),
+			),
+			this.jitter,
+			this.width,
+			this.height,
 		);
 		const u = new Float32Array(UNIFORM_MATERIALS / 4);
 		u.set(vp, 0);
@@ -2662,8 +2694,23 @@ export class WebGpuView implements ViewRenderer {
 		}
 	}
 
-	draw(camera: Camera): void {
+	draw(camera: Camera, still = false): void {
 		const started = performance.now();
+		// Still-frame TAA: a frame aside by a fraction of a pixel, while the
+		// camera and the place are as they were; otherwise a fresh one.
+		const aaPass = antialiasInfo(this.aaMode).pass;
+		this.taaWeight = 1;
+		this.jitter = [0, 0];
+		if (aaPass === "taa") {
+			const moving = this.effects?.last.moving ?? false;
+			const step = this.still.next(
+				still,
+				`${camera.eye.join(",")} ${camera.at.join(",")} ${this.width}x${this.height}`,
+				moving,
+			);
+			this.jitter = step.jitter;
+			this.taaWeight = step.weight;
+		}
 		this.tally = { draws: 0, instances: 0, triangles: 0 };
 		const { mode } = this.render;
 		const show = passesOf(this.render.features);
@@ -2711,7 +2758,11 @@ export class WebGpuView implements ViewRenderer {
 		// and the wireframe's passes go on from its depth.
 		const early = passes.occlusion;
 		const load = early && mode !== "overdraw" && mode !== "density";
-		const screen = this.context.getCurrentTexture().createView();
+		const canvasView = this.context.getCurrentTexture().createView();
+		// Antialiasing by a pass over the frame: everything is drawn into its
+		// input, and the pass draws the canvas.
+		const aaOn = aaPass !== "none" && !!this.aaColour && !this.probe;
+		const screen = aaOn ? this.aaColour!.createView() : canvasView;
 		// A BloomEffect blooms the whole picture, Neon or not: see fsBright.
 		const bloom = postOn && !!this.lighting?.post.bloom && show.glow && !heat && !wire && !tinted;
 		const glowing =
@@ -2888,6 +2939,7 @@ export class WebGpuView implements ViewRenderer {
 			pass.draw(this.overlay.count);
 		}
 		pass.end();
+		if (aaOn) this.antialiasPasses(encoder, canvasView);
 		const read = this.readStamps(encoder);
 		this.device.queue.submit([encoder.finish()]);
 		if (clock) {
@@ -2994,7 +3046,11 @@ export class WebGpuView implements ViewRenderer {
 	}
 
 	animates(): boolean {
-		return (this.effects?.last.moving ?? false) || this.occlusionStale;
+		return (
+			(this.effects?.last.moving ?? false) ||
+			this.occlusionStale ||
+			(antialiasInfo(this.aaMode).pass === "taa" && this.still.settling)
+		);
 	}
 
 	// -- occlusion: the solid parts' depth, small, read back a frame late ----------
@@ -3411,6 +3467,210 @@ export class WebGpuView implements ViewRenderer {
 				[w, h],
 			);
 		if (this.skyImages) this.rebind();
+	}
+
+	// -- antialiasing by a pass over the frame: see antialias.ts --------------------------
+
+	private aaPipes: Partial<
+		Record<"copy" | "fxaa" | "edges" | "weights" | "blend" | "taa", GPURenderPipeline>
+	> = {};
+	private aaLayout: GPUBindGroupLayout | null = null;
+	private aaUniform: GPUBuffer | null = null;
+	private aaLinear: GPUSampler | null = null;
+	private aaPoint: GPUSampler | null = null;
+	/** The frame as drawn, before the pass: in the canvas's format. */
+	private aaColour: GPUTexture | null = null;
+	private aaEdges: GPUTexture | null = null;
+	private aaWeights: GPUTexture | null = null;
+	/** TAA's average, two to read one and write the other. */
+	private aaHistory: GPUTexture[] = [];
+	private aaHistoryRead = 0;
+	private aaArea: GPUTexture | null = null;
+	private aaSearch: GPUTexture | null = null;
+	private aaBlank: GPUTexture | null = null;
+	private still = new StillFrames();
+	private jitter: [number, number] = [0, 0];
+	private taaWeight = 1;
+
+	/** The passes' pipelines, and SMAA's tables once they are unpacked. */
+	private makeAntialias(): void {
+		const pass = antialiasInfo(this.aaMode).pass;
+		if (pass === "none") return;
+		const d = this.device;
+		const module = d.createShaderModule({ code: AA_WGSL });
+		const tex = { texture: {} } as const;
+		this.aaLayout = d.createBindGroupLayout({
+			entries: [
+				{ binding: 0, visibility: STAGE.FRAGMENT, buffer: {} },
+				{ binding: 1, visibility: STAGE.FRAGMENT, ...tex },
+				{ binding: 2, visibility: STAGE.FRAGMENT, sampler: {} },
+				{ binding: 3, visibility: STAGE.FRAGMENT, sampler: {} },
+				{ binding: 4, visibility: STAGE.FRAGMENT, ...tex },
+				{ binding: 5, visibility: STAGE.FRAGMENT, ...tex },
+				{ binding: 6, visibility: STAGE.FRAGMENT, ...tex },
+				{ binding: 7, visibility: STAGE.FRAGMENT, ...tex },
+				{ binding: 8, visibility: STAGE.FRAGMENT, ...tex },
+			],
+		});
+		this.aaUniform = d.createBuffer({ size: 32, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+		this.aaLinear = d.createSampler({ magFilter: "linear", minFilter: "linear" });
+		this.aaPoint = d.createSampler({ magFilter: "nearest", minFilter: "nearest" });
+		this.aaBlank = d.createTexture({
+			size: [1, 1],
+			format: "rgba8unorm",
+			usage: TEXTURE.TEXTURE_BINDING,
+		});
+		const layout = d.createPipelineLayout({ bindGroupLayouts: [this.aaLayout] });
+		const make = (entry: string, format: GPUTextureFormat, key: keyof WebGpuView["aaPipes"]) =>
+			this.pipeline((p) => (this.aaPipes[key] = p), {
+				layout,
+				vertex: { module, entryPoint: "vs" },
+				fragment: { module, entryPoint: entry, targets: [{ format }] },
+				primitive: { topology: "triangle-list" },
+			});
+		make("fsCopy", this.format, "copy");
+		if (pass === "fxaa") make("fsFxaa", this.format, "fxaa");
+		if (pass === "smaa") {
+			make("fsEdges", "rg8unorm", "edges");
+			make("fsWeights", "rgba8unorm", "weights");
+			make("fsBlend", this.format, "blend");
+			void smaaTables().then(({ area, search }) => {
+				const upload = (
+					bytes: Uint8Array,
+					size: { width: number; height: number; channels: number },
+					format: GPUTextureFormat,
+				) => {
+					const texture = d.createTexture({
+						size: [size.width, size.height],
+						format,
+						usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST,
+					});
+					d.queue.writeTexture({ texture }, bytes, { bytesPerRow: size.width * size.channels }, [
+						size.width,
+						size.height,
+					]);
+					return texture;
+				};
+				this.aaArea = upload(area, SMAA_AREA, "rg8unorm");
+				this.aaSearch = upload(search, SMAA_SEARCH, "r8unorm");
+				this.onRedraw?.();
+			});
+		}
+		if (pass === "taa") make("fsTaa", "rgba16float", "taa");
+		this.makeAaTargets();
+	}
+
+	/** The passes' targets, the canvas's size. */
+	private makeAaTargets(): void {
+		const pass = antialiasInfo(this.aaMode).pass;
+		if (pass === "none" || !this.aaLayout) return;
+		for (const t of [this.aaColour, this.aaEdges, this.aaWeights, ...this.aaHistory]) t?.destroy();
+		const d = this.device;
+		const size = [this.width, this.height];
+		const target = (format: GPUTextureFormat) =>
+			d.createTexture({ size, format, usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING });
+		this.aaColour = target(this.format);
+		this.aaEdges = pass === "smaa" ? target("rg8unorm") : null;
+		this.aaWeights = pass === "smaa" ? target("rgba8unorm") : null;
+		this.aaHistory = pass === "taa" ? [target("rgba16float"), target("rgba16float")] : [];
+		this.still.reset();
+	}
+
+	/** The pass over the frame, into the canvas: FXAA's, SMAA's three, or TAA's average and its copy. */
+	private antialiasPasses(encoder: GPUCommandEncoder, canvas: GPUTextureView): void {
+		const d = this.device;
+		const pass = antialiasInfo(this.aaMode).pass;
+		const blank = this.aaBlank!.createView();
+		d.queue.writeBuffer(
+			this.aaUniform!,
+			0,
+			new Float32Array([
+				1 / this.width,
+				1 / this.height,
+				this.width,
+				this.height,
+				this.taaWeight,
+				0,
+				0,
+				0,
+			]),
+		);
+		const group = (t: {
+			colour?: GPUTexture;
+			edges?: GPUTexture;
+			blend?: GPUTexture;
+			history?: GPUTexture;
+			tables?: boolean;
+		}) =>
+			d.createBindGroup({
+				layout: this.aaLayout!,
+				entries: [
+					{ binding: 0, resource: { buffer: this.aaUniform! } },
+					{ binding: 1, resource: t.colour?.createView() ?? blank },
+					{ binding: 2, resource: this.aaLinear! },
+					{ binding: 3, resource: this.aaPoint! },
+					{ binding: 4, resource: t.edges?.createView() ?? blank },
+					{ binding: 5, resource: t.blend?.createView() ?? blank },
+					{ binding: 6, resource: t.tables ? this.aaArea!.createView() : blank },
+					{ binding: 7, resource: t.tables ? this.aaSearch!.createView() : blank },
+					{ binding: 8, resource: t.history?.createView() ?? blank },
+				],
+			});
+		const run = (
+			pipe: GPURenderPipeline | undefined,
+			into: GPUTextureView,
+			bind: GPUBindGroup,
+			clear = false,
+		): boolean => {
+			if (!pipe) return false;
+			const p = encoder.beginRenderPass({
+				colorAttachments: [
+					{
+						view: into,
+						loadOp: clear ? "clear" : "load",
+						clearValue: { r: 0, g: 0, b: 0, a: 0 },
+						storeOp: "store",
+					},
+				],
+			});
+			p.setPipeline(pipe);
+			p.setBindGroup(0, bind);
+			p.draw(3);
+			p.end();
+			return true;
+		};
+		const colour = this.aaColour!;
+		const copy = () => run(this.aaPipes.copy, canvas, group({ colour }), true);
+		if (pass === "fxaa") {
+			if (!run(this.aaPipes.fxaa, canvas, group({ colour }), true)) copy();
+			return;
+		}
+		if (pass === "smaa") {
+			const { edges, weights, blend } = this.aaPipes;
+			if (!edges || !weights || !blend || !this.aaArea || !this.aaSearch) {
+				copy();
+				return;
+			}
+			run(edges, this.aaEdges!.createView(), group({ colour }), true);
+			run(
+				weights,
+				this.aaWeights!.createView(),
+				group({ edges: this.aaEdges!, tables: true }),
+				true,
+			);
+			run(blend, canvas, group({ colour, blend: this.aaWeights! }), true);
+			return;
+		}
+		// TAA: this frame into the average, then the average onto the canvas.
+		const from = this.aaHistory[this.aaHistoryRead];
+		const into = this.aaHistory[1 - this.aaHistoryRead];
+		if (!this.aaPipes.taa || !from || !into) {
+			copy();
+			return;
+		}
+		run(this.aaPipes.taa, into.createView(), group({ colour, history: from }), true);
+		this.aaHistoryRead = 1 - this.aaHistoryRead;
+		run(this.aaPipes.copy, canvas, group({ colour: into }), true);
 	}
 
 	/** The shaders' textures and samplers, made again when one is replaced. */

@@ -21,6 +21,7 @@ export type {
 } from "./manifest.js";
 export { PLACE_EDITOR, type PlaceEditorModule } from "./placeEditor/manifest.js";
 export {
+	antialiasSetting,
 	OUTLINE_WIDTHS,
 	type OutlineWidth,
 	type PlaceEditorSettings,

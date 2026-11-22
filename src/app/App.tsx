@@ -32,6 +32,7 @@ import type { PlaceInstanceInfo } from "../core/rbx/browse.js";
 import { indentUnit, type NodeDef, type RoswaalConfig } from "../core/schema.js";
 import { unformattedGroups, unformattedMessage, unformattedWhat } from "../core/unformatted.js";
 import {
+	antialiasSetting,
 	EXTENSIONS,
 	OUTLINE_WIDTHS,
 	PLACE_EDITOR,
@@ -480,8 +481,7 @@ export function App() {
 					sceneView.renderScale === "auto" || sceneView.renderScale === undefined
 						? "auto"
 						: Number(sceneView.renderScale) / 100,
-				antialias:
-					sceneView.antialiasing === "off" ? 1 : sceneView.antialiasing === "4" ? 4 : undefined,
+				antialias: antialiasSetting(sceneView.antialiasing),
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
@@ -2760,6 +2760,8 @@ export function App() {
 							<viewer.RenderPanel
 								controller={viewport}
 								onQuality={(quality) => placeEditor.set("quality", quality)}
+								antialias={sceneView.antialiasing ?? "auto"}
+								onAntialias={(value) => placeEditor.set("antialiasing", value)}
 							/>
 						) : undefined,
 					performance:

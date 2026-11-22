@@ -269,6 +269,21 @@ export const ATTRIBUTIONS: Attribution[] = [
 		url: "https://ambientcg.com/",
 	},
 	{
+		name: "SMAA",
+		usage: "included",
+		licenceFile: "smaa",
+		holder: "Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez",
+		licence: "MIT",
+		ships: true,
+		where:
+			"`src/extensions/placeEditor/app/viewport/smaaTables.ts`, `src/extensions/placeEditor/app/viewport/antialias.ts`. Licence: " +
+			"`notices/upstream/smaa.txt`.",
+		note:
+			"Roswaal's SMAA antialiasing uses the reference implementation's area and search tables, " +
+			"and its passes carried over to WGSL and GLSL.",
+		url: "https://github.com/iryoku/smaa",
+	},
+	{
 		name: "BakingLab",
 		usage: "included",
 		licenceFile: "bakinglab",

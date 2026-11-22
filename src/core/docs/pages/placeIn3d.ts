@@ -477,7 +477,7 @@ export function placeEditorPerformancePage(): DocPage {
 					],
 					[
 						"Camera moving",
-						"The camera orbited, panned and zoomed as a drag and a pinch move it, and moved by each touch stick, 60 frames each from where it was: the frame, the GPU's stages, and how often the reflection cube and the near sky maps were drawn again",
+						"The camera orbited, panned and zoomed as a drag and a pinch move it, and moved by each touch stick, for one second each from where it was, at the same speed on every device: the frame, the GPU's stages, and how often the reflection cube and the near sky maps were drawn again",
 					],
 					[
 						"Quality levels",
@@ -504,8 +504,9 @@ export function placeEditorPerformancePage(): DocPage {
 			{
 				t: "p",
 				text:
-					"**Roswaal Benchmark 1** draws thirteen test scenes that Roswaal makes for itself, the same on " +
-					"every device, and times each on the GPU and the CPU. Start it from Settings › Scene view or " +
+					"**Roswaal Benchmark 2** draws thirteen test scenes that Roswaal makes for itself, the same on " +
+					"every device, and times each on the GPU and the CPU, with the GPU kept busy, two frames in " +
+					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Scene view or " +
 					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
 					"**Full sweep** runs every quality level, about 40 minutes. The editor is hidden while it runs. " +
 					"The Roswaal logo, or Esc, stops it and brings the editor back as it was.",

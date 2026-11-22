@@ -24,8 +24,8 @@ const parts = (place: {
 }) => SCENE_KINDS.reduce((n, k) => n + place.kinds[k].count + place.translucent[k].count, 0);
 
 describe("Roswaal Benchmark 1's places", () => {
-	it("is version 1, with thirteen stations in run order", () => {
-		expect(BENCHMARK_VERSION).toBe(1);
+	it("is version 2, with thirteen stations in run order", () => {
+		expect(BENCHMARK_VERSION).toBe(2);
 		expect(STATIONS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
 		expect(STATIONS.find((s) => s.id === "lights")?.variants.map((v) => v.label)).toEqual([
 			"10 lights",
@@ -124,5 +124,9 @@ describe("a benchmark's scores", () => {
 		expect(text).toMatch(/9 Station 9\s+4\.00 ms\s+20\.0 ms\s+19\.0 ms[^\n]*CPU-bound/);
 		expect(text).not.toMatch(/1 Station 1[^\n]*CPU-bound/);
 		expect(text).toContain("CPU: effects 1.00 ms · culling 0.50 ms");
+		const busy = benchmarkReport({ ...result, benchmark: 2, measure: "busy" });
+		expect(busy).toContain("Measured with the GPU kept busy, two frames in flight");
+		expect(busy).toMatch(/Station\s+GPU\s+Interval/);
+		expect(busy).toContain("by the frame interval");
 	});
 });

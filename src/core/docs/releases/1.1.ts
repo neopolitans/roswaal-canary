@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.24",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.18.0: Roswaal Benchmark 2, which times its scenes with the GPU kept busy.",
+		changed: [
+			"**Roswaal Benchmark 2** draws Benchmark 1's scenes with two frames in flight, the next always queued, rather than one at a time. An iPad's GPU slowed itself in the gaps, so 1 light and 100 took the same time, and an empty scene 7.7 ms in one pass and 13.8 ms in the next. Its scores do not compare with Benchmark 1's.",
+			"**Its report gives the time between frames**, rather than a frame waited for, beside the GPU's own time.",
+			"**The camera moves by the clock in a benchmark and a profile**: each motion runs for one second at the same speed on every device. It moved a set step each frame, so a GPU drawing 280 frames a second spun it four times as fast as an iPad.",
+			"**The Place Editor is 0.18.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.23",
 		date: "2026-11-22",
 		headline:

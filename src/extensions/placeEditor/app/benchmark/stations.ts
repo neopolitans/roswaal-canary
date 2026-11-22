@@ -19,7 +19,14 @@ import { MATERIALS } from "../../core/materials.js";
 import { buildPlaceScene } from "../../core/scene.js";
 import type { ViewportPlace } from "../viewport/controller.js";
 
-export const BENCHMARK_VERSION = 1;
+/**
+ * 2: Benchmark 1's scenes, measured with the GPU kept busy (two frames in
+ * flight) rather than one frame at a time: an iPad's GPU set its clock by
+ * the gaps, so its timers timed the clock as much as the scenes.
+ */
+export const BENCHMARK_VERSION = 2;
+/** How Benchmark 2 times its frames: see ViewportController.busyFrames. */
+export const BENCHMARK_MEASURE = "busy" as const;
 export const BENCHMARK_SEED = 1;
 
 /** Where a station's camera stands, and what it looks at. */

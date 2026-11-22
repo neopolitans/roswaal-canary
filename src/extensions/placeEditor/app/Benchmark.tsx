@@ -20,7 +20,12 @@ import {
 	benchmarkReport,
 	runScore,
 } from "./benchmark/result.js";
-import { BENCHMARK_SEED, BENCHMARK_VERSION, STATIONS } from "./benchmark/stations.js";
+import {
+	BENCHMARK_MEASURE,
+	BENCHMARK_SEED,
+	BENCHMARK_VERSION,
+	STATIONS,
+} from "./benchmark/stations.js";
 import {
 	type BenchmarkProgress,
 	ViewportController,
@@ -93,6 +98,7 @@ export function Benchmark({
 					stations: STATIONS,
 					kind,
 					passes,
+					measure: BENCHMARK_MEASURE,
 					benchmark: BENCHMARK_VERSION,
 					seed: BENCHMARK_SEED,
 					cancelled: () => stopped,

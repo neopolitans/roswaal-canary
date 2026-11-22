@@ -2010,21 +2010,105 @@ export class ViewportController {
 	 * second, from where it is, and put back after each: its frames, stages,
 	 * and what was drawn again.
 	 */
+	/**
+	 * `n` frames drawn with the GPU kept busy: the next always queued behind
+	 * the one it is drawing, two in flight. A GPU that sets its own clock by
+	 * how hard it is worked (Apple's) then works at full speed, and its timers
+	 * time the work rather than the clock: drawn one at a time and waited for,
+	 * an iPad Mini's scenes of 1 and of 100 lights both took about 18.8 ms,
+	 * and an empty one 7.7 ms in one pass and 13.8 in the next (Benchmark 1,
+	 * 22 Nov 2026). Answers the time between frames finishing.
+	 */
+	private async busyFrames(
+		n: number,
+		before?: (frame: number) => void,
+		after?: () => void,
+		budget = Number.POSITIVE_INFINITY,
+	): Promise<number[]> {
+		const view = this.view;
+		if (!view) return [];
+		const done: number[] = [];
+		const inFlight: Promise<void>[] = [];
+		const from = performance.now();
+		for (let i = 0; i < n; i++) {
+			if (this.view !== view) break;
+			if (i >= PROFILE_FEWEST && performance.now() - from > budget) break;
+			before?.(i);
+			this.drawOnce(performance.now());
+			after?.();
+			inFlight.push(
+				view.finished().then(() => {
+					done.push(performance.now());
+				}),
+			);
+			if (inFlight.length >= 2) await inFlight.shift();
+		}
+		await Promise.all(inFlight);
+		return done.slice(1).map((t, i) => t - done[i]);
+	}
+
+	/** The GPU kept busy for `ms` first, so it is at the clock full work gives it. */
+	private async warmBusy(ms: number): Promise<void> {
+		const until = performance.now() + ms;
+		while (performance.now() < until && this.view) await this.busyFrames(10);
+	}
+
+	/**
+	 * What a frame costs with the GPU kept busy: the time between frames, the
+	 * GPU's own time for one (its timers, where it has them) and the page's.
+	 */
+	private async timeBusy(label: string, n: number): Promise<Timed> {
+		await this.view?.pipelinesReady();
+		await this.warmBusy(500);
+		const view = this.view;
+		const gpu: number[] = [];
+		const cpu: number[] = [];
+		const effects: number[] = [];
+		const culling: number[] = [];
+		view?.setProfiling(null, (f) => gpu.push(Object.values(f).reduce((a, b) => a + (b ?? 0), 0)));
+		const intervals = await this.busyFrames(n, undefined, () => {
+			const s = this.view?.stats();
+			if (!s) return;
+			cpu.push(s.cpu);
+			if (s.cpuSteps) {
+				effects.push(s.cpuSteps.effects);
+				culling.push(s.cpuSteps.culling);
+			}
+		});
+		// The last frames' stamps are read back after they finish.
+		await view?.settled();
+		await new Promise((r) => setTimeout(r, 50));
+		view?.setProfiling(null);
+		return {
+			label,
+			...spread(intervals),
+			...(gpu.length >= Math.min(5, n) ? { gpuMs: spread(gpu).median } : {}),
+			...(cpu.length > 0 ? { cpuMs: spread(cpu).median } : {}),
+			...(effects.length > 0
+				? { cpuSteps: { effects: spread(effects).median, culling: spread(culling).median } }
+				: {}),
+		};
+	}
+
 	private async timeMoving(
 		phase: (name: string) => void,
 		only?: readonly string[],
+		busy = false,
 	): Promise<MovingRow[]> {
-		const dt = 1 / 60;
-		const forward = () => {
+		// Each motion by the clock, not by the frame: a drag of 720 px a second
+		// (12 a frame at 60), for MOVING_MS, so every device takes the same
+		// path at the same speed. By the frame, a GPU drawing 280 a second spun
+		// the camera four times as fast as an iPad's 60 and was done in 0.2 s.
+		const forward = (dt: number) => {
 			const b = this.back();
 			const d = BASE_SPEED * this.state.speed * 0.9 * dt;
 			for (let a = 0; a < 3; a++) this.cam.target[a] -= b[a] * d;
 		};
-		const motions: [string, () => void][] = [
-			["Orbit drag", () => this.orbit(12, 0)],
-			["Pan drag", () => this.pan(12, 0)],
-			["Pinch zoom", () => (this.cam.dist = Math.max(2, this.cam.dist * 0.985))],
-			["Look stick", () => this.look(0.7 * LOOK_RATE * dt, 0)],
+		const motions: [string, (dt: number) => void][] = [
+			["Orbit drag", (dt) => this.orbit(720 * dt, 0)],
+			["Pan drag", (dt) => this.pan(720 * dt, 0)],
+			["Pinch zoom", (dt) => (this.cam.dist = Math.max(2, this.cam.dist * 0.985 ** (60 * dt)))],
+			["Look stick", (dt) => this.look(0.7 * LOOK_RATE * dt, 0)],
 			["Move stick", forward],
 		];
 		const from = { ...this.cam, target: [...this.cam.target] };
@@ -2041,10 +2125,27 @@ export class ViewportController {
 				(each) => frames.push(each),
 				(each) => gpuFrames.push(each),
 			);
-			const times = await this.waitedFrames(60, PROFILE_BUDGET, step);
-			view.setProfiling(null);
+			if (busy) {
+				await this.warmBusy(300);
+				// Two frames in flight cross the waited stages' sums: kept to the GPU's own.
+				view.setProfiling(
+					() => {},
+					(each) => gpuFrames.push(each),
+				);
+			}
+			let last = performance.now();
+			const byClock = () => {
+				const now = performance.now();
+				// A stall (a tab hidden) is not a leap along the path.
+				step(Math.min(0.1, (now - last) / 1000));
+				last = now;
+			};
+			const times = busy
+				? await this.busyFrames(MOVING_MOST, byClock, undefined, MOVING_MS)
+				: await this.waitedFrames(MOVING_MOST, MOVING_MS, byClock);
 			await view.settled();
 			await new Promise((r) => setTimeout(r, 50));
+			view.setProfiling(null);
 			const now = view.redraws?.() ?? null;
 			rows.push({
 				label,
@@ -2111,6 +2212,8 @@ export class ViewportController {
 		kind: BenchmarkKind;
 		/** 2: a second pass over each level's stations, still frames again, for each station's own noise. */
 		passes?: 1 | 2;
+		/** "busy": frames timed with the GPU kept busy (Benchmark 2); "waited", one at a time (Benchmark 1). */
+		measure?: "waited" | "busy";
 		benchmark: number;
 		seed: number;
 		onProgress: (progress: BenchmarkProgress) => void;
@@ -2124,6 +2227,9 @@ export class ViewportController {
 		const levels: (number | null)[] =
 			run.kind === "sweep" ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
 		const passes = run.passes ?? 1;
+		const busy = run.measure === "busy";
+		const timeStill = (label: string) =>
+			busy ? this.timeBusy(label, 60) : this.timeWaited(label, 60);
 		const variants = run.stations.reduce((n, s) => n + s.variants.length, 0) * passes;
 		const facts = this.view.deviceFacts();
 		const result: BenchmarkResult = {
@@ -2131,6 +2237,7 @@ export class ViewportController {
 			seed: run.seed,
 			kind: run.kind,
 			...((run.passes ?? 1) > 1 ? { passes: run.passes } : {}),
+			...(busy ? { measure: "busy" as const } : {}),
 			release: RELEASES[0]?.version ?? "",
 			date: new Date().toISOString(),
 			renderer: this.view.backend,
@@ -2181,21 +2288,21 @@ export class ViewportController {
 								await this.waitedFrames(1, 1000);
 						}
 						report(label, station, variant.label, "Still");
-						const still = await this.timeWaited(station.name, 60);
+						const still = await timeStill(station.name);
 						lastFrame = still.median;
 						report(label, station, variant.label, "Stages");
 						const view = this.view;
 						if (!view) break;
-						const frames: StageFrame[] = [];
 						const gpuFrames: StageFrame[] = [];
 						view.setProfiling(
-							(each) => frames.push(each),
+							() => {},
 							(each) => gpuFrames.push(each),
 						);
-						await this.waitedFrames(30, PROFILE_BUDGET);
-						view.setProfiling(null);
+						if (busy) await this.busyFrames(30);
+						else await this.waitedFrames(30, PROFILE_BUDGET);
 						await view.settled();
 						await new Promise((r) => setTimeout(r, 50));
+						view.setProfiling(null);
 						report(
 							label,
 							station,
@@ -2205,6 +2312,7 @@ export class ViewportController {
 						const moving = await this.timeMoving(
 							(name) => report(label, station, variant.label, name),
 							station.allMotions ? undefined : ["Orbit drag"],
+							busy,
 						);
 						const stats = this.view?.stats();
 						rows.push({
@@ -2244,7 +2352,7 @@ export class ViewportController {
 								while (performance.now() < until && !run.cancelled())
 									await this.waitedFrames(1, 1000);
 							}
-							row.repeat = await this.timeWaited(station.name, 60);
+							row.repeat = await timeStill(station.name);
 							done++;
 						}
 				}
@@ -3535,6 +3643,10 @@ const WITHOUT_GROUPS = ["Light", "Shadows"];
 /** How long one of a profile's measurements may take, and the fewest frames it times. */
 const PROFILE_BUDGET = 1500;
 const PROFILE_FEWEST = 8;
+/** How long each motion of a profile or benchmark runs: one second, as many frames as that takes. */
+const MOVING_MS = 1000;
+/** A bound on those frames, for a display or GPU far beyond any yet. */
+const MOVING_MOST = 4000;
 
 /**
  * The smallest step the page's clock takes: Safari rounds `performance.now`

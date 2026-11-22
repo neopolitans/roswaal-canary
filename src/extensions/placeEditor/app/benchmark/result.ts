@@ -54,6 +54,12 @@ export interface BenchmarkResult {
 	kind: BenchmarkKind;
 	/** 2 where each station was measured twice (its `repeat`); absent in a run of one pass. */
 	passes?: number;
+	/**
+	 * "busy": frames timed with the GPU kept busy, two in flight, so the
+	 * still frame's `median` is the time between frames (Benchmark 2).
+	 * Absent: one at a time, waited for (Benchmark 1).
+	 */
+	measure?: "busy";
 	release: string;
 	date: string;
 	renderer: string;
@@ -119,11 +125,15 @@ export function benchmarkReport(result: BenchmarkResult): string {
 		`Renderer: ${result.renderer} · GPU: ${result.gpu} · GPU timers: ${result.gpuTimers ? "yes" : "no"} · Pixel ratio ${Number(result.pixelRatio.toFixed(2))}`,
 	);
 	lines.push(`Browser: ${result.userAgent}`);
+	if (result.measure === "busy")
+		lines.push(
+			"Measured with the GPU kept busy, two frames in flight: the time between frames, and the GPU's own time for one, at its full clock.",
+		);
 	lines.push(
 		`Seed ${result.seed} · ${result.date}${(result.passes ?? 1) > 1 ? " · each station twice" : ""}${result.cancelled ? " · stopped before the end" : ""}`,
 	);
 	lines.push(
-		`Score: ${score(total.gpu)} by the GPU's time, ${score(total.waited)} by the waited frame`,
+		`Score: ${score(total.gpu)} by the GPU's time, ${score(total.waited)} by the ${result.measure === "busy" ? "frame interval" : "waited frame"}`,
 	);
 	for (const level of result.levels) {
 		const ls = levelScore(level);
@@ -132,14 +142,14 @@ export function benchmarkReport(result: BenchmarkResult): string {
 			`${level.label} · ${level.canvas.width}×${level.canvas.height} · ${level.antialias} · score ${score(ls.gpu)} / ${score(ls.waited)}`,
 		);
 		lines.push(
-			`  ${"Station".padEnd(28)}${"GPU".padStart(10)}${"Waited".padStart(10)}${"CPU".padStart(10)}${"Orbit".padStart(10)}${"Score".padStart(13)}`,
+			`  ${"Station".padEnd(28)}${"GPU".padStart(10)}${(result.measure === "busy" ? "Interval" : "Waited").padStart(10)}${"CPU".padStart(10)}${"Orbit".padStart(10)}${"Score".padStart(17)}`,
 		);
 		for (const s of level.stations) {
 			const sc = stationScore(s);
 			const orbit = s.moving[0];
 			const name = `${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`;
 			lines.push(
-				`  ${name.padEnd(28)}${msText(s.still.gpuMs ?? Number.NaN).padStart(10)}${msText(s.still.median).padStart(10)}${msText(s.still.cpuMs ?? Number.NaN).padStart(10)}${msText(orbit ? (orbit.gpu.length > 0 ? orbit.gpuTotal.median : orbit.median) : Number.NaN).padStart(10)}${`${score(sc.gpu)} / ${score(sc.waited)}`.padStart(13)}${cpuBound(s) ? "  CPU-bound" : ""}`,
+				`  ${name.padEnd(28)}${msText(s.still.gpuMs ?? Number.NaN).padStart(10)}${msText(s.still.median).padStart(10)}${msText(s.still.cpuMs ?? Number.NaN).padStart(10)}${msText(orbit ? (orbit.gpu.length > 0 ? orbit.gpuTotal.median : orbit.median) : Number.NaN).padStart(10)}${`${score(sc.gpu)} / ${score(sc.waited)}`.padStart(17)}${cpuBound(s) ? "  CPU-bound" : ""}`,
 			);
 		}
 		lines.push("");

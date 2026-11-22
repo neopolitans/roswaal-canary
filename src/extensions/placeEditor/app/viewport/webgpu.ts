@@ -306,7 +306,9 @@ fn has(bit: u32) -> bool { return (FEATURES & bit) != 0u && (u32(u.debug.y) & bi
 @group(0) @binding(5) var sunImage: texture_2d<f32>;
 // The place's depth from each sky direction, and the sun's last: see skyBlock.
 // Then the near maps' views, their vec4 and their box: see nearSkyInto.
-struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f };
+// nearSet.x: how many layers on the near maps the shaders read are, 0 or
+// SKY_VIEWS: their other set is drawn a few a frame, then read (nearFillStep).
+struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f, nearSet: vec4f };
 @group(0) @binding(6) var skyMaps: texture_depth_2d_array;
 @group(0) @binding(7) var skyCompare: sampler_comparison;
 @group(0) @binding(8) var<uniform> skyU: SkyU;
@@ -315,6 +317,8 @@ fn skySees(k: i32, p: vec3f) -> f32 { return skySeesIn(k, p, skyU.info); }
 // As skySees, for a map whose texel and depth \`info\` gives.
 fn skySeesIn(k: i32, p: vec3f, info: vec4f) -> f32 {
 	let c = skyU.views[k] * vec4f(p, 1.0);
+	// The near maps' layers are in the set being read; k keeps their view and taps.
+	let layer = select(k, k + i32(skyU.nearSet.x), k >= ${SKY_NEAR_LAYER});
 	let uv = vec2f(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
 	if (any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) || c.z > 1.0) { return 1.0; }
 	// Four taps SKY_SOFT studs apart, turned with k, so each direction's
@@ -324,7 +328,7 @@ fn skySeesIn(k: i32, p: vec3f, info: vec4f) -> f32 {
 	let o = vec2f(cos(a), sin(a)) * spread;
 	let q = vec2f(-o.y, o.x) * 0.5;
 	let depth = c.z - info.y * 0.5;
-	let seen = 0.25 * (textureSampleCompareLevel(skyMaps, skyCompare, uv + o, k, depth) + textureSampleCompareLevel(skyMaps, skyCompare, uv - o, k, depth) + textureSampleCompareLevel(skyMaps, skyCompare, uv + q, k, depth) + textureSampleCompareLevel(skyMaps, skyCompare, uv - q, k, depth));
+	let seen = 0.25 * (textureSampleCompareLevel(skyMaps, skyCompare, uv + o, layer, depth) + textureSampleCompareLevel(skyMaps, skyCompare, uv - o, layer, depth) + textureSampleCompareLevel(skyMaps, skyCompare, uv + q, layer, depth) + textureSampleCompareLevel(skyMaps, skyCompare, uv - q, layer, depth));
 	// The sun's map shades from any height; the sky's only from parts within
 	// SKY_REACH above the camera, as Studio's do. Along this map's direction
 	// (straight up, or 45 degrees up), how far the ray may go before it leaves
@@ -333,7 +337,7 @@ fn skySeesIn(k: i32, p: vec3f, info: vec4f) -> f32 {
 	let rise = select(0.70711, 1.0, k == 0 || k == ${SKY_NEAR_LAYER});
 	let along = (u.camPos.y + ${SKY_REACH}.0 - p.y) / rise;
 	if (along <= 0.0) { return 1.0; }
-	let within = textureSampleCompareLevel(skyMaps, skyCompare, uv, k, c.z - along * info.y);
+	let within = textureSampleCompareLevel(skyMaps, skyCompare, uv, layer, c.z - along * info.y);
 	return clamp(seen + 1.0 - within, 0.0, 1.0);
 }
 // The place's lights: five vec4s each, see sceneLights; and which reach a
@@ -2952,7 +2956,11 @@ export class WebGpuView implements ViewRenderer {
 		const sunMoved = this.sunDirty;
 		const centre = nearSkyCentre(camera.eye);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
-		const mapsDue = this.skyDirty || this.sunDirty || nearMoved;
+		// The place or the sun changed, or nothing drawn yet: every map at once.
+		// The camera moved on alone: the near maps a share a frame (nearFillStep).
+		const mapsDue = this.skyDirty || this.sunDirty || !this.nearCentre;
+		if (!mapsDue && (nearMoved || this.nearFill)) encoder = this.nearFillStep(encoder, centre);
+		if (mapsDue) this.nearFill = null;
 		if (mapsDue)
 			encoder = this.drawSkyMaps(
 				encoder,
@@ -3974,7 +3982,7 @@ export class WebGpuView implements ViewRenderer {
 		this.reflBind = this.bindWith(this.reflBlank);
 	}
 
-	private bindWith(cube: GPUTexture): GPUBindGroup {
+	private bindWith(cube: GPUTexture, sky: GPUBuffer = this.skyUniform): GPUBindGroup {
 		return this.device.createBindGroup({
 			layout: this.layout,
 			entries: [
@@ -3986,7 +3994,7 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 5, resource: this.sunTexture!.createView() },
 				{ binding: 6, resource: this.skyMaps.createView({ dimension: "2d-array" }) },
 				{ binding: 7, resource: this.skyCompare },
-				{ binding: 8, resource: { buffer: this.skyUniform } },
+				{ binding: 8, resource: { buffer: sky } },
 				{ binding: 9, resource: { buffer: this.lightBuffers.data } },
 				{ binding: 10, resource: { buffer: this.lightBuffers.table } },
 				{ binding: 11, resource: { buffer: this.lightBuffers.index } },
@@ -4318,37 +4326,50 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	 * Each lighting cell the share of the sky its middle sees, from the maps
 	 * just drawn: into the cells not being read, a slice a pass, then read.
 	 */
-	private fillCells(encoder: GPUCommandEncoder): void {
+	/**
+	 * `part` of the cells: each cell's own share, the averages round them, or
+	 * both; from the sky block `bind` names. Read at once unless `swap` is off,
+	 * when nearFillStep swaps them with the maps they came from.
+	 */
+	private fillCells(
+		encoder: GPUCommandEncoder,
+		bind: GPUBindGroup = this.bind,
+		part: "all" | "own" | "around" = "all",
+		swap = true,
+	): void {
 		const steps = this.cellSteps;
 		if (steps) {
 			const target = this.cells[1 - this.cellsRead];
 			const own = steps.own.depthOrArrayLayers;
-			for (let s = 0; s * 8 < own; s++) {
+			for (let s = 0; part !== "around" && s * 8 < own; s++) {
 				const pass = encoder.beginRenderPass({
 					timestampWrites: this.stamp(null),
 					colorAttachments: this.eightSlices(steps.own, s * 8),
 				});
 				pass.setPipeline(steps.ownPipe);
-				pass.setBindGroup(0, this.bind);
+				pass.setBindGroup(0, bind);
 				pass.draw(3, 1, 0, s);
 				pass.end();
 			}
-			for (let s = 0; s * 8 < SKY_CELLS[1]; s++) {
+			for (let s = 0; part !== "own" && s * 8 < SKY_CELLS[1]; s++) {
 				const pass = encoder.beginRenderPass({
 					timestampWrites: this.stamp(null),
 					colorAttachments: this.eightSlices(target, s * 8),
 				});
 				pass.setPipeline(steps.aroundPipe);
-				pass.setBindGroup(0, this.bind);
+				pass.setBindGroup(0, bind);
 				pass.setBindGroup(1, steps.aroundGroup);
 				pass.draw(3, 1, 0, s);
 				pass.end();
 			}
-			this.cellsRead = 1 - this.cellsRead;
-			this.rebind();
+			if (swap && part !== "own") {
+				this.cellsRead = 1 - this.cellsRead;
+				this.rebind();
+			}
 			return;
 		}
-		if (!this.cellPipe) return;
+		// One slice a pass, each cell sampling the maps itself: all in the second half.
+		if (!this.cellPipe || part === "own") return;
 		const target = this.cells[1 - this.cellsRead];
 		for (let y = 0; y < SKY_CELLS[1]; y++) {
 			const pass = encoder.beginRenderPass({
@@ -4364,10 +4385,11 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				],
 			});
 			pass.setPipeline(this.cellPipe);
-			pass.setBindGroup(0, this.bind);
+			pass.setBindGroup(0, bind);
 			pass.draw(3, 1, 0, y);
 			pass.end();
 		}
+		if (!swap) return;
 		this.cellsRead = 1 - this.cellsRead;
 		this.rebind();
 	}
@@ -4377,7 +4399,22 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private skyMaps!: GPUTexture;
 	private skyCompare!: GPUSampler;
 	private skyUniform!: GPUBuffer;
+	private skyUniformNext!: GPUBuffer;
 	private skyDepth!: GPURenderPipeline;
+	/** Which set of near map layers the shaders read: 0, or 1 (SKY_VIEWS layers on). */
+	private nearSet = 0;
+	/**
+	 * The near maps being drawn again into the set not read, two a frame with
+	 * their thin parts taken out, then their cells in two halves, then read:
+	 * six frames. Drawn whole, an orbit far out redrew them nearly every
+	 * frame, about 20 ms of an iPad's GPU each time (canary.15-17).
+	 */
+	private nearFill: {
+		centre: number[];
+		block: Float32Array;
+		step: number;
+		bind: GPUBindGroup;
+	} | null = null;
 	private skyViewGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
 	/** All the maps are drawn again before the next frame: the parts moved. */
 	private skyDirty = true;
@@ -4419,7 +4456,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private makeSkyMaps(buffers: GPUVertexBufferLayout[]): void {
 		const d = this.device;
 		this.skyMaps = d.createTexture({
-			size: [SKY_MAP, SKY_MAP, SKY_LAYERS],
+			// The near maps twice: one set read, the other drawn (nearFillStep).
+			size: [SKY_MAP, SKY_MAP, SKY_LAYERS + SKY_VIEWS],
 			format: "depth32float",
 			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
 		});
@@ -4428,11 +4466,13 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			magFilter: "linear",
 			minFilter: "linear",
 		});
-		this.skyUniform = d.createBuffer({
-			// The sky block, then the reflection cube's centre: see SkyU.probeAt.
-			size: SKY_BLOCK * 4 + 16,
-			usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
-		});
+		// The sky block, then the reflection cube's centre and the near set read:
+		// see SkyU. The second, the block for the near maps being drawn, which
+		// their cells are found from.
+		const skyBuffer = () =>
+			d.createBuffer({ size: SKY_BLOCK * 4 + 32, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+		this.skyUniform = skyBuffer();
+		this.skyUniformNext = skyBuffer();
 		const layout = d.createBindGroupLayout({
 			entries: [{ binding: 0, visibility: STAGE.VERTEX, buffer: {} }],
 		});
@@ -4596,7 +4636,7 @@ fn along(pos: vec4f) -> f32 {
 			float: toFloat("fsFloat"),
 			toDepth,
 			scratch,
-			first: Array.from({ length: SKY_VIEWS }, (_, k) =>
+			first: Array.from({ length: 2 * SKY_VIEWS }, (_, k) =>
 				group(
 					this.skyMaps.createView({
 						dimension: "2d-array",
@@ -4713,7 +4753,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		this.skyOpenCompute = {
 			dilate,
 			erode,
-			dilateGroups: Array.from({ length: SKY_VIEWS }, (_, k) =>
+			dilateGroups: Array.from({ length: 2 * SKY_VIEWS }, (_, k) =>
 				d.createBindGroup({
 					layout: dilateLayout,
 					entries: [
@@ -4743,14 +4783,19 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		this.onRedraw?.();
 	}
 
-	/** Opens the near maps just drawn: see makeSkyOpen. */
-	private openNearMaps(encoder: GPUCommandEncoder): void {
+	/**
+	 * Opens the near maps just drawn, `count` of them from the near layer
+	 * `from` (either set's): see makeSkyOpen.
+	 */
+	private openNearMaps(encoder: GPUCommandEncoder, from = 0, count = SKY_VIEWS): void {
 		const o = this.skyOpen;
 		if (!o) return;
-		const cs = this.skyOpenCompute;
+		// Not on Apple's GPUs: an iPad Mini's took 17-19 ms in compute against
+		// 12-14 ms for the four passes (canary.17).
+		const cs = /apple/i.test(this.gpuName) ? null : this.skyOpenCompute;
 		if (cs) {
 			const groups = SKY_MAP / 16;
-			for (let k = 0; k < SKY_VIEWS; k++) {
+			for (let k = from; k < from + count; k++) {
 				const pass = encoder.beginComputePass({
 					timestampWrites: this.stamp(null) as GPUComputePassTimestampWrites | undefined,
 				});
@@ -4786,7 +4831,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 				{ view: o.scratch[k].createView(), loadOp: "clear" as const, storeOp: "store" as const },
 			],
 		});
-		for (let k = 0; k < SKY_VIEWS; k++) {
+		for (let k = from; k < from + count; k++) {
 			const steps: [GPURenderPassDescriptor, GPURenderPipeline, GPUBindGroup][] = [
 				[toScratch(0), o.fromDepth, o.first[k]],
 				[toScratch(1), o.float, o.rest[0]],
@@ -4870,6 +4915,86 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 	}
 
 	/**
+	 * A frame's share of the near maps drawn again for the camera's new
+	 * centre, into the set not read: two maps a frame with their thin parts,
+	 * then the cells' own shares, then their averages, and all read at once.
+	 */
+	private nearFillStep(encoder: GPUCommandEncoder, centre: number[]): GPUCommandEncoder {
+		if (this.render.freezeShadows) return encoder;
+		const box = this.scene ? sceneBox(this.scene) : null;
+		if (!box) return encoder;
+		const q = this.device.queue;
+		const other = (1 - this.nearSet) * SKY_VIEWS;
+		if (!this.nearFill) {
+			const block = skyBlock(box, this.lighting?.sun ?? [0, 1, 0], true);
+			nearSkyInto(block, box, centre, true);
+			q.writeBuffer(this.skyUniformNext, 0, block);
+			q.writeBuffer(this.skyUniformNext, SKY_BLOCK * 4 + 16, new Float32Array([other, 0, 0, 0]));
+			this.nearFill = {
+				centre,
+				block,
+				step: 0,
+				bind: this.bindWith(this.reflCube, this.skyUniformNext),
+			};
+		}
+		const fill = this.nearFill;
+		let at = encoder;
+		if (fill.step < SKY_VIEWS / 2) {
+			const from = fill.step * 2;
+			for (let j = from; j < from + 2; j++) {
+				const k = SKY_NEAR_LAYER + j;
+				const { buffer, group } = this.skyViewGroups[k];
+				q.writeBuffer(buffer, 0, fill.block.subarray(k * 16, k * 16 + 16));
+				const pass = at.beginRenderPass({
+					timestampWrites: this.stamp(null),
+					colorAttachments: [],
+					depthStencilAttachment: {
+						view: this.skyMaps.createView({
+							dimension: "2d",
+							baseArrayLayer: k + other,
+							arrayLayerCount: 1,
+						}),
+						depthClearValue: 1,
+						depthLoadOp: "clear",
+						depthStoreOp: "store",
+					},
+				});
+				pass.setPipeline(this.skyDepth);
+				pass.setBindGroup(0, group);
+				this.solids(pass);
+				pass.end();
+			}
+			at = this.cut(at, "skyMaps");
+			if (passesOf(this.render.features).thinParts) {
+				this.openNearMaps(at, other + from, 2);
+				at = this.cut(at, "skyOpen");
+			}
+			fill.step++;
+			return at;
+		}
+		if (fill.step === SKY_VIEWS / 2) {
+			this.fillCells(at, fill.bind, "own", false);
+			fill.step++;
+			return this.cut(at, "skyCells");
+		}
+		this.fillCells(at, fill.bind, "around", false);
+		at = this.cut(at, "skyCells");
+		// All drawn: the maps, their block and their cells read from here on.
+		q.writeBuffer(this.skyUniform, 0, fill.block);
+		q.writeBuffer(this.skyUniform, SKY_BLOCK * 4 + 16, new Float32Array([other, 0, 0, 0]));
+		this.nearSet = 1 - this.nearSet;
+		this.cellsRead = 1 - this.cellsRead;
+		this.nearCentre = fill.centre;
+		this.nearFill = null;
+		this.redrawn.nearMaps++;
+		this.rebind();
+		// The cube's faces are lit by the near maps: drawn again a face a frame,
+		// as a cube drawn while the camera moved shows the maps it left behind.
+		this.reflStale();
+		return at;
+	}
+
+	/**
 	 * The place's depth from each sky direction and the sun, into the maps:
 	 * the whole place's when parts moved, the sun's when it moved, and the
 	 * near maps round `centre` when either did or the camera moved a step.
@@ -4898,7 +5023,11 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 				timestampWrites: this.stamp("shadows"),
 				colorAttachments: [],
 				depthStencilAttachment: {
-					view: this.skyMaps.createView({ dimension: "2d", baseArrayLayer: k, arrayLayerCount: 1 }),
+					view: this.skyMaps.createView({
+						dimension: "2d",
+						baseArrayLayer: k >= SKY_NEAR_LAYER ? k + this.nearSet * SKY_VIEWS : k,
+						arrayLayerCount: 1,
+					}),
 					depthClearValue: 1,
 					depthLoadOp: "clear",
 					depthStoreOp: "store",
@@ -4914,7 +5043,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		// parts taken out of the near ones, and the cells found from them.
 		let at = this.cut(encoder, "skyMaps");
 		if (which.near && passesOf(this.render.features).thinParts) {
-			this.openNearMaps(at);
+			this.openNearMaps(at, this.nearSet * SKY_VIEWS);
 			at = this.cut(at, "skyOpen");
 		}
 		if (which.near) {

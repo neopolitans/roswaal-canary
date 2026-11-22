@@ -9,6 +9,21 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.18",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.14.0: orbiting far out no longer redraws the near sky maps every frame.",
+		changed: [
+			"**The near sky maps follow a moving camera a share a frame**: two maps a frame with their thin parts, then the lighting cells in two halves, into a second set that is read once complete. A place or sun change still redraws them at once.",
+			"**Apple's GPUs take the near maps' thin parts out in four render passes again**: in compute it measured slower on an iPad.",
+			"**The Place Editor is 0.14.0.**",
+		],
+		fixed: [
+			"**The reflection cube is drawn again once the near sky maps have moved**, so reflections are not left shaded by maps the camera has left.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.17",
 		date: "2026-11-22",
 		headline:

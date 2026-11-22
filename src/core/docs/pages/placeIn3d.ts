@@ -267,6 +267,27 @@ export function placeEditorRenderingPage(): DocPage {
 					"The **Rendering** panel, in the **Panels** menu while the place is in front, changes " +
 					"how the view draws the place, never the place.",
 			},
+			{ t: "h", level: 2, text: "Quality levels" },
+			{
+				t: "p",
+				text:
+					"Settings' **Quality**, and the top of **View**, draws at one of 21 levels, as Studio's " +
+					"do. How far each draws parts, and where glow and sharp shadows begin, were measured in Studio.",
+			},
+			{
+				t: "table",
+				head: ["Levels", "Draws"],
+				rows: [
+					["1–5", "Parts to 500–1,550 studs, soft blurred sun shadows, no glow"],
+					["6–9", "Neon glow, then beams, highlights and bloom"],
+					["10–12", "Sharp sun shadows near the camera, at the screen's full resolution"],
+					["13–16", "Parts to 2,200–6,000 studs, 4× antialiasing, shadows reaching further"],
+					[
+						"17–21",
+						"Every part, far shadows, soft edges, sky reflections and blur; 21 is As Studio",
+					],
+				],
+			},
 			{ t: "h", level: 2, text: "Switches" },
 			{
 				t: "p",
@@ -279,9 +300,11 @@ export function placeEditorRenderingPage(): DocPage {
 			{
 				t: "p",
 				text:
-					"**View** chooses what is shown. Its **Final output** presets set the switches: the " +
-					"performance ones take away what costs most, down to **Lowest**, and the rest show one " +
-					"feature alone. Under them, the arrows step through the ten steps a frame is built in. " +
+					"**View** chooses what is shown. Its **Quality** levels set the switches as Settings' " +
+					"Quality does: **Level 21** is everything, as Studio draws it, and each level down takes " +
+					"away what costs most. A switch changed by hand shows **Custom (from Level N)**. The " +
+					"**Final output, one feature** presets show one feature alone. Under them, the arrows " +
+					"step through the ten steps a frame is built in. " +
 					"The other views show the place as the switches leave it, so the wireframe shows what " +
 					"culling left.",
 			},

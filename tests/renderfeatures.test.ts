@@ -13,8 +13,8 @@ import {
 	featureBits,
 	featureOn,
 	litFor,
-	PERFORMANCE_PRESETS,
 	passesOf,
+	QUALITY_PRESETS,
 	RENDER_PRESETS,
 	RENDER_STEPS,
 	STUDIO_FEATURES,
@@ -140,14 +140,16 @@ describe("the Rendering panel's switches", () => {
 		expect(passesOf({ ...STUDIO_FEATURES, skyShadows: false }).thinParts).toBe(false);
 	});
 
-	it("come in presets: performance ones that only take away, debugging ones each with a purpose", () => {
-		expect(PERFORMANCE_PRESETS[0].features).toEqual(STUDIO_FEATURES);
-		for (const p of PERFORMANCE_PRESETS)
+	it("come in presets: quality levels that only take away, debugging ones each with a purpose", () => {
+		expect(QUALITY_PRESETS).toHaveLength(21);
+		expect(QUALITY_PRESETS[0].id).toBe("level-21");
+		expect(QUALITY_PRESETS[0].features).toEqual(STUDIO_FEATURES);
+		for (const p of QUALITY_PRESETS)
 			expect(changedFrom(p.features).every((k) => !p.features[k])).toBe(true);
-		// Each performance preset takes away at least what the one before it did.
-		for (let i = 1; i < PERFORMANCE_PRESETS.length; i++) {
-			const before = changedFrom(PERFORMANCE_PRESETS[i - 1].features);
-			const now = changedFrom(PERFORMANCE_PRESETS[i].features);
+		// Each level down takes away at least what the one above it did.
+		for (let i = 1; i < QUALITY_PRESETS.length; i++) {
+			const before = changedFrom(QUALITY_PRESETS[i - 1].features);
+			const now = changedFrom(QUALITY_PRESETS[i].features);
 			expect(before.every((k) => now.includes(k))).toBe(true);
 		}
 		for (const p of DEBUG_PRESETS) expect(changedFrom(p.features).length).toBeGreaterThan(0);

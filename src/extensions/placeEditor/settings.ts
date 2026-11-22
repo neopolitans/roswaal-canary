@@ -40,9 +40,22 @@ export const VIEWPORT_FRAME_RATES = [
 export type ViewportFrameRate = (typeof VIEWPORT_FRAME_RATES)[number]["value"];
 
 /**
+ * Quality: Automatic, or a level, as Studio's QualityLevel. Each level sets
+ * the Rendering panel's switches, how far parts are drawn, the sun's shadows,
+ * and, where those are Automatic, the render scale and antialiasing.
+ */
+export const VIEWPORT_QUALITIES = [
+	{ value: "auto", label: "Automatic" },
+	...Array.from({ length: 21 }, (_, i) => {
+		const level = 21 - i;
+		return { value: String(level), label: `Level ${level}` };
+	}),
+] as const;
+export type ViewportQuality = "auto" | `${number}`;
+
+/**
  * How many of the screen's pixels the place is drawn at, across and down:
- * 75% is a little over half the pixels. Automatic is 75% on a touch screen,
- * where the screen is dense and the GPU a tablet's, and all of them elsewhere.
+ * 75% is a little over half the pixels. Automatic is the quality level's.
  */
 export const VIEWPORT_RENDER_SCALES = [
 	{ value: "auto", label: "Automatic" },
@@ -52,11 +65,9 @@ export const VIEWPORT_RENDER_SCALES = [
 ] as const;
 export type ViewportRenderScale = (typeof VIEWPORT_RENDER_SCALES)[number]["value"];
 
-/** Automatic's scale on a touch screen. */
-export const TOUCH_RENDER_SCALE = 0.75;
-
-/** Antialiasing: four samples a pixel, or one. */
+/** Antialiasing: the quality level's, four samples a pixel, or one. */
 export const VIEWPORT_ANTIALIAS = [
+	{ value: "auto", label: "Automatic" },
 	{ value: "4", label: "4×" },
 	{ value: "off", label: "Off" },
 ] as const;
@@ -65,9 +76,11 @@ export type ViewportAntialias = (typeof VIEWPORT_ANTIALIAS)[number]["value"];
 /** The settings as the viewer reads them. */
 export interface PlaceEditorSettings {
 	renderer: ViewportRenderer;
+	quality: ViewportQuality;
 	frameRate: ViewportFrameRate;
 	renderScale: ViewportRenderScale;
-	antialias: ViewportAntialias;
+	/** Stored as `antialiasing`: 1.1.0-canary.6 saved `antialias` as "4" for everyone. */
+	antialiasing: ViewportAntialias;
 	outlineWidth: OutlineWidth;
 	/** The outline shows through what is in front of it, as Studio's does. */
 	outlineThrough: boolean;
@@ -94,6 +107,14 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				choices: VIEWPORT_RENDERERS,
 			},
 			{
+				key: "quality",
+				title: "Quality",
+				help: "As Studio's quality levels: each sets how far parts are drawn, the sun's shadows, which effects are on, and the render scale and antialiasing where those are Automatic. Automatic starts from the device and moves a level down or up with how fast frames are drawn. Level 21 draws everything, as Studio does.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_QUALITIES,
+			},
+			{
 				key: "frameRate",
 				legacy: "viewportFrameRate",
 				title: "Frame rate",
@@ -105,17 +126,17 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "renderScale",
 				title: "Render scale",
-				help: "How many of the screen's pixels the place is drawn at, across and down. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is 75% on a touch screen and 100% elsewhere.",
+				help: "How many of the screen's pixels the place is drawn at, across and down. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% from 10.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,
 			},
 			{
-				key: "antialias",
+				key: "antialiasing",
 				title: "Antialiasing",
-				help: "Smooths parts' edges by drawing four samples a pixel. Off draws one, which is faster where filling pixels is the cost. The view is made again when it changes.",
+				help: "Smooths parts' edges by drawing four samples a pixel. Off draws one, which is faster where filling pixels is the cost. Automatic is the quality level's: off below Level 13, 4× from it. The view is made again when it changes.",
 				type: "choice",
-				default: "4",
+				default: "auto",
 				choices: VIEWPORT_ANTIALIAS,
 			},
 		],

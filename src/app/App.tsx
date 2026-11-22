@@ -480,7 +480,12 @@ export function App() {
 					sceneView.renderScale === "auto" || sceneView.renderScale === undefined
 						? "auto"
 						: Number(sceneView.renderScale) / 100,
-				antialias: sceneView.antialias === "off" ? 1 : 4,
+				antialias:
+					sceneView.antialiasing === "off" ? 1 : sceneView.antialiasing === "4" ? 4 : undefined,
+				quality:
+					sceneView.quality === "auto" || sceneView.quality === undefined
+						? "auto"
+						: Number(sceneView.quality),
 			}),
 		[
 			viewport,
@@ -493,7 +498,8 @@ export function App() {
 			sceneView.frameRate,
 			sceneView.altClickSteps,
 			sceneView.renderScale,
-			sceneView.antialias,
+			sceneView.antialiasing,
+			sceneView.quality,
 		],
 	);
 	// The folder from a previous session, when one is waiting on a click.
@@ -2751,7 +2757,10 @@ export function App() {
 						) : undefined,
 					render:
 						placeDoc && viewer && viewport ? (
-							<viewer.RenderPanel controller={viewport} />
+							<viewer.RenderPanel
+								controller={viewport}
+								onQuality={(quality) => placeEditor.set("quality", quality)}
+							/>
 						) : undefined,
 					performance:
 						placeDoc && viewer && viewport ? (

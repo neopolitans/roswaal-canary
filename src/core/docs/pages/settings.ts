@@ -260,16 +260,20 @@ export function settingsPage(): DocPage {
 						"What draws the place in 3D: **Automatic**, WebGPU where the browser has it and WebGL2 where it does not; **WebGPU**, falling back to WebGL2 where there is none; or **WebGL2**. The place's Properties has it too.",
 					],
 					[
+						"Quality",
+						"As Studio's quality levels: **Automatic**, the default, or **Level 1** to **Level 21**. A level sets how far parts are drawn, how far the sun's shadows reach, which effects are on, and the render scale and antialiasing where those are Automatic. Automatic starts from the device (a phone at 5, a tablet at 10, a laptop's built-in GPU at 15, other computers at 21) and moves a level down or up with how fast frames are drawn. The Rendering panel has it too.",
+					],
+					[
 						"Frame rate",
 						"The most the 3D view is drawn a second while it moves: 24 to 240, **VSync** to match the display, the default, or **Unlimited**. It is drawn only when something changes either way. The place's Properties has it too.",
 					],
 					[
 						"Render scale",
-						"How many of the screen's pixels the place is drawn at, across and down: **Automatic**, the default, is 75% on a touch screen and 100% elsewhere; or **100%**, **75%** or **50%**. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
+						"How many of the screen's pixels the place is drawn at, across and down: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% from 10); or **100%**, **75%** or **50%**. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
 					],
 					[
 						"Antialiasing",
-						"Smooths parts' edges by drawing four samples a pixel: **4×**, the default, or **Off**, one, which is faster where filling pixels is the cost. The view is made again when it changes.",
+						"Smooths parts' edges by drawing four samples a pixel: **Automatic**, the default, is the quality level's (off below Level 13, 4× from it); or **4×**, or **Off**, one, which is faster where filling pixels is the cost. The view is made again when it changes.",
 					],
 					[
 						"Selection outline",

@@ -295,34 +295,46 @@ const without = (keys: FeatureKey[]): RenderFeatures =>
 		FEATURES.map((i) => [i.key, !i.fix && !keys.includes(i.key)]),
 	) as unknown as RenderFeatures;
 
-/** Performance presets: from Studio's picture down to the least the view can draw. */
-export const PERFORMANCE_PRESETS: readonly RenderPreset[] = [
-	{ id: "studio", label: "As Studio", features: STUDIO_FEATURES },
-	{ id: "balanced", label: "Balanced", features: without(["softEdges", "skyReflections"]) },
-	{
-		id: "fast",
-		label: "Fast (iPad)",
-		features: without(["softEdges", "skyReflections", "farShadows", "particles", "blur"]),
-	},
-	{
-		id: "lowest",
-		label: "Lowest",
-		features: without([
-			"softEdges",
-			"skyReflections",
-			"farShadows",
-			"particles",
-			"blur",
-			"beams",
-			"nearSkyMaps",
-			"highlights",
-			"lightHighlights",
-			"bloom",
-			"atmosphere",
-			"matGrain",
-		]),
-	},
-];
+/**
+ * Switches a quality level turns on, from the level listed: see quality.ts.
+ * A switch not listed is on from Level 1. Level 15 is the old Fast (iPad)
+ * preset's switches, Level 21 everything, As Studio.
+ */
+export const LEVEL_ADDS: Partial<Record<FeatureKey, number>> = {
+	matGrain: 5,
+	neonGlow: 6,
+	lavaGlow: 6,
+	beams: 7,
+	highlights: 8,
+	lightHighlights: 8,
+	bloom: 9,
+	nearSkyMaps: 13,
+	particles: 16,
+	farShadows: 17,
+	softEdges: 18,
+	skyReflections: 19,
+	blur: 20,
+};
+
+/** The switches at a quality level, 1 to 21. */
+export function featuresAtLevel(level: number): RenderFeatures {
+	return Object.fromEntries(
+		FEATURES.map((i) => [i.key, !i.fix && level >= (LEVEL_ADDS[i.key] ?? 1)]),
+	) as unknown as RenderFeatures;
+}
+
+/** A quality level's name, with the two that have another as well. */
+export function levelLabel(level: number): string {
+	if (level === 21) return "Level 21 · As Studio";
+	if (level === 15) return "Level 15 · Fast (iPad)";
+	return `Level ${level}`;
+}
+
+/** The quality levels as presets, highest first: `level-21` to `level-1`. */
+export const QUALITY_PRESETS: readonly RenderPreset[] = Array.from({ length: 21 }, (_, i) => {
+	const level = 21 - i;
+	return { id: `level-${level}`, label: levelLabel(level), features: featuresAtLevel(level) };
+});
 
 /** Render debugging presets: one feature at a time; See shows it lit, as wires or as its cost. */
 export const DEBUG_PRESETS: readonly RenderPreset[] = [
@@ -363,11 +375,11 @@ export const DEBUG_PRESETS: readonly RenderPreset[] = [
 	},
 ];
 
-export const RENDER_PRESETS: readonly RenderPreset[] = [...PERFORMANCE_PRESETS, ...DEBUG_PRESETS];
+export const RENDER_PRESETS: readonly RenderPreset[] = [...QUALITY_PRESETS, ...DEBUG_PRESETS];
 
-/** The preset by its id; As Studio for one that is gone. */
+/** The preset by its id; Level 21, As Studio, for one that is gone. */
 export function presetById(id: string): RenderPreset {
-	return RENDER_PRESETS.find((p) => p.id === id) ?? PERFORMANCE_PRESETS[0];
+	return RENDER_PRESETS.find((p) => p.id === id) ?? QUALITY_PRESETS[0];
 }
 
 /**

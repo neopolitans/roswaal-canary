@@ -15,7 +15,6 @@ import { type LightingParams, SKY_FACES } from "../../core/lighting.js";
 import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
-import { TOUCH_RENDER_SCALE } from "../../settings.js";
 import { type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import { boxAround } from "./box.js";
 import {
@@ -31,7 +30,7 @@ import {
 	still,
 	turnedBy,
 } from "./drag.js";
-import { FrameHistory, frameInterval } from "./frameGraph.js";
+import { FRAME_RUN, FrameHistory, frameInterval } from "./frameGraph.js";
 import { rayHit, rayPick } from "./geometry.js";
 import { gizmoCell, lightGizmoLines } from "./gizmos.js";
 import { HandleBuilder } from "./handles.js";
@@ -55,8 +54,18 @@ import {
 	stagesTotal,
 	type Timed,
 } from "./profile.js";
+import {
+	AutoQuality,
+	levelPreset,
+	presetLevel,
+	type QualityLevel,
+	qualityLevel,
+	startLevel,
+	TOP_LEVEL,
+	viewQuality,
+} from "./quality.js";
 import { startingText } from "./readout.js";
-import { FEATURE_GROUPS, litFor, RENDER_STEPS, upToStep } from "./renderFeatures.js";
+import { changedFrom, FEATURE_GROUPS, litFor, RENDER_STEPS, upToStep } from "./renderFeatures.js";
 import { clampSpeed, SPEED_NOTCH } from "./speed.js";
 import { layersUsed, loadLayer } from "./textures.js";
 import {
@@ -108,10 +117,12 @@ export interface ViewportOptions {
 	frameRate: number | "vsync" | "unlimited";
 	/** Alt and a click, or a long press, picks one Model further in each time, rather than the part. */
 	altClickSteps: boolean;
-	/** The share of the screen's pixels across and down the place is drawn at; Automatic by the screen. */
+	/** The share of the screen's pixels across and down the place is drawn at; Automatic, the quality level's. */
 	renderScale?: number | "auto";
-	/** Samples a pixel: 4, antialiased, or 1, off. Changing it builds the view again. */
+	/** Samples a pixel: 4, antialiased, or 1, off; unset, the quality level's. Changing it builds the view again. */
 	antialias?: number;
+	/** Settings' Quality: a level, 1 to 21, or Automatic. Unset, Level 21. */
+	quality?: number | "auto";
 }
 
 /**
@@ -170,6 +181,8 @@ export interface ViewportState {
 	editable: boolean;
 	/** The Rendering panel's mode and switches: the view's alone, for this session. */
 	render: RenderSettings;
+	/** The quality level drawn at, and whether Automatic chose it. */
+	quality: { level: number; auto: boolean };
 	/** A profile running: what it is measuring, and how far along. See `runProfile`. */
 	profiling: { phase: string; done: number; of: number } | null;
 	/** The last profile finished, for the Performance panel. */
@@ -361,6 +374,7 @@ export class ViewportController {
 		space: "object",
 		editable: false,
 		render: DEFAULT_RENDER,
+		quality: { level: TOP_LEVEL, auto: false },
 		profiling: null,
 		profile: null,
 		gizmos: DEFAULT_GIZMOS,
@@ -641,8 +655,12 @@ export class ViewportController {
 			this.drawHandles();
 			this.redraw();
 		}
+		if ((options.quality ?? TOP_LEVEL) !== this.qualitySetting) {
+			this.chooseQuality(options.quality ?? TOP_LEVEL);
+			return;
+		}
 		if (!this.view) return;
-		if (was.renderer !== options.renderer || (was.antialias ?? 4) !== (options.antialias ?? 4)) {
+		if (was.renderer !== options.renderer || this.view.samples !== this.samples()) {
 			void this.restartView();
 			return;
 		}
@@ -1763,8 +1781,20 @@ export class ViewportController {
 			return canvas;
 		};
 		const gl2 = this.options.renderer === "webgl2";
-		const samples = this.options.antialias ?? 4;
-		let view: ViewRenderer = gl2 ? new WebGl2View(samples) : new WebGpuView(samples);
+		// Automatic's first level, from the device, before the view is made at it.
+		if (this.auto && !this.classed) {
+			this.classed = true;
+			const level = startLevel({
+				touch: typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
+				shortSide: Math.min(screen.width, screen.height),
+				gpu: await gpuName(gl2),
+			});
+			this.auto = new AutoQuality(level);
+			this.toLevel(level, true);
+		}
+		const samples = this.samples();
+		const map = this.level().shadowMap;
+		let view: ViewRenderer = gl2 ? new WebGl2View(samples, map) : new WebGpuView(samples, map);
 		let fellBack = false;
 		try {
 			try {
@@ -1772,7 +1802,7 @@ export class ViewportController {
 			} catch (err) {
 				if (gl2) throw err;
 				fellBack = true;
-				view = new WebGl2View(samples);
+				view = new WebGl2View(samples, map);
 				await this.initView(view, make(), place);
 			}
 		} catch (err) {
@@ -1791,6 +1821,7 @@ export class ViewportController {
 		view.setOutline(this.options.outlineWidth, this.options.hideBehind);
 		view.setGlassHides(this.options.glassHides);
 		view.setPostEffects(this.options.postEffects);
+		view.setQuality(viewQuality(this.level()));
 		view.setRender(this.state.render);
 		this.view = view;
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
@@ -1842,10 +1873,83 @@ export class ViewportController {
 	 * render scale -- Automatic is less on a touch screen -- and by a profile's
 	 * resolution while it measures.
 	 */
+	// -- quality levels: see quality.ts -------------------------------------------------
+
+	/** Settings' Quality as last applied. */
+	private qualitySetting: number | "auto" = TOP_LEVEL;
+	/** Automatic's steps; null at a level chosen by hand. */
+	private auto: AutoQuality | null = null;
+	/** Automatic has had its first level from the device. */
+	private classed = false;
+
+	private level(): QualityLevel {
+		return qualityLevel(this.state.quality.level);
+	}
+
+	/** Samples a pixel: Settings' Antialiasing, or the quality level's. */
+	private samples(): number {
+		return this.options.antialias ?? this.level().antialias;
+	}
+
+	/**
+	 * A quality level chosen, or Automatic: its switches replace the Rendering
+	 * panel's, even where they were changed by hand, as choosing a preset does.
+	 */
+	chooseQuality(quality: number | "auto"): void {
+		this.qualitySetting = quality;
+		if (quality === "auto") {
+			// The device is read once, as the view is first made; after that Automatic starts where it is.
+			const started = this.classed || this.view !== null;
+			this.classed = started;
+			this.auto = new AutoQuality(started ? this.state.quality.level : TOP_LEVEL);
+			this.toLevel(this.auto.level, true);
+		} else {
+			this.auto = null;
+			this.toLevel(qualityLevel(quality).level, true);
+		}
+	}
+
+	/** Draws at `level`; `reset`, with its switches in the Rendering panel. */
+	private toLevel(level: number, reset: boolean): void {
+		const q = qualityLevel(level);
+		this.set({ quality: { level: q.level, auto: this.auto !== null } });
+		if (reset)
+			this.setRender({ ...this.state.render, preset: levelPreset(q.level), features: q.features });
+		const view = this.view;
+		if (!view) return;
+		if (view.samples !== this.samples() || view.shadowMap !== q.shadowMap) {
+			void this.restartView();
+			return;
+		}
+		view.setQuality(viewQuality(q));
+		this.fit();
+		this.redraw();
+	}
+
+	/**
+	 * One frame for Automatic: what it cost the GPU where the browser times
+	 * it, otherwise how long it took, in a run of frames. It waits while a
+	 * profile runs and while the switches are not the level's own.
+	 */
+	private autoStep(
+		run: boolean,
+		interval: number,
+		gpu: { shadows: number; scene: number; post: number } | null | undefined,
+	): void {
+		const auto = this.auto;
+		if (!auto || this.state.profiling || this.starting) return;
+		const render = this.state.render;
+		if (presetLevel(render.preset) !== auto.level) return;
+		if (changedFrom(render.features, this.level().features).length > 0) return;
+		const gpuMs = gpu ? gpu.shadows + gpu.scene + gpu.post : Number.NaN;
+		const ms = !run ? 0 : Number.isFinite(gpuMs) && gpuMs > 0 ? gpuMs : interval;
+		const next = auto.frame(ms);
+		if (next !== null) this.toLevel(next, true);
+	}
+
 	private pixelRatio(): number {
 		const setting = this.options.renderScale ?? "auto";
-		const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
-		const scale = setting === "auto" ? (touch ? TOUCH_RENDER_SCALE : 1) : setting;
+		const scale = setting === "auto" ? this.level().scale : setting;
 		return Math.min(2, devicePixelRatio || 1) * scale * this.resolutionScale;
 	}
 
@@ -2142,7 +2246,7 @@ export class ViewportController {
 				antialias.push(await this.timeWaited(label, 30));
 			}
 			this.options = options;
-			if ((options.antialias ?? 4) !== 4) {
+			if (this.samples() !== 4) {
 				await this.restartView();
 				await this.viewSettled();
 			}
@@ -2203,6 +2307,7 @@ export class ViewportController {
 		const stats = this.view?.stats();
 		const gpu = stats?.gpu;
 		const interval = frameInterval(now, this.drawnAt, this.wantedAt);
+		this.autoStep(this.wantedAt - this.drawnAt <= FRAME_RUN, interval, gpu);
 		this.drawnAt = now;
 		this.history.push({
 			interval,
@@ -2931,4 +3036,29 @@ function clockStep(): number {
 		}
 	}
 	return Number.isFinite(smallest) ? smallest : Number.NaN;
+}
+
+/**
+ * The GPU's name, for Automatic's first level: WebGPU's adapter's, or
+ * WebGL2's renderer string; empty where the browser keeps it back.
+ */
+async function gpuName(gl2: boolean): Promise<string> {
+	try {
+		const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+		if (!gl2 && gpu) {
+			const adapter = (await gpu.requestAdapter()) as {
+				info?: { vendor?: string; architecture?: string; description?: string };
+			} | null;
+			const info = adapter?.info;
+			if (info) return [info.vendor, info.architecture, info.description].filter(Boolean).join(" ");
+		}
+		const gl = document.createElement("canvas").getContext("webgl2");
+		if (!gl) return "";
+		const ext = gl.getExtension("WEBGL_debug_renderer_info");
+		const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? "");
+		gl.getExtension("WEBGL_lose_context")?.loseContext();
+		return name;
+	} catch {
+		return "";
+	}
 }

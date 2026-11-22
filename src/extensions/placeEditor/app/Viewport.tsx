@@ -63,13 +63,14 @@ import {
 	STAGE_LABELS,
 	stepCosts,
 } from "./viewport/profile.js";
+import { presetLevel } from "./viewport/quality.js";
 import {
 	changedFrom,
 	DEBUG_PRESETS,
 	FEATURE_GROUPS,
 	featureOn,
-	PERFORMANCE_PRESETS,
 	presetById,
+	QUALITY_PRESETS,
 	RENDER_STEPS,
 	type RenderFeatures,
 	stepOf,
@@ -752,7 +753,7 @@ function RenderBadge({ render }: { render: RenderSettings }) {
 	const heat = heatStyled(render.mode)
 		? RENDER_HEAT.find(([h]) => h === render.heat)?.[1]
 		: undefined;
-	const plain = render.preset === "studio" && changedFrom(render.features).length === 0;
+	const plain = render.preset === "level-21" && changedFrom(render.features).length === 0;
 	return (
 		<div className="vp-render-badge" title="How the view is drawn: the Rendering panel">
 			<span>{heat ? `${mode} · ${heat}` : mode}</span>
@@ -1411,8 +1412,15 @@ export function PerformancePanel({ controller }: { controller: ViewportControlle
  * views of what it costs. The view's alone, for the session; the place is
  * untouched.
  */
-export function RenderPanel({ controller }: { controller: ViewportController }) {
-	const { render } = useViewport(controller);
+export function RenderPanel({
+	controller,
+	onQuality,
+}: {
+	controller: ViewportController;
+	/** Settings' Quality, chosen here too: "auto" or a level, "1" to "21". */
+	onQuality: (quality: string) => void;
+}) {
+	const { render, quality } = useViewport(controller);
 	const apply = (next: RenderSettings) => controller.setRender(next);
 	const legend = HEAT_LEGEND[render.mode];
 	const viewLegend = renderLegend(render.mode);
@@ -1438,7 +1446,11 @@ export function RenderPanel({ controller }: { controller: ViewportController }) 
 	 */
 	const pick = (value: string) => {
 		const [kind, id] = value.split(":");
-		if (kind === "preset") {
+		if (kind === "quality") {
+			controller.chooseQuality(id === "auto" ? "auto" : Number(id));
+			apply({ ...controller.renderSettings(), mode: "lit" });
+			onQuality(id);
+		} else if (kind === "preset") {
 			const p = presetById(id);
 			apply({ ...render, mode: "lit", preset: p.id, features: p.features });
 		} else apply({ ...render, mode: id as RenderMode });
@@ -1453,12 +1465,23 @@ export function RenderPanel({ controller }: { controller: ViewportController }) 
 							<span>View</span>
 							<select
 								className="tb place-edit-field"
-								value={render.mode === "lit" ? `preset:${base.id}` : `mode:${render.mode}`}
+								value={
+									render.mode !== "lit"
+										? `mode:${render.mode}`
+										: presetLevel(base.id) === null
+											? `preset:${base.id}`
+											: quality.auto
+												? "quality:auto"
+												: `quality:${presetLevel(base.id)}`
+								}
 								onChange={(e) => pick(e.target.value)}
 							>
-								<optgroup label="Final output">
-									{PERFORMANCE_PRESETS.map((p) => (
-										<option key={p.id} value={`preset:${p.id}`}>
+								<optgroup label="Quality">
+									<option value="quality:auto">
+										{quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"}
+									</option>
+									{QUALITY_PRESETS.map((p) => (
+										<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
 											{p.label}
 										</option>
 									))}
@@ -1629,9 +1652,15 @@ export function RenderPanel({ controller }: { controller: ViewportController }) 
 	);
 }
 
-/** The preset chosen, and how many switches are changed from it: "Fast (iPad) · 2 changed". */
+/**
+ * The preset chosen, and how many switches are changed from it: "Level 10",
+ * "Custom (from Level 15) · 2 changed".
+ */
 function presetLine(render: RenderSettings): string {
 	const base = presetById(render.preset);
 	const changed = changedFrom(render.features, base.features).length;
-	return changed === 0 ? base.label : `${base.label} · ${changed} changed`;
+	if (changed === 0) return base.label;
+	const level = presetLevel(base.id);
+	const from = level === null ? base.label : `Custom (from Level ${level})`;
+	return `${from} · ${changed} changed`;
 }

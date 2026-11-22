@@ -40,6 +40,7 @@ import {
 	backToFront,
 	bloomStart,
 	blurSigma,
+	boxBeyond,
 	CASCADE_BLOCK,
 	CASCADE_MAP,
 	type Camera,
@@ -47,6 +48,7 @@ import {
 	cascadeBlock,
 	DEFAULT_RENDER,
 	FOV,
+	FULL_QUALITY,
 	fingerprint,
 	GLOW_NARROW,
 	GLOW_WIDE,
@@ -94,6 +96,7 @@ import {
 	sharesView,
 	skyBlock,
 	splitByMesh,
+	type ViewQuality,
 	type ViewRenderer,
 } from "./view.js";
 
@@ -527,7 +530,7 @@ fn cascadeSees(k: i32, p: vec3f, n: vec3f) -> f32 {
 	let uv = vec2f(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
 	// ShadowSoftness's width, and never under a texel and a half, so the
 	// map's texels blur into a straight edge rather than steps.
-	let r = max(cascU.far.w / texel, 1.5) / ${CASCADE_MAP}.0;
+	let r = max(cascU.far.w / texel, 1.5) / f32(textureDimensions(sunMaps).x);
 	var seen = 0.0;
 	for (var j = 0; j < 8; j++) {
 		seen = seen + textureSampleCompareLevel(sunMaps, skyCompare, uv + POISSON[j] * r, k, c.z - 0.00005);
@@ -1146,8 +1149,14 @@ struct FarU { invViewProj: mat4x4f, eye: vec4f, size: vec4f };
 export class WebGpuView implements ViewRenderer {
 	readonly backend = "WebGPU" as const;
 
-	/** Samples a pixel: 4, antialiased, or 1, Settings' Antialiasing off. */
-	constructor(readonly samples: number = SAMPLES) {}
+	/**
+	 * Samples a pixel: 4, antialiased, or 1, Settings' Antialiasing off; and
+	 * each sun shadow map's side, in texels, as the quality level sets it.
+	 */
+	constructor(
+		readonly samples: number = SAMPLES,
+		readonly shadowMap: number = CASCADE_MAP,
+	) {}
 
 	/**
 	 * A pass's colour going to `target`: drawn antialiased and resolved into
@@ -1222,6 +1231,12 @@ export class WebGpuView implements ViewRenderer {
 		this.postOn = on;
 	}
 
+	/** The quality level's render distance and sun shadows. */
+	private quality: ViewQuality = FULL_QUALITY;
+	setQuality(quality: ViewQuality): void {
+		this.quality = quality;
+	}
+
 	/** The Rendering panel's mode and switches: see `RenderSettings`. */
 	private render: RenderSettings = DEFAULT_RENDER;
 	private heatAdded!: GPURenderPipeline;
@@ -1276,7 +1291,8 @@ export class WebGpuView implements ViewRenderer {
 	private cull(camera: Camera, draws: readonly { chunks?: Chunk[]; count: number }[]): void {
 		this.runs.clear();
 		const passes = passesOf(this.render.features);
-		if (!passes.frustum && !passes.occlusion) {
+		const distance = this.quality.distance;
+		if (!passes.frustum && !passes.occlusion && distance === null) {
 			this.culled = null;
 			this.occlusionStale = false;
 			return;
@@ -1291,8 +1307,11 @@ export class WebGpuView implements ViewRenderer {
 		this.cullView = { vp, eye: [...camera.eye] };
 		// Drawn with another view's depth: draw again once this view's arrives.
 		this.occlusionStale = passes.occlusion && !sameView(depth?.viewProj, vp);
+		// Past the quality level's render distance nothing is drawn, as in Studio.
 		const seen = (min: readonly number[], max: readonly number[]) =>
-			(!passes.frustum || boxInView(planes, min, max)) && !(depth && boxHidden(depth, min, max));
+			(distance === null || !boxBeyond(camera.eye, min, max, distance)) &&
+			(!passes.frustum || boxInView(planes, min, max)) &&
+			!(depth && boxHidden(depth, min, max));
 		let drawn = 0;
 		let of = 0;
 		for (const draw of draws) {
@@ -3471,7 +3490,7 @@ struct VIn { @location(0) pos: vec3f, @location(2) c0: vec3f, @location(3) c1: v
 			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "less" },
 		});
 		this.sunMaps = d.createTexture({
-			size: [CASCADE_MAP, CASCADE_MAP, SUN_CASCADES.length],
+			size: [this.shadowMap, this.shadowMap, SUN_CASCADES.length],
 			format: "depth32float",
 			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
 		});
@@ -3695,6 +3714,8 @@ fn along(pos: vec4f) -> f32 {
 			l?.shadowSoftness ?? 0.2,
 			l?.sunShadows ?? true,
 			true,
+			this.quality,
+			this.shadowMap,
 		);
 		if (!partsMoved && block.every((v, i) => v === this.cascadeLast[i])) return;
 		this.cascadeLast = block;

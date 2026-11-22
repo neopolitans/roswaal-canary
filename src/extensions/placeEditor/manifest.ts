@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.3.0",
+	version: "0.4.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.4.0",
+			roswaal: "1.1.0-canary.7",
+			date: "2026-11-22",
+			text: "Quality levels, Automatic and Level 1 to 21, as Studio's: each sets the switches, how far parts are drawn, the sun's shadows, the render scale and antialiasing. Automatic starts from the device and moves with frame times. The Rendering panel's performance presets are the levels now.",
+		},
 		{
 			version: "0.3.0",
 			roswaal: "1.1.0-canary.6",

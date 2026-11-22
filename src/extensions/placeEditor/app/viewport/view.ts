@@ -33,6 +33,9 @@ export interface Camera {
 
 export interface ViewRenderer {
 	readonly backend: "WebGPU" | "WebGL2";
+	/** Samples a pixel, and each sun shadow map's side: fixed for the view's life. */
+	readonly samples: number;
+	readonly shadowMap: number;
 	/** `progress` hears the share of the shaders compiled, 0 to 1, as they are. */
 	init(
 		canvas: HTMLCanvasElement,
@@ -88,6 +91,8 @@ export interface ViewRenderer {
 	setMeshes(meshes: ReadonlyMap<number, MeshGeometry>): void;
 	/** Whether the place's post effects are drawn: Settings › Scene view. */
 	setPostEffects(on: boolean): void;
+	/** The quality level's render distance and sun shadows: see quality.ts. */
+	setQuality(quality: ViewQuality): void;
 	/** How the place is drawn, from the Rendering panel: the renderer's alone, never the place's. */
 	setRender(render: RenderSettings): void;
 	/** What the last frame cost, for the Rendering panel. */
@@ -662,6 +667,39 @@ export const CASCADE_MAP = 2048;
 export const CASCADE_BLOCK = 16 * SUN_CASCADES.length + 8;
 
 /**
+ * What a quality level asks of the view: how far parts are drawn (null, all),
+ * how far the sun's sharp shadows reach, and below Level 10 how wide the
+ * blurred shadow standing in for Studio's voxel blobs is (null, ShadowSoftness's).
+ */
+export interface ViewQuality {
+	distance: number | null;
+	reach: number;
+	blobWidth: number | null;
+}
+export const FULL_QUALITY: ViewQuality = { distance: null, reach: 1024, blobWidth: null };
+
+/** The cascades' reaches for a shadow reach: SUN_CASCADES's shares of it. */
+export function cascadeFars(reach: number): number[] {
+	const top = SUN_CASCADES[SUN_CASCADES.length - 1];
+	return SUN_CASCADES.map((far) => (far * reach) / top);
+}
+
+/** Whether a box lies wholly past `distance` from `eye`: its nearest point further. */
+export function boxBeyond(
+	eye: readonly number[],
+	min: readonly number[],
+	max: readonly number[],
+	distance: number,
+): boolean {
+	let d2 = 0;
+	for (let a = 0; a < 3; a++) {
+		const d = eye[a] < min[a] ? min[a] - eye[a] : eye[a] > max[a] ? eye[a] - max[a] : 0;
+		d2 += d * d;
+	}
+	return d2 > distance * distance;
+}
+
+/**
  * The cascades for a view: each slice of the view, held in a sphere, seen by
  * the sun square on from beyond the whole place, so what casts a shadow into
  * the slice from outside it still does. Each map is moved only by whole texels
@@ -677,6 +715,8 @@ export function cascadeBlock(
 	softness: number,
 	on: boolean,
 	zeroToOne: boolean,
+	quality: ViewQuality = FULL_QUALITY,
+	mapSize: number = CASCADE_MAP,
 ): Float32Array {
 	const block = new Float32Array(CASCADE_BLOCK);
 	const n = SUN_CASCADES.length;
@@ -703,12 +743,16 @@ export function cascadeBlock(
 		k & 4 ? box.max[2] : box.min[2],
 	]);
 	let near = 0;
-	SUN_CASCADES.forEach((far, i) => {
+	// A shorter reach than the default's keeps to what is near the camera:
+	// casters outside a cascade's sphere cast nothing into it, as Studio's
+	// lower levels leave out a far ship's shadow.
+	const short = quality.reach < SUN_CASCADES[SUN_CASCADES.length - 1];
+	cascadeFars(quality.reach).forEach((far, i) => {
 		const mid = (near + far) / 2;
 		const corner = (d: number) => Math.hypot(d * tan * aspect, d * tan, d - mid);
 		const radius = Math.max(corner(near), corner(far)) + 1;
 		let centre = camera.eye.map((v, a) => v + ahead[a] * mid);
-		const texel = (2 * radius) / CASCADE_MAP;
+		const texel = (2 * radius) / mapSize;
 		const cx = dot(centre, x);
 		const cy = dot(centre, y);
 		centre = centre.map(
@@ -718,7 +762,7 @@ export function cascadeBlock(
 				y[a] * (Math.round(cy / texel) * texel - cy),
 		);
 		const along = corners.map((c) => dot(c, back) - dot(centre, back));
-		const top = Math.max(radius, ...along) + 1;
+		const top = (short ? radius : Math.max(radius, ...along)) + 1;
 		const depth = top - Math.min(-radius, ...along) + 1;
 		const eye = centre.map((v, a) => v + back[a] * top);
 		const view = new Float32Array(16);
@@ -741,7 +785,7 @@ export function cascadeBlock(
 		near = far;
 	});
 	// Softness as a width in studs: ShadowSoftness 0.2 blurs an edge over about a third of a stud.
-	block[n * 16 + 3] = 0.1 + Math.max(0, Math.min(1, softness)) * 1.2;
+	block[n * 16 + 3] = quality.blobWidth ?? 0.1 + Math.max(0, Math.min(1, softness)) * 1.2;
 	block[n * 16 + 7] = 1;
 	return block;
 }
@@ -1106,7 +1150,7 @@ export const DEFAULT_RENDER: RenderSettings = {
 	mode: "lit",
 	heat: "linear",
 	features: STUDIO_FEATURES,
-	preset: "studio",
+	preset: "level-21",
 	lightRanges: false,
 	freezeShadows: false,
 };

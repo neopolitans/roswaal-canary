@@ -40,6 +40,7 @@ import {
 	backToFront,
 	bloomStart,
 	blurSigma,
+	boxBeyond,
 	CASCADE_BLOCK,
 	CASCADE_MAP,
 	type Camera,
@@ -47,6 +48,7 @@ import {
 	cascadeBlock,
 	DEFAULT_RENDER,
 	FOV,
+	FULL_QUALITY,
 	fingerprint,
 	GLOW_NARROW,
 	GLOW_WIDE,
@@ -94,6 +96,7 @@ import {
 	sharesView,
 	skyBlock,
 	splitByMesh,
+	type ViewQuality,
 	type ViewRenderer,
 } from "./view.js";
 
@@ -459,7 +462,7 @@ float cascadeSees(int k, vec3 p, vec3 n) {
 	float slope = sqrt(max(1.0 - dot(n, l) * dot(n, l), 0.0));
 	vec4 c = cascViews[k] * vec4(p + n * texel * (0.5 + slope), 1.0);
 	vec3 q = c.xyz * 0.5 + 0.5;
-	float r = max(cascFar.w / texel, 1.5) / ${CASCADE_MAP}.0;
+	float r = max(cascFar.w / texel, 1.5) / float(textureSize(sunMaps, 0).x);
 	float seen = 0.0;
 	for (int j = 0; j < 8; j++) seen += texture(sunMaps, vec4(q.xy + POISSON[j] * r, float(k), q.z - 0.00005));
 	return seen / 8.0;
@@ -1091,8 +1094,14 @@ interface WireSource {
 export class WebGl2View implements ViewRenderer {
 	readonly backend = "WebGL2" as const;
 
-	/** Samples a pixel asked for: 4, antialiased, or 1, Settings' Antialiasing off. */
-	constructor(readonly samples: number = 4) {}
+	/**
+	 * Samples a pixel asked for: 4, antialiased, or 1, Settings' Antialiasing
+	 * off; and each sun shadow map's side, in texels, as the quality level sets it.
+	 */
+	constructor(
+		readonly samples: number = 4,
+		readonly shadowMap: number = CASCADE_MAP,
+	) {}
 	private gl!: WebGL2RenderingContext;
 	/**
 	 * Where the browser has EXT_clip_control, depth runs 0 to 1 and is
@@ -1183,6 +1192,12 @@ export class WebGl2View implements ViewRenderer {
 	private shape: GlowShape = glowShape(undefined, false);
 	setPostEffects(on: boolean): void {
 		this.postOn = on;
+	}
+
+	/** The quality level's render distance and sun shadows. */
+	private quality: ViewQuality = FULL_QUALITY;
+	setQuality(quality: ViewQuality): void {
+		this.quality = quality;
 	}
 
 	/** The Rendering panel's mode and switches: see `RenderSettings`. */
@@ -1471,7 +1486,8 @@ export class WebGl2View implements ViewRenderer {
 	private cull(camera: Camera, draws: readonly { chunks?: Chunk[]; count: number }[]): void {
 		this.runs.clear();
 		const passes = passesOf(this.render.features);
-		if (!passes.frustum && !passes.occlusion) {
+		const distance = this.quality.distance;
+		if (!passes.frustum && !passes.occlusion && distance === null) {
 			this.culled = null;
 			this.occlusionStale = false;
 			return;
@@ -1487,8 +1503,11 @@ export class WebGl2View implements ViewRenderer {
 		this.cullView = { vp, eye: [...camera.eye] };
 		// Drawn with another view's depth: draw again once this view's arrives.
 		this.occlusionStale = passes.occlusion && !sameView(depth?.viewProj, vp);
+		// Past the quality level's render distance nothing is drawn, as in Studio.
 		const seen = (min: readonly number[], max: readonly number[]) =>
-			(!passes.frustum || boxInView(planes, min, max)) && !(depth && boxHidden(depth, min, max));
+			(distance === null || !boxBeyond(camera.eye, min, max, distance)) &&
+			(!passes.frustum || boxInView(planes, min, max)) &&
+			!(depth && boxHidden(depth, min, max));
 		let drawn = 0;
 		let of = 0;
 		for (const draw of draws) {
@@ -2523,8 +2542,8 @@ export class WebGl2View implements ViewRenderer {
 			gl.TEXTURE_2D_ARRAY,
 			1,
 			gl.DEPTH_COMPONENT32F,
-			CASCADE_MAP,
-			CASCADE_MAP,
+			this.shadowMap,
+			this.shadowMap,
 			SUN_CASCADES.length,
 		);
 		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -2550,6 +2569,8 @@ export class WebGl2View implements ViewRenderer {
 			l?.shadowSoftness ?? 0.2,
 			l?.sunShadows ?? true,
 			false,
+			this.quality,
+			this.shadowMap,
 		);
 		if (!partsMoved && block.every((v, i) => v === this.cascadeLast[i])) return;
 		this.cascadeLast = block;
@@ -2557,7 +2578,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.skyFbo);
 		gl.drawBuffers([gl.NONE]);
 		gl.readBuffer(gl.NONE);
-		gl.viewport(0, 0, CASCADE_MAP, CASCADE_MAP);
+		gl.viewport(0, 0, this.shadowMap, this.shadowMap);
 		gl.useProgram(this.depthProgram.program);
 		gl.disable(gl.CULL_FACE);
 		gl.enable(gl.DEPTH_TEST);

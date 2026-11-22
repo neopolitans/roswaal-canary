@@ -1090,6 +1090,9 @@ interface WireSource {
 
 export class WebGl2View implements ViewRenderer {
 	readonly backend = "WebGL2" as const;
+
+	/** Samples a pixel asked for: 4, antialiased, or 1, Settings' Antialiasing off. */
+	constructor(readonly samples: number = 4) {}
 	private gl!: WebGL2RenderingContext;
 	/**
 	 * Where the browser has EXT_clip_control, depth runs 0 to 1 and is
@@ -1632,7 +1635,7 @@ export class WebGl2View implements ViewRenderer {
 	): Promise<void> {
 		this.canvas = canvas;
 		const gl = canvas.getContext("webgl2", {
-			antialias: true,
+			antialias: this.samples > 1,
 			powerPreference: "high-performance",
 		});
 		if (!gl) throw new Error("no WebGL2");
@@ -2101,7 +2104,7 @@ export class WebGl2View implements ViewRenderer {
 		);
 		// The place drawn off screen, antialiased, and resolved into a texture
 		// for the glow to be added to.
-		const samples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES) as number);
+		const samples = this.drawnSamples();
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.sceneColour);
 		gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, this.width, this.height);
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.sceneDepth);
@@ -2911,6 +2914,12 @@ export class WebGl2View implements ViewRenderer {
 		return Promise.resolve();
 	}
 
+	/** The off-screen frame's samples: as asked, as far as the GPU goes; 0 is none. */
+	private drawnSamples(): number {
+		if (this.samples <= 1) return 0;
+		return Math.min(this.samples, this.gl.getParameter(this.gl.MAX_SAMPLES) as number);
+	}
+
 	/** WebGL2's programs are built once, for every switch. */
 	pipelinesReady(): Promise<void> {
 		return Promise.resolve();
@@ -2973,7 +2982,7 @@ export class WebGl2View implements ViewRenderer {
 			gpu,
 			timers: gl.getExtension("EXT_disjoint_timer_query_webgl2") !== null,
 			// The off-screen frame's, which the place is drawn into: see `resize`.
-			samples: Math.min(4, gl.getParameter(gl.MAX_SAMPLES) as number),
+			samples: Math.max(1, this.drawnSamples()),
 		};
 	}
 

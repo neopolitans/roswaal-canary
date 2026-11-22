@@ -26,7 +26,7 @@ import {
 	visibleRuns,
 } from "./culling.js";
 import { GpuEffects } from "./effectsGpu.js";
-import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
+import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geometry.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
@@ -226,6 +226,7 @@ ${OVERDRAW_WGSL}
 }
 `;
 
+/** Antialiasing's samples a pixel, unless the view is made with another count. */
 const SAMPLES = 4;
 
 /** The pipelines built again for one set of switches: see WebGpuView.litFor. */
@@ -486,17 +487,24 @@ fn skyVisibilityMaps(p: vec3f, n: vec3f) -> f32 {
 		let off = abs(p - skyU.nearAt.xyz);
 		edge = max(off.x, max(off.y, off.z)) / skyU.nearAt.w;
 	}
-	var near = 0.0;
-	if (edge < 1.0) {
-		let qn = p + n * skyU.near.x * 1.5;
-		for (var k = 0; k < 8; k++) { near = near + skySeesIn(${SKY_NEAR_LAYER} + k, qn, skyU.near); }
-		near = near / 8.0;
-		if (edge < 0.75) { return near; }
-	}
+	// The near maps where edge < 1, the whole place's where edge >= 0.75: one
+	// loop over all sixteen, so the lookup is written once rather than once a
+	// loop, which a tablet's GPU pays for whether or not it is run.
+	let qn = p + n * skyU.near.x * 1.5;
 	let q = p + n * skyU.info.x * 1.5;
+	let nearOn = edge < 1.0;
+	let farOn = edge >= 0.75;
+	var near = 0.0;
 	var seen = 0.0;
-	for (var k = 0; k < 8; k++) { seen = seen + skySees(k, q); }
+	for (var j = 0; j < 16; j++) {
+		let isNear = j < 8;
+		if ((isNear && !nearOn) || (!isNear && !farOn)) { continue; }
+		let s = skySeesIn(select(j - 8, ${SKY_NEAR_LAYER} + j, isNear), select(q, qn, isNear), select(skyU.info, skyU.near, isNear));
+		if (isNear) { near = near + s; } else { seen = seen + s; }
+	}
+	near = near / 8.0;
 	seen = seen / 8.0;
+	if (edge < 0.75) { return near; }
 	if (edge >= 1.0) { return seen; }
 	return mix(near, seen, smoothstep(0.75, 1.0, edge));
 }
@@ -825,8 +833,13 @@ fn surface(i: VOut) -> vec4f {
 	let uv = faceUv(i.local, i.lnormal);
 	let layer = i32(b.w) - 1;
 	let look = textureSample(looks, lookSampler, uv / tex.x, max(layer, 0));
-	var pat = pattern(u32(b.z), uv, b.x);
-	if (!has(${FEATURE_BIT.grain}u)) { pat = vec3f(1.0, 1.0, pat.z); }
+	// The pattern only where something reads it: its x and y for grain, its z
+	// for CrackedLava's light. Left out of a place with neither.
+	var pat = vec3f(1.0, 1.0, 0.0);
+	if (has(${FEATURE_BIT.grain}u) || has(${FEATURE_BIT.lava}u)) {
+		pat = pattern(u32(b.z), uv, b.x);
+		if (!has(${FEATURE_BIT.grain}u)) { pat = vec3f(1.0, 1.0, pat.z); }
+	}
 	if (layer >= 0 && has(${FEATURE_BIT.textures}u)) {
 		pat = vec3f(mix(1.0, look.r * 2.0, tex.y), 1.0, tex.z * look.g);
 	}
@@ -1102,9 +1115,9 @@ interface Draw {
  * The depth image for occlusion: each cell the farthest of the solid parts'
  * depths over its pixels, as a distance from the eye; 1e30 where nothing is.
  */
-const FAR_SHADER = /* wgsl */ `
+const farShader = (samples: number) => /* wgsl */ `
 struct FarU { invViewProj: mat4x4f, eye: vec4f, size: vec4f };
-@group(0) @binding(0) var depthTex: texture_depth_multisampled_2d;
+@group(0) @binding(0) var depthTex: ${samples > 1 ? "texture_depth_multisampled_2d" : "texture_depth_2d"};
 @group(0) @binding(1) var<uniform> fu: FarU;
 @vertex fn vsFar(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 	let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
@@ -1132,6 +1145,23 @@ struct FarU { invViewProj: mat4x4f, eye: vec4f, size: vec4f };
 
 export class WebGpuView implements ViewRenderer {
 	readonly backend = "WebGPU" as const;
+
+	/** Samples a pixel: 4, antialiased, or 1, Settings' Antialiasing off. */
+	constructor(readonly samples: number = SAMPLES) {}
+
+	/**
+	 * A pass's colour going to `target`: drawn antialiased and resolved into
+	 * it, the samples let go; or, one sample a pixel, drawn into it and kept.
+	 */
+	private into(target: GPUTextureView): {
+		view: GPUTextureView;
+		resolveTarget?: GPUTextureView;
+		storeOp: GPUStoreOp;
+	} {
+		return this.samples > 1
+			? { view: this.msaa!.createView(), resolveTarget: target, storeOp: "discard" }
+			: { view: target, storeOp: "store" };
+	}
 	private device!: GPUDevice;
 	private context!: GPUCanvasContext;
 	private format!: GPUTextureFormat;
@@ -1434,6 +1464,9 @@ export class WebGpuView implements ViewRenderer {
 	/** Asked for when something it waited for is ready: a pipeline built for the switches. */
 	onRedraw?: () => void;
 
+	/** Whether any of the place's materials has grain or a pattern: see sceneGrainy. */
+	private grainy = true;
+
 	/** Whether the place has any PointLight, SpotLight or SurfaceLight: see setLights. */
 	private hasLights = true;
 
@@ -1452,6 +1485,7 @@ export class WebGpuView implements ViewRenderer {
 				FEATURE_BIT.lightHighlights
 			);
 		if (!this.glowing) bits &= ~(FEATURE_BIT.neon | FEATURE_BIT.neonGlow | FEATURE_BIT.lava);
+		if (!this.grainy) bits &= ~FEATURE_BIT.grain;
 		return bits;
 	}
 
@@ -1650,7 +1684,7 @@ export class WebGpuView implements ViewRenderer {
 			},
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: depth,
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		// Lit only where the pre-pass found it nearest.
 		this.pipeline(
@@ -1661,7 +1695,7 @@ export class WebGpuView implements ViewRenderer {
 				fragment: { module, entryPoint: "fs", targets: [{ format: this.format }] },
 				primitive: { topology: "triangle-list", cullMode: "back" },
 				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "equal" },
-				multisample: { count: SAMPLES },
+				multisample: { count: this.samples },
 			}),
 		);
 		// The see-through parts: blended over what is behind them, hidden by
@@ -1686,7 +1720,7 @@ export class WebGpuView implements ViewRenderer {
 				},
 				primitive: { topology: "triangle-list", cullMode: "back" },
 				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-				multisample: { count: SAMPLES },
+				multisample: { count: this.samples },
 			}),
 		);
 		// The heatmaps' see-through parts: each one's share added to what is behind it.
@@ -1708,7 +1742,7 @@ export class WebGpuView implements ViewRenderer {
 			},
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		// Wireframe only: every edge, those behind others included.
 		this.pipeline((p) => (this.wire = p), {
@@ -1729,7 +1763,7 @@ export class WebGpuView implements ViewRenderer {
 			},
 			primitive: { topology: "line-list" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "always" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		// Decals and Textures: blended onto their faces, hidden by what is in
 		// front, hiding nothing. Their own vertices, and their image in group 1.
@@ -1777,7 +1811,7 @@ export class WebGpuView implements ViewRenderer {
 			},
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		this.pipeline((p) => (this.imageDepth = p), {
 			layout: d.createPipelineLayout({ bindGroupLayouts: [layout, this.imageLayout] }),
@@ -1803,13 +1837,13 @@ export class WebGpuView implements ViewRenderer {
 			},
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		this.viewPipelines(module, layout, buffers);
 		this.effects = new GpuEffects({
 			device: d,
 			format: this.format,
-			samples: SAMPLES,
+			samples: this.samples,
 			imageLayout: this.imageLayout,
 			imageSampler: this.imageSampler,
 			pipeline: (set, desc) => this.pipeline(set, desc),
@@ -1822,7 +1856,7 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fs", targets: [{ format: this.format, writeMask: 0 }] },
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: depth,
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		this.pipeline(
 			(p) => (this.glassBlended = p),
@@ -1848,7 +1882,7 @@ export class WebGpuView implements ViewRenderer {
 					depthWriteEnabled: false,
 					depthCompare: "greater-equal",
 				},
-				multisample: { count: SAMPLES },
+				multisample: { count: this.samples },
 			}),
 		);
 		// Over everything, as Studio's selection box is.
@@ -1872,7 +1906,7 @@ export class WebGpuView implements ViewRenderer {
 				},
 				primitive: { topology: "triangle-list" },
 				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare },
-				multisample: { count: SAMPLES },
+				multisample: { count: this.samples },
 			});
 		line((p) => (this.lines = p), "always");
 		line((p) => (this.linesBehind = p), "greater-equal");
@@ -1901,7 +1935,7 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fsOver", targets: [{ format: this.format }] },
 			primitive: { topology: "line-list" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "always" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		this.pipeline((p) => (this.handle = p), {
 			layout: pipelineLayout,
@@ -1921,7 +1955,7 @@ export class WebGpuView implements ViewRenderer {
 			},
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: depth,
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		this.pipeline((p) => (this.skyPipeline = p), {
 			layout: pipelineLayout,
@@ -1929,14 +1963,14 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fsSky", targets: [{ format: this.format }] },
 			primitive: { topology: "triangle-list" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "always" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		// The glow's passes: the place drawn small in what it gives off, then blurred and added.
 		// Half floats, so six passes of blur do not round the glow's fall into steps.
 		// Drawn at the view's size, antialiased as the frame is, so a sliver of
 		// Neon through a seam glows by as much of a pixel as it covers.
 		const glowTarget = { format: this.format };
-		const glowSamples = { count: SAMPLES };
+		const glowSamples = { count: this.samples };
 		this.pipeline((p) => (this.glowSolid = p), {
 			layout: pipelineLayout,
 			vertex: { module, entryPoint: "vs", buffers },
@@ -2055,7 +2089,7 @@ export class WebGpuView implements ViewRenderer {
 			primitive: { topology: "triangle-list" },
 			// Under the selection and the handles, in their pass: see draw.
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "always" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		this.sampler = d.createSampler({ magFilter: "linear", minFilter: "linear" });
 		// Across, down, and the strength the glow is added at.
@@ -2159,6 +2193,7 @@ export class WebGpuView implements ViewRenderer {
 		this.glass = [];
 		this.clearEye = null;
 		this.glowing = sceneGlows(scene);
+		this.grainy = sceneGrainy(scene);
 		const sets = seeThroughSets(scene, this.glassHides);
 		type Rows = { data: Float32Array; count: number };
 		const add = (
@@ -2277,13 +2312,13 @@ export class WebGpuView implements ViewRenderer {
 		const d = this.device;
 		this.msaa = d.createTexture({
 			size,
-			sampleCount: SAMPLES,
+			sampleCount: this.samples,
 			format: this.format,
 			usage: TEXTURE.RENDER_ATTACHMENT,
 		});
 		this.depth = d.createTexture({
 			size,
-			sampleCount: SAMPLES,
+			sampleCount: this.samples,
 			format: "depth32float",
 			// Read by occlusion's depth image: see drawFar.
 			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
@@ -2409,11 +2444,9 @@ export class WebGpuView implements ViewRenderer {
 			timestampWrites: this.stamp("post"),
 			colorAttachments: [
 				{
-					view: this.msaa!.createView(),
-					resolveTarget: this.glowFull.createView(),
+					...this.into(this.glowFull.createView()),
 					clearValue: { r: 0, g: 0, b: 0, a: 0 },
 					loadOp: "clear",
-					storeOp: "discard",
 				},
 			],
 			depthStencilAttachment: {
@@ -2636,8 +2669,7 @@ export class WebGpuView implements ViewRenderer {
 			timestampWrites: this.stamp("scene"),
 			colorAttachments: [
 				{
-					view: this.msaa!.createView(),
-					resolveTarget: glow ? this.frame!.createView() : screen,
+					...this.into(glow ? this.frame!.createView() : screen),
 					clearValue: heat
 						? { r: 0, g: 0, b: 0, a: 1 }
 						: wire
@@ -2646,7 +2678,6 @@ export class WebGpuView implements ViewRenderer {
 								? { r: 0.56, g: 0.71, b: 0.86, a: 1 }
 								: { r: 0.16, g: 0.17, b: 0.19, a: 1 },
 					loadOp: "clear",
-					storeOp: "discard",
 				},
 			],
 			depthStencilAttachment: {
@@ -2736,11 +2767,9 @@ export class WebGpuView implements ViewRenderer {
 				timestampWrites: this.stamp("post"),
 				colorAttachments: [
 					{
-						view: this.msaa!.createView(),
-						resolveTarget: screen,
+						...this.into(screen),
 						clearValue: { r: 0, g: 0, b: 0, a: 1 },
 						loadOp: "clear",
-						storeOp: "discard",
 					},
 				],
 				depthStencilAttachment: {
@@ -2823,11 +2852,9 @@ export class WebGpuView implements ViewRenderer {
 		const pass = encoder.beginRenderPass({
 			colorAttachments: [
 				{
-					view: this.msaa!.createView(),
-					resolveTarget: this.context.getCurrentTexture().createView(),
+					...this.into(this.context.getCurrentTexture().createView()),
 					clearValue: { r: 0.16, g: 0.17, b: 0.19, a: 1 },
 					loadOp: "clear",
-					storeOp: "discard",
 				},
 			],
 			depthStencilAttachment: {
@@ -2848,7 +2875,7 @@ export class WebGpuView implements ViewRenderer {
 	}
 
 	deviceFacts(): { gpu: string; timers: boolean; samples: number } {
-		return { gpu: this.gpuName, timers: !!this.timing, samples: SAMPLES };
+		return { gpu: this.gpuName, timers: !!this.timing, samples: this.samples };
 	}
 
 	/** While profiling, ends a stage: what it encoded is submitted, and drawing goes on in a new encoder. */
@@ -2931,13 +2958,13 @@ export class WebGpuView implements ViewRenderer {
 		if (!this.cullView) return false;
 		const { cols, rows } = depthCells(this.width, this.height);
 		if (!this.farPipe || !this.farLayout) {
-			const module = d.createShaderModule({ code: FAR_SHADER });
+			const module = d.createShaderModule({ code: farShader(this.samples) });
 			this.farLayout = d.createBindGroupLayout({
 				entries: [
 					{
 						binding: 0,
 						visibility: STAGE.FRAGMENT,
-						texture: { sampleType: "depth", multisampled: true },
+						texture: { sampleType: "depth", multisampled: this.samples > 1 },
 					},
 					{ binding: 1, visibility: STAGE.FRAGMENT, buffer: {} },
 				],
@@ -3055,7 +3082,7 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fsCount", targets: [added] },
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "always" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		// Every fragment of an image in front of the solid parts.
 		this.pipeline((p) => (this.imageCount = p), {
@@ -3078,7 +3105,7 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fsCount", targets: [added] },
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 		// Each draw's triangles, at its own offset: a draw is one mesh.
 		this.densityLayout = d.createBindGroupLayout({
@@ -3096,7 +3123,7 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fsDensity", targets: [{ format: this.format }] },
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
-			multisample: { count: SAMPLES },
+			multisample: { count: this.samples },
 		});
 	}
 

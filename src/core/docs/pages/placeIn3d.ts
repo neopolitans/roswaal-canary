@@ -436,6 +436,10 @@ export function placeEditorPerformancePage(): DocPage {
 						"Resolution",
 						"The frame at all, half and a quarter of the pixels. Much faster with fewer means filling pixels is the cost",
 					],
+					[
+						"Antialiasing",
+						"One frame with the view built again at one sample a pixel and at four, so the two compare",
+					],
 					["Device", "The renderer, the GPU's name, the canvas size and antialiasing"],
 				],
 			},

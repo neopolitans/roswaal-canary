@@ -143,6 +143,10 @@ const RESULT: ProfileResult = {
 		{ label: "100%", median: 80, p95: 90 },
 		{ label: "25%", median: 20, p95: 25 },
 	],
+	antialias: [
+		{ label: "Off", median: 50, p95: 55 },
+		{ label: "4×", median: 80, p95: 85 },
+	],
 	clock: 1,
 };
 
@@ -171,6 +175,9 @@ describe("what the profile says", () => {
 		expect(text).toMatch(/\+ Shadows\s+70\.0 ms \+40\.0 ms/);
 		expect(text).toMatch(/25%\s+20\.0 ms\s+50 fps/);
 		expect(text).toMatch(/Empty frame\s+20\.0 ms/);
+		expect(text).toMatch(
+			/Antialiasing, the view built again for each:\n\s+Off\s+50\.0 ms\s+20 fps\n\s+4×\s+80\.0 ms/,
+		);
 		expect(text).toMatch(/Parts' depth only\s+not here/);
 		expect(text).toMatch(/Without Sky shadows\s+30\.0 ms\s+50\.0 ms/);
 	});

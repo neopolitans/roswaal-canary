@@ -147,6 +147,23 @@ export function rayHit(
 }
 
 /** Whether anything in the place gives light of its own -- Neon, CrackedLava -- for the glow. */
+/**
+ * Whether any part's material has grain or a pattern: a place of Plastic and
+ * SmoothPlastic has neither, and the shader can leave both out.
+ */
+export function sceneGrainy(scene: PlaceScene): boolean {
+	for (const set of [scene.kinds, scene.translucent])
+		for (const k of SCENE_KINDS) {
+			const { data, count } = set[k];
+			const words = new Uint32Array(data.buffer, data.byteOffset, data.length);
+			for (let i = 0; i < count; i++) {
+				const m = MATERIALS[words[i * SCENE_STRIDE + 14] & 255];
+				if (m && (m.grain > 0 || m.pattern !== "none")) return true;
+			}
+		}
+	return false;
+}
+
 export function sceneGlows(scene: PlaceScene): boolean {
 	for (const set of [scene.kinds, scene.translucent])
 		for (const k of SCENE_KINDS) {

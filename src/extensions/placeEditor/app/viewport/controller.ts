@@ -16,7 +16,7 @@ import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
 import { TOUCH_RENDER_SCALE } from "../../settings.js";
-import { type AssetProgress, AssetTally } from "./assetProgress.js";
+import { type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import { boxAround } from "./box.js";
 import {
 	type DragStart,
@@ -110,6 +110,8 @@ export interface ViewportOptions {
 	altClickSteps: boolean;
 	/** The share of the screen's pixels across and down the place is drawn at; Automatic by the screen. */
 	renderScale?: number | "auto";
+	/** Samples a pixel: 4, antialiased, or 1, off. Changing it builds the view again. */
+	antialias?: number;
 }
 
 /**
@@ -640,14 +642,8 @@ export class ViewportController {
 			this.redraw();
 		}
 		if (!this.view) return;
-		if (was.renderer !== options.renderer) {
-			this.view.destroy();
-			this.view = null;
-			this.canvas?.remove();
-			this.pivotMark?.remove();
-			this.pivotMark = null;
-			this.canvas = null;
-			void this.start();
+		if (was.renderer !== options.renderer || (was.antialias ?? 4) !== (options.antialias ?? 4)) {
+			void this.restartView();
 			return;
 		}
 		this.view.setOutline(options.outlineWidth, options.hideBehind);
@@ -1767,7 +1763,8 @@ export class ViewportController {
 			return canvas;
 		};
 		const gl2 = this.options.renderer === "webgl2";
-		let view: ViewRenderer = gl2 ? new WebGl2View() : new WebGpuView();
+		const samples = this.options.antialias ?? 4;
+		let view: ViewRenderer = gl2 ? new WebGl2View(samples) : new WebGpuView(samples);
 		let fellBack = false;
 		try {
 			try {
@@ -1775,7 +1772,7 @@ export class ViewportController {
 			} catch (err) {
 				if (gl2) throw err;
 				fellBack = true;
-				view = new WebGl2View();
+				view = new WebGl2View(samples);
 				await this.initView(view, make(), place);
 			}
 		} catch (err) {
@@ -1810,6 +1807,31 @@ export class ViewportController {
 		this.attach(this.canvas as HTMLCanvasElement);
 		this.refreshSelection();
 		this.fit();
+	}
+
+	/** The view made again: another renderer, or another number of samples a pixel. */
+	private async restartView(): Promise<void> {
+		this.view?.destroy();
+		this.view = null;
+		this.canvas?.remove();
+		this.pivotMark?.remove();
+		this.pivotMark = null;
+		this.canvas = null;
+		await this.start();
+	}
+
+	/**
+	 * Once a view built again has the place's assets on the GPU, as far as they
+	 * come in ten seconds, and the pipelines for its switches.
+	 */
+	private async viewSettled(): Promise<void> {
+		const from = performance.now();
+		while (performance.now() - from < 10000) {
+			const a = this.state.assets;
+			if (this.view && (a === null || assetsPending(a) <= 0)) break;
+			await new Promise((r) => setTimeout(r, 200));
+		}
+		await this.view?.pipelinesReady();
 	}
 
 	/** A share of the canvas's pixels, below 1 only while a profile measures resolution. */
@@ -2014,6 +2036,8 @@ export class ViewportController {
 		const render = this.state.render;
 		const options = this.options;
 		const pixels = { width: canvas.width, height: canvas.height };
+		// Its size on the page, before the antialiasing sweep replaces the canvas.
+		const box = canvas.getBoundingClientRect();
 		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
 		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round((this.pixelRatio() / Math.min(2, devicePixelRatio || 1)) * 100)}%`;
 		const steps = RENDER_STEPS.length;
@@ -2025,7 +2049,7 @@ export class ViewportController {
 			),
 		}));
 		const total =
-			1 + 1 + 3 + 1 + 1 + (steps + 1) + 3 + alone.reduce((n, g) => n + g.features.length, 0);
+			1 + 1 + 3 + 1 + 1 + (steps + 1) + 3 + 2 + alone.reduce((n, g) => n + g.features.length, 0);
 		let done = 0;
 		const phase = (name: string) =>
 			this.set({ profiling: { phase: name, done: done++, of: total } });
@@ -2100,9 +2124,28 @@ export class ViewportController {
 				const h = this.canvas?.height ?? 0;
 				resolution.push(await this.timeWaited(`${Math.round(scale * 100)}% (${w}×${h})`, 30));
 			}
+			this.resolutionScale = 1;
+			// Before the antialiasing sweep builds the view again: this one's counts and device.
 			const stats = view.stats();
 			const facts = view.deviceFacts();
-			const box = canvas.getBoundingClientRect();
+			// Antialiasing: the view built again at one sample a pixel, then at four,
+			// each measured once it has its assets and pipelines, so the two compare.
+			const antialias: Timed[] = [];
+			for (const [samples, label] of [
+				[1, "Off"],
+				[4, "4×"],
+			] as const) {
+				phase(`Antialiasing ${label}`);
+				this.options = { ...options, antialias: samples };
+				await this.restartView();
+				await this.viewSettled();
+				antialias.push(await this.timeWaited(label, 30));
+			}
+			this.options = options;
+			if ((options.antialias ?? 4) !== 4) {
+				await this.restartView();
+				await this.viewSettled();
+			}
 			result = {
 				facts: {
 					renderer: view.backend,
@@ -2132,11 +2175,14 @@ export class ViewportController {
 				without,
 				asSet,
 				resolution,
+				antialias,
 				clock: clockStep(),
 			};
 		} finally {
-			view.setProfiling(null);
-			view.setProbe(null);
+			// The view as it is now: the antialiasing sweep builds it again.
+			this.view?.setProfiling(null);
+			this.view?.setProbe(null);
+			this.options = options;
 			this.counting = null;
 			this.resolutionScale = 1;
 			this.setRender(render);

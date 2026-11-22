@@ -268,6 +268,10 @@ export function settingsPage(): DocPage {
 						"How many of the screen's pixels the place is drawn at, across and down: **Automatic**, the default, is 75% on a touch screen and 100% elsewhere; or **100%**, **75%** or **50%**. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
 					],
 					[
+						"Antialiasing",
+						"Smooths parts' edges by drawing four samples a pixel: **4×**, the default, or **Off**, one, which is faster where filling pixels is the cost. The view is made again when it changes.",
+					],
+					[
 						"Selection outline",
 						"How wide the outline round what is picked is drawn: **Thin**, **Medium** or **Thick**.",
 					],

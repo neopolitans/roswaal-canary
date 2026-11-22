@@ -1272,6 +1272,22 @@ function ProfileSection({
 									most={resMost}
 								/>
 							))}
+							{profile.antialias.length > 0 && (
+								<>
+									<h4 className="profile-head">
+										Antialiasing <span>frame · rate</span>
+									</h4>
+									{profile.antialias.map((r) => (
+										<TimeBar
+											key={r.label}
+											name={r.label}
+											value={r.median}
+											second={fpsText(r.median)}
+											most={Math.max(...profile.antialias.map((x) => x.median))}
+										/>
+									))}
+								</>
+							)}
 							<h4 className="profile-head">Device</h4>
 							<Rows
 								rows={[

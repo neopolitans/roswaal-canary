@@ -246,6 +246,8 @@ export interface ProfileResult {
 	/** The frame as set, measured just before the switches are turned off, which they are compared with. */
 	asSet: Timed | null;
 	resolution: Timed[];
+	/** One frame with the view built at one sample a pixel, and at four. */
+	antialias: Timed[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
 	clock: number;
 }
@@ -367,5 +369,13 @@ export function profileReport(result: ProfileResult): string {
 		lines.push(
 			`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
 		);
+	if (result.antialias.length > 0) {
+		lines.push("");
+		lines.push("Antialiasing, the view built again for each:");
+		for (const r of result.antialias)
+			lines.push(
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+			);
+	}
 	return lines.join("\n");
 }

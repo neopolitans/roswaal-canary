@@ -34,6 +34,7 @@ describe("an extension's settings", () => {
 			renderer: "auto",
 			frameRate: "vsync",
 			renderScale: "auto",
+			antialias: "4",
 			outlineWidth: "medium",
 			outlineThrough: true,
 			altClickSteps: false,

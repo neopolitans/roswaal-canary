@@ -9,6 +9,21 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.6",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.3.0: antialiasing can be turned off, and the profile measures it.",
+		added: [
+			"**Antialiasing** in Settings › Scene view: 4×, the default, or Off, one sample a pixel. The view is made again when it changes.",
+			"**The profile's antialiasing rows**: one frame with the view built at one sample a pixel and at four.",
+		],
+		changed: [
+			"**The sky's shadow is read in one loop over its sixteen maps**, and materials' grain and patterns are left out of a place with none, as one of Plastic and SmoothPlastic is. The picture is unchanged.",
+			"**The Place Editor is 0.3.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.5",
 		date: "2026-11-21",
 		headline: "The Place Editor's shader is smaller on WebGPU, for a tablet's GPU.",

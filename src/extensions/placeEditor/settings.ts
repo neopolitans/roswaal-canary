@@ -55,11 +55,19 @@ export type ViewportRenderScale = (typeof VIEWPORT_RENDER_SCALES)[number]["value
 /** Automatic's scale on a touch screen. */
 export const TOUCH_RENDER_SCALE = 0.75;
 
+/** Antialiasing: four samples a pixel, or one. */
+export const VIEWPORT_ANTIALIAS = [
+	{ value: "4", label: "4×" },
+	{ value: "off", label: "Off" },
+] as const;
+export type ViewportAntialias = (typeof VIEWPORT_ANTIALIAS)[number]["value"];
+
 /** The settings as the viewer reads them. */
 export interface PlaceEditorSettings {
 	renderer: ViewportRenderer;
 	frameRate: ViewportFrameRate;
 	renderScale: ViewportRenderScale;
+	antialias: ViewportAntialias;
 	outlineWidth: OutlineWidth;
 	/** The outline shows through what is in front of it, as Studio's does. */
 	outlineThrough: boolean;
@@ -101,6 +109,14 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,
+			},
+			{
+				key: "antialias",
+				title: "Antialiasing",
+				help: "Smooths parts' edges by drawing four samples a pixel. Off draws one, which is faster where filling pixels is the cost. The view is made again when it changes.",
+				type: "choice",
+				default: "4",
+				choices: VIEWPORT_ANTIALIAS,
 			},
 		],
 	},

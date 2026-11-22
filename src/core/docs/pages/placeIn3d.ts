@@ -463,6 +463,10 @@ export function placeEditorPerformancePage(): DocPage {
 						"Antialiasing",
 						"One frame with the view built again at one sample a pixel and at four, so the two compare",
 					],
+					[
+						"Quality levels",
+						"One frame at each level, 1 to 21, with the level's own render scale and antialiasing; the view goes back to its own level after",
+					],
 					["Device", "The renderer, the GPU's name, the canvas size and antialiasing"],
 				],
 			},

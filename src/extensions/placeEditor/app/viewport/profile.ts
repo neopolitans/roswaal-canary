@@ -248,6 +248,8 @@ export interface ProfileResult {
 	resolution: Timed[];
 	/** One frame with the view built at one sample a pixel, and at four. */
 	antialias: Timed[];
+	/** One frame at each quality level, 1 to 21, with the level's own scale and antialiasing. */
+	quality: Timed[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
 	clock: number;
 }
@@ -373,6 +375,14 @@ export function profileReport(result: ProfileResult): string {
 		lines.push("");
 		lines.push("Antialiasing, the view built again for each:");
 		for (const r of result.antialias)
+			lines.push(
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+			);
+	}
+	if (result.quality.length > 0) {
+		lines.push("");
+		lines.push("Quality levels, each with its own scale and antialiasing:");
+		for (const r of result.quality)
 			lines.push(
 				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
 			);

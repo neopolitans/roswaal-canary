@@ -323,10 +323,9 @@ export function featuresAtLevel(level: number): RenderFeatures {
 	) as unknown as RenderFeatures;
 }
 
-/** A quality level's name, with the two that have another as well. */
+/** A quality level's name, Level 21's with its other. */
 export function levelLabel(level: number): string {
 	if (level === 21) return "Level 21 · As Studio";
-	if (level === 15) return "Level 15 · Fast (iPad)";
 	return `Level ${level}`;
 }
 

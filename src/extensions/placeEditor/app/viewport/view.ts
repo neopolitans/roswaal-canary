@@ -743,10 +743,8 @@ export function cascadeBlock(
 		k & 4 ? box.max[2] : box.min[2],
 	]);
 	let near = 0;
-	// A shorter reach than the default's keeps to what is near the camera:
-	// casters outside a cascade's sphere cast nothing into it, as Studio's
-	// lower levels leave out a far ship's shadow.
-	const short = quality.reach < SUN_CASCADES[SUN_CASCADES.length - 1];
+	// Every caster towards the sun counts, however far: Studio's shorter
+	// reaches still drew shadows cast from 1,000 studs up.
 	cascadeFars(quality.reach).forEach((far, i) => {
 		const mid = (near + far) / 2;
 		const corner = (d: number) => Math.hypot(d * tan * aspect, d * tan, d - mid);
@@ -762,7 +760,7 @@ export function cascadeBlock(
 				y[a] * (Math.round(cy / texel) * texel - cy),
 		);
 		const along = corners.map((c) => dot(c, back) - dot(centre, back));
-		const top = (short ? radius : Math.max(radius, ...along)) + 1;
+		const top = Math.max(radius, ...along) + 1;
 		const depth = top - Math.min(-radius, ...along) + 1;
 		const eye = centre.map((v, a) => v + back[a] * top);
 		const view = new Float32Array(16);

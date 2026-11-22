@@ -49,15 +49,25 @@ const DISTANCE: [number, number | null][] = [
 	[17, null],
 ];
 
-/** The sun's shadow reach from Level 10, where Studio's map begins: first guesses, to fit. */
+/**
+ * How far from the camera the sun's sharp shadows reach, fitted to Studio's
+ * captures at each level (22 Nov 2026): a floor of shadows from 40 to 1,200
+ * studs, cast from just above it and from 1,000 studs up, which reached as
+ * far. Below Level 10 the blurred stand-in reaches as far as Studio's voxel
+ * shadows did beyond Level 10's map.
+ */
 const REACH: [number, number][] = [
-	[1, 128],
-	[11, 192],
-	[12, 256],
-	[13, 384],
-	[14, 512],
-	[15, 768],
-	[16, 1024],
+	[1, 384],
+	[10, 90],
+	[11, 124],
+	[12, 164],
+	[13, 209],
+	[14, 269],
+	[15, 318],
+	[16, 385],
+	[17, 430],
+	[18, 528],
+	[19, 578],
 ];
 
 function stepped<T>(table: [number, T][], level: number): T {

@@ -1790,7 +1790,7 @@ export class ViewportController {
 				gpu: await gpuName(gl2),
 			});
 			this.auto = new AutoQuality(level);
-			this.toLevel(level, true);
+			void this.toLevel(level, true);
 		}
 		const samples = this.samples();
 		const map = this.level().shadowMap;
@@ -1902,15 +1902,18 @@ export class ViewportController {
 			const started = this.classed || this.view !== null;
 			this.classed = started;
 			this.auto = new AutoQuality(started ? this.state.quality.level : TOP_LEVEL);
-			this.toLevel(this.auto.level, true);
+			void this.toLevel(this.auto.level, true);
 		} else {
 			this.auto = null;
-			this.toLevel(qualityLevel(quality).level, true);
+			void this.toLevel(qualityLevel(quality).level, true);
 		}
 	}
 
-	/** Draws at `level`; `reset`, with its switches in the Rendering panel. */
-	private toLevel(level: number, reset: boolean): void {
+	/**
+	 * Draws at `level`; `reset`, with its switches in the Rendering panel.
+	 * Done once the view is drawing at it, made again where it had to be.
+	 */
+	private async toLevel(level: number, reset: boolean): Promise<void> {
 		const q = qualityLevel(level);
 		this.set({ quality: { level: q.level, auto: this.auto !== null } });
 		if (reset)
@@ -1918,7 +1921,7 @@ export class ViewportController {
 		const view = this.view;
 		if (!view) return;
 		if (view.samples !== this.samples() || view.shadowMap !== q.shadowMap) {
-			void this.restartView();
+			await this.restartView();
 			return;
 		}
 		view.setQuality(viewQuality(q));
@@ -1944,7 +1947,7 @@ export class ViewportController {
 		const gpuMs = gpu ? gpu.shadows + gpu.scene + gpu.post : Number.NaN;
 		const ms = !run ? 0 : Number.isFinite(gpuMs) && gpuMs > 0 ? gpuMs : interval;
 		const next = auto.frame(ms);
-		if (next !== null) this.toLevel(next, true);
+		if (next !== null) void this.toLevel(next, true);
 	}
 
 	private pixelRatio(): number {
@@ -2153,7 +2156,19 @@ export class ViewportController {
 			),
 		}));
 		const total =
-			1 + 1 + 3 + 1 + 1 + (steps + 1) + 3 + 2 + alone.reduce((n, g) => n + g.features.length, 0);
+			1 +
+			1 +
+			3 +
+			1 +
+			1 +
+			(steps + 1) +
+			3 +
+			2 +
+			TOP_LEVEL +
+			alone.reduce((n, g) => n + g.features.length, 0);
+		// The level drawn at, and Automatic's steps, put back after the quality sweep.
+		const level = this.state.quality.level;
+		const auto = this.auto;
 		let done = 0;
 		const phase = (name: string) =>
 			this.set({ profiling: { phase: name, done: done++, of: total } });
@@ -2250,6 +2265,24 @@ export class ViewportController {
 				await this.restartView();
 				await this.viewSettled();
 			}
+			// Quality: each level as Settings would set it, its own scale and
+			// antialiasing too, from Level 1 up, so the view is made again only
+			// where a level's samples or shadow maps change. Then back.
+			const quality: Timed[] = [];
+			this.auto = null;
+			this.options = { ...options, antialias: undefined, renderScale: "auto" };
+			for (let n = 1; n <= TOP_LEVEL; n++) {
+				phase(`Quality ${n}`);
+				const made = this.view;
+				await this.toLevel(n, true);
+				if (this.view !== made) await this.viewSettled();
+				quality.push(await this.timeWaited(`Level ${n}`, 20));
+			}
+			this.options = options;
+			this.auto = auto;
+			this.setRender(render);
+			await this.toLevel(level, false);
+			await this.viewSettled();
 			result = {
 				facts: {
 					renderer: view.backend,
@@ -2280,6 +2313,7 @@ export class ViewportController {
 				asSet,
 				resolution,
 				antialias,
+				quality,
 				clock: clockStep(),
 			};
 		} finally {
@@ -2289,7 +2323,10 @@ export class ViewportController {
 			this.options = options;
 			this.counting = null;
 			this.resolutionScale = 1;
+			this.auto = auto;
 			this.setRender(render);
+			// A sweep cut short: back to the level it started at.
+			if (this.state.quality.level !== level) void this.toLevel(level, false);
 			this.fit();
 			this.set({ profiling: null, ...(result ? { profile: result } : {}) });
 		}

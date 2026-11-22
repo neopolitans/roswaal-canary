@@ -9,6 +9,22 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.8",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.5.0: the sun's shadows reach as far as Studio's at each quality level, and the profile measures every level.",
+		added: [
+			"**The profile's quality levels**: one frame at each level, 1 to 21, with the level's own render scale and antialiasing. The view goes back to its own level after.",
+		],
+		changed: [
+			"**The sun's sharp shadows reach as far as Studio's at each quality level**, from about 90 studs at Level 10 to 578 from Level 19, as measured in Studio. Parts far above still cast them, as they do in Studio.",
+			"**Below Level 10 the blurred shadows reach further**, as Studio's soft shadows do without a shadow map.",
+			"**Level 15 is named Level 15** in the Rendering panel's View.",
+			"**The Place Editor is 0.5.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.7",
 		date: "2026-11-22",
 		headline:

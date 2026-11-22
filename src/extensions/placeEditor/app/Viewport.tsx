@@ -1289,6 +1289,22 @@ function ProfileSection({
 									))}
 								</>
 							)}
+							{profile.quality.length > 0 && (
+								<>
+									<h4 className="profile-head">
+										Quality levels <span>frame · rate</span>
+									</h4>
+									{profile.quality.map((r) => (
+										<TimeBar
+											key={r.label}
+											name={r.label}
+											value={r.median}
+											second={fpsText(r.median)}
+											most={Math.max(...profile.quality.map((x) => x.median))}
+										/>
+									))}
+								</>
+							)}
 							<h4 className="profile-head">Device</h4>
 							<Rows
 								rows={[

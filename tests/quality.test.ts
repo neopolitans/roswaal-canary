@@ -35,7 +35,7 @@ describe("quality levels", () => {
 		expect(top.distance).toBeNull();
 		expect(top.antialias).toBe(4);
 		expect(top.scale).toBe(1);
-		expect(top.reach).toBe(SUN_CASCADES[SUN_CASCADES.length - 1]);
+		expect(top.reach).toBe(578);
 	});
 
 	it("draw as far as Studio's did at each level", () => {
@@ -87,6 +87,14 @@ describe("quality levels", () => {
 		expect([1, 2, 3, 9, 10].map((n) => qualityLevel(n).scale)).toEqual([0.5, 0.5, 0.75, 0.75, 1]);
 	});
 
+	it("reach as far as Studio's sharp shadows did, the stand-in further and blurred", () => {
+		expect(QUALITY_LEVELS.slice(9).map((q) => q.reach)).toEqual([
+			90, 124, 164, 209, 269, 318, 385, 430, 528, 578, 578, 578,
+		]);
+		expect(qualityLevel(9).reach).toBeGreaterThan(qualityLevel(10).reach);
+		expect(qualityLevel(9).blobWidth).toBeGreaterThan(0);
+	});
+
 	it("never take away what a lower level has, and reach further as they rise", () => {
 		for (let i = 1; i < QUALITY_LEVELS.length; i++) {
 			const lower = QUALITY_LEVELS[i - 1];
@@ -94,7 +102,7 @@ describe("quality levels", () => {
 			expect(changedFrom(q.features).every((k) => changedFrom(lower.features).includes(k))).toBe(
 				true,
 			);
-			expect(q.reach).toBeGreaterThanOrEqual(lower.reach);
+			if (q.level > 10) expect(q.reach).toBeGreaterThanOrEqual(lower.reach);
 			expect(q.distance ?? Infinity).toBeGreaterThanOrEqual(lower.distance ?? Infinity);
 		}
 	});

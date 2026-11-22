@@ -9,6 +9,26 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.15",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.11.0: dragging the camera is lighter at the higher levels, and the profile's GPU times can be trusted on Safari.",
+		added: [
+			"**The profile's Camera moving rows**: an orbit, a pan, a pinch and each touch stick, with the GPU's stages and what was drawn again.",
+			"**The GPU's own time beside every row of the profile**, where it has timers.",
+		],
+		changed: [
+			"**The reflection cube is drawn a face a frame**, from one place, and read once all six are done. An orbit drew all six, and their smaller levels, every frame.",
+			"**The lighting cells are found in two steps, eight slices a pass**: each cell's own share of the sky once, then the average round it. The same cells, with a 27th of the samples, where the browser allows it.",
+			"**The reflection cube is no longer drawn again when only the near sky maps move.**",
+			"**The Place Editor is 0.11.0.**",
+		],
+		fixed: [
+			"**The GPU's timers no longer count overlapping passes twice**: on Safari, Glow, bloom and post read longer than the whole frame. Automatic reads the same times.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.14",
 		date: "2026-11-22",
 		headline:

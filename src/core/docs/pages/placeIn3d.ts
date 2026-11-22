@@ -439,7 +439,10 @@ export function placeEditorPerformancePage(): DocPage {
 				head: ["Part", "What it measures"],
 				rows: [
 					["On screen", "The frame rate the view gets, at the display's pace"],
-					["One frame", "One frame drawn and waited for until the GPU has finished it"],
+					[
+						"One frame",
+						"One frame drawn and waited for until the GPU has finished it. Where the GPU has timers, every row also gives its own time, which leaves out waiting for the screen",
+					],
 					[
 						"Stages",
 						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under. Where the GPU has timers, the same stages by its own clock, which leaves out the waits; the sun's maps are drawn every frame here, as when the camera moves",
@@ -471,6 +474,10 @@ export function placeEditorPerformancePage(): DocPage {
 					[
 						"Depth path",
 						"With WebGPU: one frame with the parts' depth drawn first, and with them shaded and depth-tested in one draw, as a tile-based GPU (Apple's) wants",
+					],
+					[
+						"Camera moving",
+						"The camera orbited, panned and zoomed as a drag and a pinch move it, and moved by each touch stick, 60 frames each from where it was: the frame, the GPU's stages, and how often the reflection cube and the near sky maps were drawn again",
 					],
 					[
 						"Quality levels",

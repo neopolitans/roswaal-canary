@@ -49,6 +49,7 @@ import {
 import { loadMeshes } from "./meshes.js";
 import {
 	type LevelRow,
+	type MovingRow,
 	type ProfileResult,
 	type StageFrame,
 	spread,
@@ -1986,6 +1987,65 @@ export class ViewportController {
 		};
 	}
 
+	/**
+	 * The camera moved as each control moves it, a frame at a time at 60 a
+	 * second, from where it is, and put back after each: its frames, stages,
+	 * and what was drawn again.
+	 */
+	private async timeMoving(phase: (name: string) => void): Promise<MovingRow[]> {
+		const dt = 1 / 60;
+		const forward = () => {
+			const b = this.back();
+			const d = BASE_SPEED * this.state.speed * 0.9 * dt;
+			for (let a = 0; a < 3; a++) this.cam.target[a] -= b[a] * d;
+		};
+		const motions: [string, () => void][] = [
+			["Orbit drag", () => this.orbit(12, 0)],
+			["Pan drag", () => this.pan(12, 0)],
+			["Pinch zoom", () => (this.cam.dist = Math.max(2, this.cam.dist * 0.985))],
+			["Look stick", () => this.look(0.7 * LOOK_RATE * dt, 0)],
+			["Move stick", forward],
+		];
+		const from = { ...this.cam, target: [...this.cam.target] };
+		const rows: MovingRow[] = [];
+		for (const [label, step] of motions) {
+			phase(label);
+			const view = this.view;
+			if (!view) break;
+			const frames: StageFrame[] = [];
+			const gpuFrames: StageFrame[] = [];
+			const was = view.redraws?.() ?? null;
+			view.setProfiling(
+				(each) => frames.push(each),
+				(each) => gpuFrames.push(each),
+			);
+			const times = await this.waitedFrames(60, PROFILE_BUDGET, step);
+			view.setProfiling(null);
+			await view.settled();
+			await new Promise((r) => setTimeout(r, 50));
+			const now = view.redraws?.() ?? null;
+			rows.push({
+				label,
+				...spread(times),
+				frames: times.length,
+				stages: stageRows(frames),
+				gpu: stageRows(gpuFrames),
+				gpuTotal: stagesTotal(gpuFrames),
+				redrawn:
+					was && now
+						? {
+								probeFaces: now.probeFaces - was.probeFaces,
+								nearMaps: now.nearMaps - was.nearMaps,
+								sunMaps: now.sunMaps - was.sunMaps,
+							}
+						: null,
+			});
+			Object.assign(this.cam, { ...from, target: [...from.target] });
+			this.redraw();
+		}
+		return rows;
+	}
+
 	private async toLevel(level: number, reset: boolean): Promise<void> {
 		const q = qualityLevel(level);
 		this.set({ quality: { level: q.level, auto: this.auto !== null } });
@@ -2133,12 +2193,17 @@ export class ViewportController {
 	 * costs, with nothing left over from the frame before. Up to `n`, fewer on
 	 * a slow device, which stops after `budget` milliseconds.
 	 */
-	private async waitedFrames(n: number, budget: number): Promise<number[]> {
+	private async waitedFrames(
+		n: number,
+		budget: number,
+		before?: (frame: number) => void,
+	): Promise<number[]> {
 		const times: number[] = [];
 		const from = performance.now();
 		for (let i = 0; i < n; i++) {
 			const view = this.view;
 			if (!view) break;
+			before?.(i);
 			const start = performance.now();
 			this.drawOnce(start);
 			await view.finished();
@@ -2155,7 +2220,17 @@ export class ViewportController {
 		// The pipelines for these switches, not the ones drawing while they compile.
 		await this.view?.pipelinesReady();
 		await this.waitedFrames(3, 400);
-		return { label, ...spread(await this.waitedFrames(n, PROFILE_BUDGET)) };
+		// The GPU's own time beside the waited one, where it has timers.
+		const view = this.view;
+		const gpu: number[] = [];
+		view?.setProfiling(null, (f) => gpu.push(Object.values(f).reduce((a, b) => a + (b ?? 0), 0)));
+		const times = await this.waitedFrames(n, PROFILE_BUDGET);
+		view?.setProfiling(null);
+		return {
+			label,
+			...spread(times),
+			...(gpu.length >= Math.min(5, n) ? { gpuMs: spread(gpu).median } : {}),
+		};
 	}
 
 	/**
@@ -2267,7 +2342,8 @@ export class ViewportController {
 			TOP_LEVEL +
 			alone.reduce((n, g) => n + g.features.length, 0) +
 			(view.setDepthPath ? 2 : 0) +
-			(view.deviceFacts().half ? 2 : 0);
+			(view.deviceFacts().half ? 2 : 0) +
+			5;
 		// The level drawn at, and Automatic's steps, put back after the quality sweep.
 		const level = this.state.quality.level;
 		const auto = this.auto;
@@ -2406,6 +2482,8 @@ export class ViewportController {
 				await this.restartView();
 				await this.viewSettled();
 			}
+			// The camera moving, as the view is set.
+			const moving = await this.timeMoving(phase);
 			// Quality: each level as Settings would set it, its own scale and
 			// antialiasing too, from Level 1 up, so the view is made again only
 			// where a level's samples or shadow maps change. Then back.
@@ -2461,6 +2539,7 @@ export class ViewportController {
 				resolution,
 				depthPath,
 				precision,
+				moving,
 				antialias,
 				quality,
 				clock: clockStep(),

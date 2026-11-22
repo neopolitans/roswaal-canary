@@ -117,9 +117,16 @@ export interface ViewRenderer {
 	/**
 	 * Each frame's stages to `sink`, each waited for; and, where the GPU has
 	 * timers, its own time for each stage to `gpu`, which the waits do not
-	 * see: a stage that waits for the screen is charged that wait.
+	 * see: a stage that waits for the screen is charged that wait. With only
+	 * `gpu`, the frame is drawn as usual and its GPU time handed over.
 	 */
 	setProfiling(sink: StageSink | null, gpu?: StageSink | null): void;
+	/**
+	 * What the view has drawn again since it was made, counted: the
+	 * reflection cube's faces, the near sky maps and the sun's maps. For the
+	 * profile's moving camera; where the renderer counts them.
+	 */
+	redraws?(): { probeFaces: number; nearMaps: number; sunMaps: number };
 	/**
 	 * Resolves once the GPU has finished everything drawn so far: a frame's
 	 * whole cost, for a profile. WebGL2 waits there and then.

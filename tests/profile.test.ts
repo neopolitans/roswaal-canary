@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	type ProfileResult,
+	passTimes,
 	profileReport,
 	profileVerdict,
 	QueueClock,
@@ -64,6 +65,33 @@ describe("timing stages", () => {
 		await new Promise((r) => setTimeout(r, 0));
 		expect(frames).toHaveLength(1);
 		expect(Object.keys(frames[0])).toEqual(["shadows", "place"]);
+	});
+});
+
+describe("reading a frame's GPU stamps", () => {
+	const ms = (v: number) => BigInt(Math.round(v * 1e6));
+	const at = (...pairs: number[]) => pairs.map(ms);
+
+	it("shares out passes that overlap rather than counting the overlap twice", () => {
+		// A tile GPU starts the next pass while the last one finishes.
+		expect(passTimes(at(0, 4, 3, 6, 5, 10))).toEqual([4, 2, 4]);
+	});
+
+	it("starts a pass whose begin was left stale where the pass before it ended", () => {
+		const stamps = at(1000, 1004, 1004, 1006);
+		stamps[2] = ms(1); // written a second ago, by another frame
+		expect(passTimes(stamps)).toEqual([4, 2]);
+	});
+
+	it("drops a pass whose end is before the last one's, and a first pass with no sound pair", () => {
+		const stamps = at(10, 12, 12, 15, 15, 18);
+		stamps[3] = ms(5);
+		expect(passTimes(stamps)).toEqual([2, Number.NaN, 3]);
+		expect(passTimes([ms(5000), ms(10), ms(10), ms(12)])).toEqual([Number.NaN, 2]);
+	});
+
+	it("leaves the gap before a pass that begins after the last one ended out", () => {
+		expect(passTimes(at(0, 2, 5, 6))).toEqual([2, 1]);
 	});
 });
 
@@ -153,6 +181,21 @@ const RESULT: ProfileResult = {
 		{ label: "Off", median: 50, p95: 55 },
 		{ label: "4×", median: 80, p95: 85 },
 	],
+	moving: [
+		{
+			label: "Orbit drag",
+			median: 16,
+			p95: 18,
+			frames: 60,
+			stages: [],
+			gpu: [
+				{ stage: "skyMaps", frames: 20, median: 3, p95: 4 },
+				{ stage: "place", frames: 60, median: 5, p95: 6 },
+			],
+			gpuTotal: { median: 7, p95: 9 },
+			redrawn: { probeFaces: 60, nearMaps: 20, sunMaps: 60 },
+		},
+	],
 	precision: [
 		{ label: "Half precision", median: 18, p95: 19 },
 		{ label: "Full precision", median: 20, p95: 21 },
@@ -215,6 +258,24 @@ const RESULT: ProfileResult = {
 };
 
 describe("what the profile says", () => {
+	it("judges by the GPU's own times where every row has one, and shows them", () => {
+		const timed = {
+			...RESULT,
+			frame: { ...RESULT.frame, gpuMs: 6 },
+			// Waited, the full frame reads slow (a refresh missed); the GPU says not.
+			resolution: [
+				{ label: "100%", median: 16, p95: 17, gpuMs: 4 },
+				{ label: "25%", median: 8, p95: 9, gpuMs: 3.5 },
+			],
+		};
+		expect(profileVerdict(timed)[0]).toMatch(
+			/^Not bound by filling pixels: a quarter of the pixels is only 1\.1×/,
+		);
+		const text = profileReport(timed);
+		expect(text).toMatch(/100%\s+16\.0 ms\s+63 fps\s+GPU\s+4\.00 ms/);
+		expect(text).toContain("then the GPU's own time");
+	});
+
 	it("calls a frame that is much faster with fewer pixels bound by filling them", () => {
 		expect(profileVerdict(RESULT)).toEqual([
 			"Bound by filling pixels: at a quarter of the pixels the frame is 4.0× as fast.",
@@ -253,6 +314,9 @@ describe("what the profile says", () => {
 		);
 		expect(text).toMatch(/Parts' depth only\s+not here/);
 		expect(text).toContain("Quality: Automatic, Level 12");
+		expect(text).toMatch(
+			/Camera moving[^\n]*\n\s+Orbit drag\s+16\.0 ms\s+63 fps\s+GPU\s+7\.00 ms\n\s+Sky maps 3\.00 ms · Parts 5\.00 ms\n\s+over 60 frames, drawn again: 60 reflection faces, 20 near sky maps/,
+		);
 		expect(text).toContain("Antialiasing: FXAA");
 		expect(text).toMatch(
 			/Each level's stages by the GPU's own timers[^\n]*\n\s+Level\s+Frame\s+Shadows\s+Parts\s+Total\n\s+1\s+8\.00 ms\s+0\.50 ms\s+2\.00 ms\s+2\.50 ms\n\s+21\s+40\.0 ms\s+–\s+20\.0 ms\s+20\.0 ms/,

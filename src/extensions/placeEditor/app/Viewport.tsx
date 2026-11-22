@@ -1359,6 +1359,35 @@ function ProfileSection({
 									))}
 								</>
 							)}
+							{profile.moving.length > 0 && (
+								<>
+									<h4 className="profile-head">
+										Camera moving{" "}
+										<span>{profile.moving[0].gpu.length > 0 ? "GPU · rate" : "frame · rate"}</span>
+									</h4>
+									{profile.moving.map((r) => {
+										const value = r.gpu.length > 0 ? r.gpuTotal.median : r.median;
+										return (
+											<TimeBar
+												key={r.label}
+												name={r.label}
+												hint={
+													r.redrawn
+														? `Over ${r.frames} frames: ${r.redrawn.probeFaces} reflection faces, ${r.redrawn.nearMaps} near sky maps drawn again`
+														: undefined
+												}
+												value={value}
+												second={fpsText(r.median)}
+												most={Math.max(
+													...profile.moving.map((x) =>
+														x.gpu.length > 0 ? x.gpuTotal.median : x.median,
+													),
+												)}
+											/>
+										);
+									})}
+								</>
+							)}
 							{profile.quality.length > 0 && (
 								<>
 									<h4 className="profile-head">

@@ -39,7 +39,14 @@ import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geom
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
-import { type Probe, QueueClock, type Stage, type StageFrame, type StageSink } from "./profile.js";
+import {
+	type Probe,
+	passTimes,
+	QueueClock,
+	type Stage,
+	type StageFrame,
+	type StageSink,
+} from "./profile.js";
 import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
@@ -298,7 +305,7 @@ fn has(bit: u32) -> bool { return (FEATURES & bit) != 0u && (u32(u.debug.y) & bi
 @group(0) @binding(5) var sunImage: texture_2d<f32>;
 // The place's depth from each sky direction, and the sun's last: see skyBlock.
 // Then the near maps' views, their vec4 and their box: see nearSkyInto.
-struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f };
+struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f };
 @group(0) @binding(6) var skyMaps: texture_depth_2d_array;
 @group(0) @binding(7) var skyCompare: sampler_comparison;
 @group(0) @binding(8) var<uniform> skyU: SkyU;
@@ -510,6 +517,58 @@ struct CellOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) 
 	}
 	return vec4f(sum / 27.0, 0.0, 0.0, 1.0);
 }
+// The cells as fsCell finds them, in two steps and a 27th of its samples of
+// the maps: each cell's own share, once, with a cell's border round them, as
+// the average reaches a cell out; then each cell the average of its own and
+// its 26 neighbours', read back. Eight slices a draw, each its own target.
+fn cellOwn(x: f32, y: f32, z: f32) -> vec4f {
+	let p = cellOrigin() + (vec3f(x, y, z) + 0.5) * ${SKY_CELL}.0;
+	return vec4f(skyVisibilityMaps(p, vec3f(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
+}
+struct Cells8 { @location(0) a: vec4f, @location(1) b: vec4f, @location(2) c: vec4f, @location(3) d: vec4f, @location(4) e: vec4f, @location(5) f: vec4f, @location(6) g: vec4f, @location(7) h: vec4f };
+@fragment fn fsCellOwn(c: CellOut) -> Cells8 {
+	// Texel (x, z, y) holds cell (x - 1, y - 1, z - 1).
+	let x = floor(c.pos.x) - 1.0;
+	let z = floor(c.pos.y) - 1.0;
+	let y = f32(c.slice * 8u) - 1.0;
+	var o: Cells8;
+	o.a = cellOwn(x, y + 0.0, z);
+	o.b = cellOwn(x, y + 1.0, z);
+	o.c = cellOwn(x, y + 2.0, z);
+	o.d = cellOwn(x, y + 3.0, z);
+	o.e = cellOwn(x, y + 4.0, z);
+	o.f = cellOwn(x, y + 5.0, z);
+	o.g = cellOwn(x, y + 6.0, z);
+	o.h = cellOwn(x, y + 7.0, z);
+	return o;
+}
+@group(1) @binding(1) var cellsOwn: texture_3d<f32>;
+fn cellAround(x: i32, y: i32, z: i32) -> vec4f {
+	var sum = 0.0;
+	for (var dx = 0; dx <= 2; dx++) {
+		for (var dy = 0; dy <= 2; dy++) {
+			for (var dz = 0; dz <= 2; dz++) {
+				sum = sum + textureLoad(cellsOwn, vec3i(x + dx, z + dz, y + dy), 0).r;
+			}
+		}
+	}
+	return vec4f(sum / 27.0, 0.0, 0.0, 1.0);
+}
+@fragment fn fsCellAround(c: CellOut) -> Cells8 {
+	let x = i32(c.pos.x);
+	let z = i32(c.pos.y);
+	let y = i32(c.slice * 8u);
+	var o: Cells8;
+	o.a = cellAround(x, y + 0, z);
+	o.b = cellAround(x, y + 1, z);
+	o.c = cellAround(x, y + 2, z);
+	o.d = cellAround(x, y + 3, z);
+	o.e = cellAround(x, y + 4, z);
+	o.f = cellAround(x, y + 5, z);
+	o.g = cellAround(x, y + 6, z);
+	o.h = cellAround(x, y + 7, z);
+	return o;
+}
 fn skyVisibilityMaps(p: vec3f, n: vec3f) -> f32 {
 	if (skyU.info.w < 0.5 || !has(${FEATURE_BIT.skyShadows}u)) { return 1.0; }
 	// Near the camera the near maps, a texel well under a wall's width; the
@@ -636,9 +695,10 @@ fn shade(v: VIn) -> VOut {
 // blurred as \`lod\` says. The cube's alpha is how much of its texel the place
 // covers, and its colour is the place's share of it, so the sky shows through
 // the rest.
-// The cube is read where the ray from p meets a sphere round the camera, not
-// along the ray's direction alone, so a part reflects what is beside it
-// rather than what the camera would see that way (see PROBE_RADIUS).
+// The cube is read where the ray from p meets a sphere round where it was
+// drawn from (skyU.probeAt, near the camera), not along the ray's direction
+// alone, so a part reflects what is beside it rather than what the camera
+// would see that way (see PROBE_RADIUS).
 fn envSees(p: vec3f, dir: vec3f, vis: f32, lod: f32) -> vec3f {
 	let s = skyLight(dir) * max(vis, 0.05);
 	if (!has(${FEATURE_BIT.sceneReflect}u)) { return s; }
@@ -648,7 +708,7 @@ fn envSees(p: vec3f, dir: vec3f, vis: f32, lod: f32) -> vec3f {
 // The place in the cube from p along dir: its light, already weighted by how
 // much of the texel it covers, and that cover.
 fn sceneSees(p: vec3f, dir: vec3f, lod: f32) -> vec4f {
-	let o = p - u.camPos.xyz;
+	let o = p - skyU.probeAt.xyz;
 	let radius = max(${PROBE_RADIUS}.0, length(o) + 50.0);
 	let b = dot(o, dir);
 	let t = -b + sqrt(max(b * b - dot(o, o) + radius * radius, 0.0));
@@ -1432,7 +1492,7 @@ export class WebGpuView implements ViewRenderer {
 		const held = (r: RenderSettings) =>
 			`${passesOf(r.features).thinParts} ${featureBits(r.features) & (FEATURE_BIT.skyShadows | FEATURE_BIT.nearSky)}`;
 		if (held(render) !== held(this.render)) this.nearCentre = null;
-		if (render.features !== this.render.features) this.reflAt = null;
+		if (render.features !== this.render.features) this.reflStale();
 		this.render = render;
 	}
 
@@ -1620,12 +1680,14 @@ export class WebGpuView implements ViewRenderer {
 					const ns = new BigUint64Array(into.getMappedRange(0, bytes));
 					const sum = { shadows: 0, scene: 0, post: 0 };
 					const byStage: StageFrame = {};
+					// Each pass from where the one before it ended: see passTimes.
+					const times = passTimes(ns);
 					kinds.forEach((kind, j) => {
-						const took = Number(ns[j * 2 + 1] - ns[j * 2]);
-						if (!(took > 0 && took < 1e9)) return;
-						if (kind) sum[kind] += took / 1e6;
+						const took = times[j];
+						if (!Number.isFinite(took)) return;
+						if (kind) sum[kind] += took;
 						const stage = stages[j];
-						if (stage) byStage[stage] = (byStage[stage] ?? 0) + took / 1e6;
+						if (stage) byStage[stage] = (byStage[stage] ?? 0) + took;
 					});
 					into.unmap();
 					t.free.push(into);
@@ -1920,6 +1982,7 @@ export class WebGpuView implements ViewRenderer {
 			fragment: { module, entryPoint: "fsCell", targets: [{ format: "r8unorm" }] },
 			primitive: { topology: "triangle-list" },
 		});
+		void this.makeCellSteps(module, layout);
 		this.makeSkyMaps(buffers);
 		this.setLights(undefined);
 		const pipelineLayout = d.createPipelineLayout({ bindGroupLayouts: [layout] });
@@ -2427,7 +2490,7 @@ export class WebGpuView implements ViewRenderer {
 
 	setLighting(lighting: LightingParams): void {
 		this.lighting = lighting;
-		this.reflAt = null;
+		this.reflStale();
 		const sun = lighting.sun.join(",");
 		if (sun !== this.sunKey) {
 			this.sunKey = sun;
@@ -2885,6 +2948,7 @@ export class WebGpuView implements ViewRenderer {
 			return;
 		}
 		const partsMoved = this.skyDirty;
+		const sunMoved = this.sunDirty;
 		const centre = nearSkyCentre(camera.eye);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
 		const mapsDue = this.skyDirty || this.sunDirty || nearMoved;
@@ -2902,8 +2966,10 @@ export class WebGpuView implements ViewRenderer {
 		// While the stages are profiled, the sun's maps are drawn every frame,
 		// as when the camera moves: a still camera draws them only once.
 		this.drawCascades(encoder, camera, partsMoved || this.clock !== null);
-		// The parts moved or the light changed: the cube shows them again.
-		if (partsMoved || mapsDue) this.reflAt = null;
+		// The parts moved or the light changed: the cube shows them again. Not
+		// when only the near maps moved with the camera: the cube follows it
+		// by PROBE_STEP, and the near maps changed what it showed by little.
+		if (partsMoved || sunMoved) this.reflStale();
 		this.drawReflections(encoder, camera);
 		encoder = this.cut(encoder, "shadows");
 		// The camera's passes from here draw only the chunks in view.
@@ -3128,7 +3194,8 @@ export class WebGpuView implements ViewRenderer {
 
 	setProfiling(sink: StageSink | null, gpu: StageSink | null = null): void {
 		this.clock = sink ? new QueueClock(sink) : null;
-		this.gpuSink = sink && this.timing ? gpu : null;
+		// The GPU's times alone (no sink) leave the frame in one submission.
+		this.gpuSink = this.timing ? gpu : null;
 	}
 
 	finished(): Promise<void> {
@@ -3935,15 +4002,32 @@ export class WebGpuView implements ViewRenderer {
 
 	// -- scene reflections: see PROBE_SIZE ----------------------------------------------
 
+	/** The cube the shaders read, and the one its next faces are drawn into. */
 	private reflCube!: GPUTexture;
+	private reflNext!: GPUTexture;
 	private reflBlank!: GPUTexture;
 	private reflDepth!: GPUTexture;
 	private reflSampler!: GPUSampler;
 	private reflBind!: GPUBindGroup;
 	private reflPipe: GPURenderPipeline | null = null;
 	private reflHalve: GPURenderPipeline | null = null;
-	/** Each smaller level's face, and the level above it to read. */
-	private reflLevels: { target: GPUTextureView; group: GPUBindGroup }[] = [];
+	/** For each cube, each face's smaller levels, and the level above each to read. */
+	private reflLevels = new Map<GPUTexture, { target: GPUTextureView; group: GPUBindGroup }[][]>();
+	/**
+	 * The cube being drawn again, a face a frame into reflNext, all from one
+	 * centre; read once its sixth face is done. A redraw of all six at once
+	 * is six passes of the place and thirty of its levels, which every frame
+	 * of an orbit asked for.
+	 */
+	private reflFill: { at: number[]; face: number; again: boolean } | null = null;
+	/** Whether any cube has been drawn yet: the first is drawn whole. */
+	private reflEver = false;
+	/** What has been drawn again, counted: see ViewRenderer.redraws. */
+	private redrawn = { probeFaces: 0, nearMaps: 0, sunMaps: 0 };
+
+	redraws(): { probeFaces: number; nearMaps: number; sunMaps: number } {
+		return { ...this.redrawn };
+	}
 	private reflGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
 	/** Where the cube was last drawn from; null, to be drawn again. */
 	private reflAt: number[] | null = null;
@@ -3962,7 +4046,10 @@ export class WebGpuView implements ViewRenderer {
 				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
 			});
 		this.reflCube = cube(PROBE_SIZE, PROBE_LEVELS);
+		this.reflNext = cube(PROBE_SIZE, PROBE_LEVELS);
 		this.reflBlank = cube(1, 1);
+		this.reflFill = null;
+		this.reflEver = false;
 		this.reflDepth = d.createTexture({
 			size: [PROBE_SIZE, PROBE_SIZE],
 			format: "depth32float",
@@ -4001,27 +4088,32 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			primitive: { topology: "triangle-list" },
 		});
 		const halveSampler = d.createSampler({ magFilter: "linear", minFilter: "linear" });
-		const view = (level: number, face: number) =>
-			this.reflCube.createView({
-				dimension: "2d",
-				baseMipLevel: level,
-				mipLevelCount: 1,
-				baseArrayLayer: face,
-				arrayLayerCount: 1,
-			});
-		this.reflLevels = [];
-		for (let level = 1; level < PROBE_LEVELS; level++)
-			for (let face = 0; face < 6; face++)
-				this.reflLevels.push({
-					target: view(level, face),
-					group: d.createBindGroup({
-						layout: halveLayout,
-						entries: [
-							{ binding: 0, resource: view(level - 1, face) },
-							{ binding: 1, resource: halveSampler },
-						],
-					}),
+		this.reflLevels.clear();
+		for (const into of [this.reflCube, this.reflNext]) {
+			const view = (level: number, face: number) =>
+				into.createView({
+					dimension: "2d",
+					baseMipLevel: level,
+					mipLevelCount: 1,
+					baseArrayLayer: face,
+					arrayLayerCount: 1,
 				});
+			this.reflLevels.set(
+				into,
+				[0, 1, 2, 3, 4, 5].map((face) =>
+					Array.from({ length: PROBE_LEVELS - 1 }, (_, i) => ({
+						target: view(i + 1, face),
+						group: d.createBindGroup({
+							layout: halveLayout,
+							entries: [
+								{ binding: 0, resource: view(i, face) },
+								{ binding: 1, resource: halveSampler },
+							],
+						}),
+					})),
+				),
+			);
+		}
 		const faceLayout = d.createBindGroupLayout({
 			entries: [{ binding: 0, visibility: STAGE.VERTEX, buffer: {} }],
 		});
@@ -4053,18 +4145,26 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private drawReflections(encoder: GPUCommandEncoder, camera: Camera): void {
 		if (!this.reflPipe || !this.reflBind || !featureOn(this.render.features, "sceneReflections"))
 			return;
-		const at = this.reflAt;
-		if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
-		this.reflAt = [...camera.eye];
-		const faces = probeFaces(camera.eye, false);
+		if (!this.reflFill) {
+			const at = this.reflAt;
+			if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+			this.reflFill = { at: [...camera.eye], face: 0, again: false };
+		}
+		const fill = this.reflFill;
+		// The first cube whole, so the place never reflects an empty one.
+		const until = this.reflEver ? fill.face + 1 : 6;
+		const faces = probeFaces(fill.at, false);
+		const into = this.reflNext;
+		const levels = this.reflLevels.get(into) ?? [];
 		const q = this.device.queue;
-		this.reflGroups.forEach(({ buffer, group }, k) => {
+		for (let k = fill.face; k < until; k++) {
+			const { buffer, group } = this.reflGroups[k];
 			q.writeBuffer(buffer, 0, faces[k]);
 			const pass = encoder.beginRenderPass({
 				timestampWrites: this.stamp(null),
 				colorAttachments: [
 					{
-						view: this.reflCube.createView({
+						view: into.createView({
 							dimension: "2d",
 							baseMipLevel: 0,
 							mipLevelCount: 1,
@@ -4083,23 +4183,41 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					depthStoreOp: "discard",
 				},
 			});
-			pass.setPipeline(this.reflPipe!);
+			pass.setPipeline(this.reflPipe);
 			pass.setBindGroup(0, this.reflBind);
 			pass.setBindGroup(1, group);
 			this.solids(pass, this.draws, true);
 			pass.end();
-		});
-		if (!this.reflHalve) return;
-		for (const { target, group } of this.reflLevels) {
-			const pass = encoder.beginRenderPass({
-				timestampWrites: this.stamp(null),
-				colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store" }],
-			});
-			pass.setPipeline(this.reflHalve);
-			pass.setBindGroup(0, group);
-			pass.draw(3);
-			pass.end();
+			this.redrawn.probeFaces++;
+			// Its smaller levels, each from the one above it.
+			if (this.reflHalve)
+				for (const level of levels[k] ?? []) {
+					const step = encoder.beginRenderPass({
+						timestampWrites: this.stamp(null),
+						colorAttachments: [{ view: level.target, loadOp: "clear", storeOp: "store" }],
+					});
+					step.setPipeline(this.reflHalve);
+					step.setBindGroup(0, level.group);
+					step.draw(3);
+					step.end();
+				}
 		}
+		fill.face = until;
+		if (fill.face < 6) return;
+		// All six: read from here on, and where they were drawn from with them.
+		this.reflNext = this.reflCube;
+		this.reflCube = into;
+		this.reflEver = true;
+		this.reflAt = fill.again ? null : fill.at;
+		this.reflFill = null;
+		q.writeBuffer(this.skyUniform, SKY_BLOCK * 4, new Float32Array([...fill.at, 1]));
+		this.rebind();
+	}
+
+	/** What the cube shows changed: drawn again, after any fill under way, which started before. */
+	private reflStale(): void {
+		this.reflAt = null;
+		if (this.reflFill) this.reflFill.again = true;
 	}
 
 	// -- the lighting cells: see SKY_CELL ---------------------------------------------
@@ -4108,12 +4226,128 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private cellsRead = 0;
 	private cellSampler!: GPUSampler;
 	private cellPipe?: GPURenderPipeline;
+	/**
+	 * The cells in two steps, eight slices a pass (fsCellOwn, fsCellAround):
+	 * where the browser lets one pass draw into eight slices of a 3D texture.
+	 * Otherwise fsCell, a slice a pass, each cell sampling the maps 27 times.
+	 */
+	private cellSteps: {
+		own: GPUTexture;
+		ownPipe: GPURenderPipeline;
+		aroundPipe: GPURenderPipeline;
+		aroundGroup: GPUBindGroup;
+	} | null = null;
+
+	private async makeCellSteps(module: GPUShaderModule, layout: GPUBindGroupLayout): Promise<void> {
+		const d = this.device;
+		const [w, h, s] = [SKY_CELLS[0] + 2, SKY_CELLS[2] + 2, Math.ceil((SKY_CELLS[1] + 2) / 8) * 8];
+		const own = d.createTexture({
+			size: [w, h, s],
+			dimension: "3d",
+			format: "r8unorm",
+			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.RENDER_ATTACHMENT,
+		});
+		// Eight slices of one 3D texture in one pass: tried once, as a browser may refuse it.
+		d.pushErrorScope("validation");
+		const trial = d.createCommandEncoder();
+		const view = own.createView({ dimension: "3d" });
+		trial
+			.beginRenderPass({
+				colorAttachments: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({
+					view,
+					depthSlice: i,
+					loadOp: "clear" as const,
+					storeOp: "store" as const,
+				})),
+			})
+			.end();
+		d.queue.submit([trial.finish()]);
+		if (await d.popErrorScope()) {
+			own.destroy();
+			return;
+		}
+		const targets = Array.from({ length: 8 }, () => ({ format: "r8unorm" as GPUTextureFormat }));
+		const ownLayout = d.createBindGroupLayout({
+			entries: [{ binding: 1, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } }],
+		});
+		try {
+			const [ownPipe, aroundPipe] = await Promise.all([
+				d.createRenderPipelineAsync({
+					layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
+					vertex: { module, entryPoint: "vsCell" },
+					fragment: { module, entryPoint: "fsCellOwn", targets },
+					primitive: { topology: "triangle-list" },
+				}),
+				d.createRenderPipelineAsync({
+					layout: d.createPipelineLayout({ bindGroupLayouts: [layout, ownLayout] }),
+					vertex: { module, entryPoint: "vsCell" },
+					fragment: { module, entryPoint: "fsCellAround", targets },
+					primitive: { topology: "triangle-list" },
+				}),
+			]);
+			this.cellSteps = {
+				own,
+				ownPipe,
+				aroundPipe,
+				aroundGroup: d.createBindGroup({
+					layout: ownLayout,
+					entries: [{ binding: 1, resource: view }],
+				}),
+			};
+			// Cells filled before these were ready: filled again with them.
+			this.skyDirty = true;
+			this.onRedraw?.();
+		} catch {
+			own.destroy();
+		}
+	}
+
+	/** Eight slices of `texture` from `first`, as one pass's targets. */
+	private eightSlices(texture: GPUTexture, first: number): GPURenderPassColorAttachment[] {
+		const view = texture.createView({ dimension: "3d" });
+		return [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({
+			view,
+			depthSlice: first + i,
+			loadOp: "clear",
+			storeOp: "store",
+			clearValue: { r: 1, g: 0, b: 0, a: 1 },
+		}));
+	}
 
 	/**
 	 * Each lighting cell the share of the sky its middle sees, from the maps
 	 * just drawn: into the cells not being read, a slice a pass, then read.
 	 */
 	private fillCells(encoder: GPUCommandEncoder): void {
+		const steps = this.cellSteps;
+		if (steps) {
+			const target = this.cells[1 - this.cellsRead];
+			const own = steps.own.depthOrArrayLayers;
+			for (let s = 0; s * 8 < own; s++) {
+				const pass = encoder.beginRenderPass({
+					timestampWrites: this.stamp(null),
+					colorAttachments: this.eightSlices(steps.own, s * 8),
+				});
+				pass.setPipeline(steps.ownPipe);
+				pass.setBindGroup(0, this.bind);
+				pass.draw(3, 1, 0, s);
+				pass.end();
+			}
+			for (let s = 0; s * 8 < SKY_CELLS[1]; s++) {
+				const pass = encoder.beginRenderPass({
+					timestampWrites: this.stamp(null),
+					colorAttachments: this.eightSlices(target, s * 8),
+				});
+				pass.setPipeline(steps.aroundPipe);
+				pass.setBindGroup(0, this.bind);
+				pass.setBindGroup(1, steps.aroundGroup);
+				pass.draw(3, 1, 0, s);
+				pass.end();
+			}
+			this.cellsRead = 1 - this.cellsRead;
+			this.rebind();
+			return;
+		}
 		if (!this.cellPipe) return;
 		const target = this.cells[1 - this.cellsRead];
 		for (let y = 0; y < SKY_CELLS[1]; y++) {
@@ -4195,7 +4429,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			minFilter: "linear",
 		});
 		this.skyUniform = d.createBuffer({
-			size: SKY_BLOCK * 4,
+			// The sky block, then the reflection cube's centre: see SkyU.probeAt.
+			size: SKY_BLOCK * 4 + 16,
 			usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
 		});
 		const layout = d.createBindGroupLayout({
@@ -4447,6 +4682,7 @@ fn along(pos: vec4f) -> f32 {
 		);
 		if (!partsMoved && block.every((v, i) => v === this.cascadeLast[i])) return;
 		this.cascadeLast = block;
+		this.redrawn.sunMaps++;
 		const q = this.device.queue;
 		q.writeBuffer(this.cascadeUniform, 0, block);
 		if (block[SUN_CASCADES.length * 16 + 7] !== 1) return;
@@ -4509,6 +4745,7 @@ fn along(pos: vec4f) -> f32 {
 			this.solids(pass);
 			pass.end();
 		});
+		if (which.near) this.redrawn.nearMaps++;
 		if (which.near && passesOf(this.render.features).thinParts) this.openNearMaps(encoder);
 		if (which.near) this.fillCells(encoder);
 	}

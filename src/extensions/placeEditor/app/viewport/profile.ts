@@ -163,6 +163,41 @@ export class QueueClock {
 	}
 }
 
+/** The longest a frame's GPU work is believed to take, in ms: a longer span is a stale stamp. */
+export const STAMP_SPAN = 1000;
+
+/**
+ * Each pass's GPU time, in ms, from its pair of stamps (begin, end; ns) in
+ * the order the passes were encoded: from where the pass before it ended
+ * (or its own begin, if later) to its own end. A tile-based GPU (Apple's)
+ * overlaps one pass with the next, and Safari leaves some passes' begin
+ * unwritten, so each pass's own begin-to-end summed counts time twice or
+ * from a stale value; this shares the frame's timeline out once. A pass
+ * whose end is before the last end, or far past the first, is stale: NaN.
+ */
+export function passTimes(stamps: ArrayLike<bigint>): number[] {
+	const n = Math.floor(stamps.length / 2);
+	const out: number[] = new Array(n).fill(Number.NaN);
+	let base: bigint | null = null;
+	let last = 0;
+	for (let j = 0; j < n; j++) {
+		const b = stamps[j * 2];
+		const e = stamps[j * 2 + 1];
+		if (e === 0n) continue;
+		if (base === null) {
+			// The first pass sets the frame's start: its own pair has to be sound.
+			if (e < b || Number(e - b) / 1e6 > STAMP_SPAN) continue;
+			base = b;
+		}
+		const end = Number(e - base) / 1e6;
+		if (!(end >= last) || end > STAMP_SPAN) continue;
+		const begin = Number(b - base) / 1e6;
+		out[j] = end - Math.max(last, Math.min(begin, end));
+		last = end;
+	}
+	return out;
+}
+
 /** Each stage's time from when it was submitted and when it was done, in queue order. */
 export function queueStages(
 	entries: readonly { stage: Stage; at: number; done: number }[],
@@ -218,6 +253,23 @@ export interface Timed {
 	label: string;
 	median: number;
 	p95: number;
+	/**
+	 * The GPU's own time for the frame, by its timers, where it has them: the
+	 * waited time can run to the next screen refresh (Safari's often does).
+	 */
+	gpuMs?: number;
+}
+
+/** A row's GPU time as a column, or nothing where the GPU has no timers. */
+export function gpuColumn(r: { gpuMs?: number }): string {
+	return r.gpuMs !== undefined && Number.isFinite(r.gpuMs)
+		? `   GPU ${msText(r.gpuMs).padStart(9)}`
+		: "";
+}
+
+/** Whether every row has the GPU's own time, so sums and verdicts can use it. */
+function allTimed(rows: readonly Timed[]): boolean {
+	return rows.length > 0 && rows.every((r) => r.gpuMs !== undefined && Number.isFinite(r.gpuMs));
 }
 
 /** What is known of the device and the view, for the report's head. */
@@ -277,10 +329,23 @@ export interface ProfileResult {
 	depthPath: Timed[];
 	/** One frame with WebGPU's shader in half precision, and in full, where the device has half. */
 	precision: Timed[];
+	/** The camera moved each way the controls move it, from where it was: see MovingRow. */
+	moving: MovingRow[];
 	/** Each quality level, 1 to 21, with its own scale and antialiasing: its frame, its stages, what it set. */
 	quality: LevelRow[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
 	clock: number;
+}
+
+/** The camera moved as a drag, a pinch or a stick moves it: its frames, and what was drawn again. */
+export interface MovingRow extends Timed {
+	frames: number;
+	stages: StageRow[];
+	/** Its stages by the GPU's own timers, where it has them. */
+	gpu: StageRow[];
+	gpuTotal: { median: number; p95: number };
+	/** What was drawn again over the frames, where the renderer counts it. */
+	redrawn: { probeFaces: number; nearMaps: number; sunMaps: number } | null;
 }
 
 /** One quality level as the sweep drew it: its frame and stages, and what it set. */
@@ -338,8 +403,11 @@ export const fpsText = (ms: number): string =>
  */
 export function profileVerdict(result: ProfileResult): string[] {
 	const out: string[] = [];
-	const full = result.resolution[0]?.median ?? Number.NaN;
-	const quarter = result.resolution.at(-1)?.median ?? Number.NaN;
+	const byGpu = allTimed(result.resolution);
+	const time = (r: Timed | undefined) =>
+		r ? (byGpu ? (r.gpuMs ?? Number.NaN) : r.median) : Number.NaN;
+	const full = time(result.resolution[0]);
+	const quarter = time(result.resolution.at(-1));
 	if (Number.isFinite(full) && Number.isFinite(quarter) && quarter > 0) {
 		const gain = full / quarter;
 		out.push(
@@ -348,7 +416,9 @@ export function profileVerdict(result: ProfileResult): string[] {
 				: `Not bound by filling pixels: a quarter of the pixels is only ${gain.toFixed(1)}× as fast, so the cost is per frame or per part.`,
 		);
 	}
-	const costs = stepCosts(result.steps).filter((c) => Number.isFinite(c.cost));
+	const costs = stepCosts(result.steps)
+		.map((c) => (c.gpuCost !== undefined ? { ...c, cost: c.gpuCost } : c))
+		.filter((c) => Number.isFinite(c.cost));
 	const worst = costs.reduce<(typeof costs)[number] | null>(
 		(a, b) => (a === null || b.cost > a.cost ? b : a),
 		null,
@@ -370,11 +440,18 @@ export function profileVerdict(result: ProfileResult): string[] {
 /** Each step's cost: how much slower the frame got when it was added. */
 export function stepCosts(
 	steps: readonly Timed[],
-): { label: string; frame: number; cost: number }[] {
+): { label: string; frame: number; cost: number; gpu?: number; gpuCost?: number }[] {
+	const timed = allTimed(steps);
 	return steps.map((s, i) => ({
 		label: s.label,
 		frame: s.median,
 		cost: i === 0 ? Number.NaN : s.median - steps[i - 1].median,
+		...(timed
+			? {
+					gpu: s.gpuMs,
+					gpuCost: i === 0 ? Number.NaN : (s.gpuMs ?? 0) - (steps[i - 1].gpuMs ?? 0),
+				}
+			: {}),
 	}));
 }
 
@@ -404,6 +481,10 @@ export function profileReport(result: ProfileResult): string {
 		`One frame, waited for: ${msText(result.frame.median)}, slow frames ${msText(result.frame.p95)}`,
 	);
 	for (const line of profileVerdict(result)) lines.push(line);
+	if (result.frame.gpuMs !== undefined)
+		lines.push(
+			"Rows give the frame waited for, then the GPU's own time: a wait can run to the next screen refresh.",
+		);
 	lines.push("");
 	lines.push(
 		`Stages, waited for one at a time (${result.stageFrames} frames; median, slow frames):`,
@@ -432,36 +513,38 @@ export function profileReport(result: ProfileResult): string {
 	lines.push("Base, every feature off (frame):");
 	for (const b of result.base)
 		lines.push(
-			`  ${b.label.padEnd(24)} ${Number.isFinite(b.median) ? msText(b.median).padStart(9) : "  not here"}`,
+			`  ${b.label.padEnd(24)} ${Number.isFinite(b.median) ? `${msText(b.median).padStart(9)}${gpuColumn(b)}` : "  not here"}`,
 		);
 	lines.push("");
 	if (result.asSet)
-		lines.push(`As set, just before the switches below: ${msText(result.asSet.median)}`);
+		lines.push(
+			`As set, just before the switches below: ${msText(result.asSet.median)}${gpuColumn(result.asSet)}`,
+		);
 	for (const group of result.without) {
 		lines.push(`${group.title}, each switch off alone (frame, saved):`);
 		for (const r of group.rows)
 			lines.push(
-				`  ${`Without ${r.label}`.padEnd(30)} ${msText(r.median).padStart(9)} ${msText(r.saves).padStart(9)}`,
+				`  ${`Without ${r.label}`.padEnd(30)} ${msText(r.median).padStart(9)} ${msText(r.saves).padStart(9)}${gpuColumn(r)}`,
 			);
 		lines.push("");
 	}
 	lines.push("Steps added one at a time (frame, cost of the step):");
 	for (const s of stepCosts(result.steps))
 		lines.push(
-			`  ${s.label.padEnd(24)} ${msText(s.frame).padStart(9)} ${Number.isFinite(s.cost) ? `${s.cost >= 0 ? "+" : ""}${msText(s.cost)}` : ""}`,
+			`  ${s.label.padEnd(24)} ${msText(s.frame).padStart(9)} ${(Number.isFinite(s.cost) ? `${s.cost >= 0 ? "+" : ""}${msText(s.cost)}` : "").padEnd(9)}${s.gpu !== undefined ? `${gpuColumn({ gpuMs: s.gpu })} ${s.gpuCost !== undefined && Number.isFinite(s.gpuCost) ? `${s.gpuCost >= 0 ? "+" : ""}${msText(s.gpuCost)}` : ""}` : ""}`,
 		);
 	lines.push("");
 	lines.push("Resolution:");
 	for (const r of result.resolution)
 		lines.push(
-			`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+			`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}${gpuColumn(r)}`,
 		);
 	if (result.antialias.length > 0) {
 		lines.push("");
 		lines.push("Antialiasing, the view built again for each:");
 		for (const r of result.antialias)
 			lines.push(
-				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}${gpuColumn(r)}`,
 			);
 	}
 	if (result.precision.length > 0) {
@@ -469,7 +552,7 @@ export function profileReport(result: ProfileResult): string {
 		lines.push("Shader precision, the view built again for each:");
 		for (const r of result.precision)
 			lines.push(
-				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}${gpuColumn(r)}`,
 			);
 	}
 	if (result.depthPath.length > 0) {
@@ -477,15 +560,36 @@ export function profileReport(result: ProfileResult): string {
 		lines.push("Depth path:");
 		for (const r of result.depthPath)
 			lines.push(
-				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}${gpuColumn(r)}`,
 			);
+	}
+	if (result.moving.length > 0) {
+		lines.push("");
+		lines.push(
+			"Camera moving, each from where it began, sun maps drawn every frame (frame; then the GPU's stages):",
+		);
+		for (const r of result.moving) {
+			const total = r.gpu.length > 0 ? `   GPU ${msText(r.gpuTotal.median).padStart(9)}` : "";
+			lines.push(
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}${total}`,
+			);
+			const rows = r.gpu.length > 0 ? r.gpu : r.stages;
+			if (rows.length > 0)
+				lines.push(
+					`      ${rows.map((s) => `${STAGE_SHORT[s.stage]} ${msText(s.median)}`).join(" · ")}`,
+				);
+			if (r.redrawn)
+				lines.push(
+					`      over ${r.frames} frames, drawn again: ${r.redrawn.probeFaces} reflection faces, ${r.redrawn.nearMaps} near sky maps`,
+				);
+		}
 	}
 	if (result.quality.length > 0) {
 		lines.push("");
 		lines.push("Quality levels, each with its own scale and antialiasing:");
 		for (const r of result.quality)
 			lines.push(
-				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}${gpuColumn(r)}`,
 			);
 		// The GPU's own times where it has them: the waited times charge a
 		// stage for waiting on the screen.

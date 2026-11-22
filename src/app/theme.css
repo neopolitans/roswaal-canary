@@ -24468,3 +24468,37 @@ textarea.tb:where(:disabled) {
 	font-family: var(--font-mono, monospace);
 	font-size: 11px;
 }
+
+/* A file input inside a button-styled label: the label is the control. */
+.benchmark-file {
+	position: relative;
+	cursor: pointer;
+}
+
+.benchmark-file input {
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+
+.benchmark-compare {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.benchmark-compare .benchmark-text {
+	height: 220px;
+	white-space: pre;
+}
+
+.benchmark-error {
+	color: var(--danger, #c0504d);
+	font-size: var(--text-sm);
+}
+
+.benchmark-end {
+	max-height: calc(100% - 32px);
+	overflow-y: auto;
+}

@@ -29,6 +29,8 @@ export interface BenchmarkStationResult {
 	variant: string;
 	/** Still frames, waited for: the waited time, the GPU's and the CPU's. */
 	still: Timed;
+	/** The same, measured again in a second pass over the stations, where the run measured each twice. */
+	repeat?: Timed;
 	/** The GPU's own time by stage, sun maps drawn every frame as when moving. */
 	gpu: StageRow[];
 	gpuTotal: { median: number; p95: number };
@@ -50,6 +52,8 @@ export interface BenchmarkResult {
 	benchmark: number;
 	seed: number;
 	kind: BenchmarkKind;
+	/** 2 where each station was measured twice (its `repeat`); absent in a run of one pass. */
+	passes?: number;
 	release: string;
 	date: string;
 	renderer: string;
@@ -116,7 +120,7 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	);
 	lines.push(`Browser: ${result.userAgent}`);
 	lines.push(
-		`Seed ${result.seed} · ${result.date}${result.cancelled ? " · stopped before the end" : ""}`,
+		`Seed ${result.seed} · ${result.date}${(result.passes ?? 1) > 1 ? " · each station twice" : ""}${result.cancelled ? " · stopped before the end" : ""}`,
 	);
 	lines.push(
 		`Score: ${score(total.gpu)} by the GPU's time, ${score(total.waited)} by the waited frame`,

@@ -11,6 +11,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { BenchmarkKind } from "../benchmarkEvent.js";
+import { CompareView, readResultFiles } from "./benchmark/CompareView.jsx";
+import { keepRun, runBefore } from "./benchmark/history.js";
 import {
 	type BenchmarkResult,
 	benchmarkFileName,
@@ -51,7 +53,15 @@ async function saveResults(result: BenchmarkResult): Promise<void> {
 	setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: ViewportOptions }) {
+export function Benchmark({
+	kind,
+	passes = 1,
+	options,
+}: {
+	kind: BenchmarkKind;
+	passes?: 1 | 2;
+	options: ViewportOptions;
+}) {
 	const holder = useRef<HTMLDivElement>(null);
 	const text = useRef<HTMLTextAreaElement>(null);
 	// As they were when the run began: Settings changed meanwhile do not restart it.
@@ -60,6 +70,9 @@ export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: Vie
 	const [result, setResult] = useState<BenchmarkResult | null>(null);
 	const [failed, setFailed] = useState<string | null>(null);
 	const [copied, setCopied] = useState<"yes" | "select" | null>(null);
+	// What this run is compared with: the last kept run, or a file.
+	const [against, setAgainst] = useState<BenchmarkResult | null>(null);
+	const [fileError, setFileError] = useState<string | null>(null);
 
 	useEffect(() => {
 		const el = holder.current;
@@ -79,6 +92,7 @@ export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: Vie
 				const done = await controller.runBenchmark({
 					stations: STATIONS,
 					kind,
+					passes,
 					benchmark: BENCHMARK_VERSION,
 					seed: BENCHMARK_SEED,
 					cancelled: () => stopped,
@@ -89,7 +103,10 @@ export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: Vie
 						setProgress(p);
 					},
 				});
-				if (!stopped && done) setResult(done);
+				if (!stopped && done) {
+					setResult(done);
+					keepRun(done);
+				}
 			} catch (err) {
 				if (!stopped) setFailed(err instanceof Error ? err.message : String(err));
 			}
@@ -98,7 +115,7 @@ export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: Vie
 			stopped = true;
 			unmount();
 		};
-	}, [kind, settings]);
+	}, [kind, passes, settings]);
 
 	const report = result ? benchmarkReport(result) : "";
 	const copy = async () => {
@@ -111,6 +128,7 @@ export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: Vie
 		}
 	};
 	const total = result ? runScore(result) : null;
+	const previous = result ? runBefore(result) : null;
 
 	return (
 		<>
@@ -153,6 +171,27 @@ export function Benchmark({ kind, options }: { kind: BenchmarkKind; options: Vie
 							Download results
 						</button>
 					</div>
+					<div className="benchmark-actions">
+						{previous && (
+							<button type="button" className="tb" onClick={() => setAgainst(previous)}>
+								Compare with last run
+							</button>
+						)}
+						<label className="tb benchmark-file">
+							Compare with a file…
+							<input
+								type="file"
+								accept=".json,application/json"
+								onChange={async (e) => {
+									const read = await readResultFiles(e.currentTarget.files);
+									setFileError(read.error ?? null);
+									if (read.runs[0]) setAgainst(read.runs[0]);
+								}}
+							/>
+						</label>
+					</div>
+					{fileError && <span className="benchmark-error">{fileError}</span>}
+					{against && <CompareView before={against} after={result} />}
 					{copied === "select" && (
 						<textarea
 							ref={text}

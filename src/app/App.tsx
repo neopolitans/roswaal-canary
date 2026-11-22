@@ -34,7 +34,7 @@ import { unformattedGroups, unformattedMessage, unformattedWhat } from "../core/
 import {
 	antialiasSetting,
 	BENCHMARK_EVENT,
-	type BenchmarkKind,
+	type BenchmarkRequest,
 	EXTENSIONS,
 	OUTLINE_WIDTHS,
 	PLACE_EDITOR,
@@ -509,13 +509,13 @@ export function App() {
 	// Roswaal Benchmark: asked for from Settings or the Rendering panel. The
 	// editor stays as it is underneath, its own view paused; Esc or the logo
 	// stops the run and brings it back.
-	const [benchmark, setBenchmark] = useState<BenchmarkKind | null>(null);
+	const [benchmark, setBenchmark] = useState<BenchmarkRequest | null>(null);
 	useEffect(() => {
 		const start = (e: Event) => {
-			const kind = (e as CustomEvent<BenchmarkKind>).detail;
-			if (kind !== "current" && kind !== "sweep") return;
+			const asked = (e as CustomEvent<BenchmarkRequest>).detail;
+			if (asked?.kind !== "current" && asked?.kind !== "sweep") return;
 			setSettingsOpen(false);
-			setBenchmark(kind);
+			setBenchmark({ kind: asked.kind, passes: asked.passes === 2 ? 2 : 1 });
 		};
 		window.addEventListener(BENCHMARK_EVENT, start);
 		return () => window.removeEventListener(BENCHMARK_EVENT, start);
@@ -3178,7 +3178,13 @@ export function App() {
 			/>
 			{benchmark && (
 				<div className="benchmark-layer">
-					{viewer && <viewer.Benchmark kind={benchmark} options={viewOptions} />}
+					{viewer && (
+						<viewer.Benchmark
+							kind={benchmark.kind}
+							passes={benchmark.passes}
+							options={viewOptions}
+						/>
+					)}
 					<button
 						type="button"
 						className="benchmark-mark"

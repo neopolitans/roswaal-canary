@@ -536,6 +536,15 @@ export function placeEditorPerformancePage(): DocPage {
 					"frame allows; the run's is their geometric mean. Scores compare within one benchmark version. " +
 					"**Copy report** gives the text; **Download results** saves the whole run as JSON.",
 			},
+			{
+				t: "p",
+				text:
+					"**Compare with last run**, at the end of a run, or **Compare two results** in Settings, sets two " +
+					"runs side by side. A warm tablet is slower everywhere, so the change across all the stations (their " +
+					"median) is taken as the run's drift and taken out of each station's; a change inside the noise, how " +
+					"far the stations scatter, is called within noise. **Each station twice**, in Settings, measures every " +
+					"station again in a second pass, so each has noise of its own: steadier, and twice as long.",
+			},
 			{ t: "h", level: 2, text: "Finding a spike" },
 			{
 				t: "p",

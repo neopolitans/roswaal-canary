@@ -2109,6 +2109,8 @@ export class ViewportController {
 	async runBenchmark(run: {
 		stations: readonly Station[];
 		kind: BenchmarkKind;
+		/** 2: a second pass over each level's stations, still frames again, for each station's own noise. */
+		passes?: 1 | 2;
 		benchmark: number;
 		seed: number;
 		onProgress: (progress: BenchmarkProgress) => void;
@@ -2121,12 +2123,14 @@ export class ViewportController {
 		const startLevel = this.state.quality.level;
 		const levels: (number | null)[] =
 			run.kind === "sweep" ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
-		const variants = run.stations.reduce((n, s) => n + s.variants.length, 0);
+		const passes = run.passes ?? 1;
+		const variants = run.stations.reduce((n, s) => n + s.variants.length, 0) * passes;
 		const facts = this.view.deviceFacts();
 		const result: BenchmarkResult = {
 			benchmark: run.benchmark,
 			seed: run.seed,
 			kind: run.kind,
+			...((run.passes ?? 1) > 1 ? { passes: run.passes } : {}),
 			release: RELEASES[0]?.version ?? "",
 			date: new Date().toISOString(),
 			renderer: this.view.backend,
@@ -2222,6 +2226,28 @@ export class ViewportController {
 						});
 						done++;
 					}
+				// Again, still frames only, after the whole first pass: what changed
+				// between them is each station's own noise, warming included.
+				if (passes > 1) {
+					let i = 0;
+					for (const station of run.stations)
+						for (const variant of station.variants) {
+							const row = rows[i++];
+							if (run.cancelled() || !row) break;
+							report(label, station, variant.label, "Again");
+							this.setPlace(variant.place());
+							this.pose(station.pose.eye, station.pose.at);
+							await this.viewSettled();
+							await this.waitedFrames(10, 2000);
+							if (variant.settleMs) {
+								const until = performance.now() + variant.settleMs;
+								while (performance.now() < until && !run.cancelled())
+									await this.waitedFrames(1, 1000);
+							}
+							row.repeat = await this.timeWaited(station.name, 60);
+							done++;
+						}
+				}
 				result.levels.push({
 					label,
 					level,

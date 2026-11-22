@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.22",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.17.0: benchmark runs compared, with the drift between them taken out and the noise said.",
+		added: [
+			"**Compare with last run** and **Compare with a file** at the end of a benchmark, and **Compare two results** in Settings › Scene view: each station's change before and after the run's drift, and whether it is past the noise.",
+			"**Each station twice**, in Settings › Scene view: a second pass over the stations, so each has its own noise. Twice as long.",
+			"**The last five runs are kept in this browser**, to compare a new run with.",
+		],
+		changed: ["**The Place Editor is 0.17.0.**"],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.21",
 		date: "2026-11-22",
 		headline: "The Place Editor is 0.16.1: a Highlight's outline costs a fraction of what it did.",

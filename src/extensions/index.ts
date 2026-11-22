@@ -22,6 +22,7 @@ export type {
 export {
 	BENCHMARK_EVENT,
 	type BenchmarkKind,
+	type BenchmarkRequest,
 	startBenchmark,
 } from "./placeEditor/benchmarkEvent.js";
 export { PLACE_EDITOR, type PlaceEditorModule } from "./placeEditor/manifest.js";

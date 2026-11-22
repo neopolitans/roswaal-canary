@@ -31,7 +31,7 @@ import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
 import { type Probe, QueueClock, type Stage, type StageSink } from "./profile.js";
-import { FEATURE_BIT, featureBits, passesOf } from "./renderFeatures.js";
+import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
 import {
@@ -63,11 +63,19 @@ import {
 	imageOrder,
 	imageQuads,
 	LIGHTS_FULL,
+	METAL_DIFFUSE_CUT,
+	METAL_SEEN,
 	type MeshGeometry,
 	nearSkyCentre,
 	nearSkyInto,
 	OVERDRAW_FULL,
+	PROBE_LEVELS,
+	PROBE_RADIUS,
+	PROBE_ROUGH,
+	PROBE_SIZE,
+	PROBE_STEP,
 	postActive,
+	probeFaces,
 	type RenderSettings,
 	type RenderStats,
 	renderDebug,
@@ -571,6 +579,16 @@ struct VOut {
 	@location(6) local: vec3f, @location(7) lnormal: vec3f,
 };
 @vertex fn vs(v: VIn) -> VOut { return shade(v); }
+// A face of the reflection cube: the parts as the camera's view lights them,
+// seen from the cube's middle. See drawReflections.
+struct ReflU { viewProj: mat4x4f };
+@group(1) @binding(0) var<uniform> reflU: ReflU;
+@vertex fn vsRefl(v: VIn) -> VOut {
+	var o = shade(v);
+	o.clip = reflU.viewProj * vec4f(o.world, 1.0);
+	return o;
+}
+@fragment fn fsRefl(i: VOut) -> @location(0) vec4f { return vec4f(surface(i).rgb, 1.0); }
 // The parts' transform, shared by the parts and the handles: an entry point cannot call another.
 fn shade(v: VIn) -> VOut {
 	let m = mat3x3f(v.c0, v.c1, v.c2);
@@ -587,6 +605,33 @@ fn shade(v: VIn) -> VOut {
 	o.local = v.pos * s;
 	o.lnormal = v.nrm;
 	return o;
+}
+// Scene reflections: the place round the camera, its alpha 0 where nothing
+// was drawn and the sky shows. A blank cube while the cube itself is drawn.
+@group(0) @binding(16) var reflCube: texture_cube<f32>;
+@group(0) @binding(17) var reflSampler: sampler;
+// What a reflection sees in a direction: the sky as far as it reaches p, and
+// over it the place round the camera, where scene reflections are on, as
+// blurred as \`lod\` says. The cube's alpha is how much of its texel the place
+// covers, and its colour is the place's share of it, so the sky shows through
+// the rest.
+// The cube is read where the ray from p meets a sphere round the camera, not
+// along the ray's direction alone, so a part reflects what is beside it
+// rather than what the camera would see that way (see PROBE_RADIUS).
+fn envSees(p: vec3f, dir: vec3f, vis: f32, lod: f32) -> vec3f {
+	let s = skyLight(dir) * max(vis, 0.05);
+	if (!has(${FEATURE_BIT.sceneReflect}u)) { return s; }
+	let e = sceneSees(p, dir, lod);
+	return s * (1.0 - e.a) + e.rgb;
+}
+// The place in the cube from p along dir: its light, already weighted by how
+// much of the texel it covers, and that cover.
+fn sceneSees(p: vec3f, dir: vec3f, lod: f32) -> vec4f {
+	let o = p - u.camPos.xyz;
+	let radius = max(${PROBE_RADIUS}.0, length(o) + 50.0);
+	let b = dot(o, dir);
+	let t = -b + sqrt(max(b * b - dot(o, o) + radius * radius, 0.0));
+	return textureSampleLevel(reflCube, reflSampler, o + dir * t, lod);
 }
 // The sky in a direction: blue overhead, the haze colour at the horizon,
 // darker below it, and the sun's disc and glow.
@@ -875,11 +920,12 @@ fn surface(i: VOut) -> vec4f {
 		var lamps = Lamps(vec3f(0.0), vec3f(0.0));
 		if (has(${FEATURE_BIT.pointLights}u | ${FEATURE_BIT.spotLights}u | ${FEATURE_BIT.surfaceLights}u)) { lamps = partLights(i.world, n, v, a.y * 2.0); }
 		let lampShine = select(0.0, 1.0, has(${FEATURE_BIT.lightHighlights}u));
-		c = albedo * (1.0 - a.z * 0.6) * (fill + lit + lamps.diffuse) + mix(vec3f(1.0), albedo, a.z) * (spec * lit + lamps.spec * a.x * pat.y * 4.6 * lampShine);
+		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps.diffuse) + mix(vec3f(1.0), albedo, a.z) * (spec * lit + lamps.spec * a.x * pat.y * 4.6 * lampShine);
 		if (has(${FEATURE_BIT.reflections}u)) {
-			let seen = sky(reflect(-v, n)) * max(vis, 0.05);
-			// A metal shows a little of the sky in its own colour.
-			c = c + seen * albedo * a.z * a.x * 0.25;
+			let r = reflect(-v, n);
+			let seen = envSees(i.world, r, vis, 0.0);
+			// A metal shows what is round it, blurred, in its own colour.
+			if (a.z > 0.5) { c = c + envSees(i.world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)}; }
 			// Reflectance, and glass's own, stronger at a glancing angle.
 			var mirror = shine;
 			if (b.y > 1.5) { mirror = max(mirror, 0.2 + 0.5 * pow(1.0 - abs(dot(n, v)), 3.0)); }
@@ -977,6 +1023,15 @@ fn skyFace(d: vec3f) -> vec3f {
 	}
 	if (d.y > 0.0) { return vec3f(-d.z / a.y, -d.x / a.y, 5.0); }
 	return vec3f(-d.z / a.y, d.x / a.y, 1.0);
+}
+// The sky's light in a direction, as a reflection sees it: a Sky's own six
+// images where it has them, so a dark space Sky is dark in a metal too; the
+// sky made here where it has none.
+fn skyLight(dir: vec3f) -> vec3f {
+	if (u.screen.w < 0.5) { return sky(dir); }
+	let f = skyFace(dir);
+	let c = textureSampleLevel(skyImages, skySampler, f.xy * 0.5 + 0.5, i32(f.z), 0.0).rgb;
+	return pow(c, vec3f(2.2)) * ${SKY_GAIN} + select(vec3f(0.0), sunLight(dir), u.screen.w > 1.5);
 }
 @fragment fn fsSky(i: SOut) -> @location(0) vec4f {
 	let far = u.invViewProj * vec4f(i.ndc, 1.0, 1.0);
@@ -1248,6 +1303,7 @@ export class WebGpuView implements ViewRenderer {
 		const held = (r: RenderSettings) =>
 			`${passesOf(r.features).thinParts} ${featureBits(r.features) & (FEATURE_BIT.skyShadows | FEATURE_BIT.nearSky)}`;
 		if (held(render) !== held(this.render)) this.nearCentre = null;
+		if (render.features !== this.render.features) this.reflAt = null;
 		this.render = render;
 	}
 
@@ -1666,9 +1722,12 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 13, visibility: STAGE.FRAGMENT, buffer: {} },
 				{ binding: 14, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } },
 				{ binding: 15, visibility: STAGE.FRAGMENT, sampler: {} },
+				{ binding: 16, visibility: STAGE.FRAGMENT, texture: { viewDimension: "cube" } },
+				{ binding: 17, visibility: STAGE.FRAGMENT, sampler: {} },
 			],
 		});
 		this.layout = layout;
+		this.makeReflections(module, layout, buffers);
 		// The lighting cells, two: one read while the other is filled. See fillCells.
 		this.cells = [0, 1].map(() =>
 			d.createTexture({
@@ -2172,6 +2231,7 @@ export class WebGpuView implements ViewRenderer {
 
 	setLighting(lighting: LightingParams): void {
 		this.lighting = lighting;
+		this.reflAt = null;
 		const sun = lighting.sun.join(",");
 		if (sun !== this.sunKey) {
 			this.sunKey = sun;
@@ -2584,9 +2644,9 @@ export class WebGpuView implements ViewRenderer {
 		this.device.queue.writeBuffer(this.uniform, 0, u);
 	}
 
-	private solids(pass: GPURenderPassEncoder, draws: Draw[] = this.draws): void {
+	private solids(pass: GPURenderPassEncoder, draws: Draw[] = this.draws, all = false): void {
 		for (const draw of draws) {
-			const runs = this.runs.get(draw);
+			const runs = all ? undefined : this.runs.get(draw);
 			if (runs && runs.length === 0) continue;
 			pass.setVertexBuffer(0, draw.vertices);
 			pass.setVertexBuffer(1, draw.instances);
@@ -2639,6 +2699,9 @@ export class WebGpuView implements ViewRenderer {
 			);
 		if (mapsDue) encoder = this.cut(encoder, "skyMaps");
 		this.drawCascades(encoder, camera, partsMoved);
+		// The parts moved or the light changed: the cube shows them again.
+		if (partsMoved || mapsDue) this.reflAt = null;
+		this.drawReflections(encoder, camera);
 		encoder = this.cut(encoder, "shadows");
 		// The camera's passes from here draw only the chunks in view.
 		this.cull(camera, [...this.draws, ...this.glass]);
@@ -3352,7 +3415,13 @@ export class WebGpuView implements ViewRenderer {
 
 	/** The shaders' textures and samplers, made again when one is replaced. */
 	private rebind(): void {
-		this.bind = this.device.createBindGroup({
+		this.bind = this.bindWith(this.reflCube);
+		// The cube's own faces are drawn with a blank one in its place.
+		this.reflBind = this.bindWith(this.reflBlank);
+	}
+
+	private bindWith(cube: GPUTexture): GPUBindGroup {
+		return this.device.createBindGroup({
 			layout: this.layout,
 			entries: [
 				{ binding: 0, resource: { buffer: this.uniform } },
@@ -3371,8 +3440,177 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 13, resource: { buffer: this.cascadeUniform } },
 				{ binding: 14, resource: this.cells[this.cellsRead].createView({ dimension: "3d" }) },
 				{ binding: 15, resource: this.cellSampler },
+				{ binding: 16, resource: cube.createView({ dimension: "cube" }) },
+				{ binding: 17, resource: this.reflSampler },
 			],
 		});
+	}
+
+	// -- scene reflections: see PROBE_SIZE ----------------------------------------------
+
+	private reflCube!: GPUTexture;
+	private reflBlank!: GPUTexture;
+	private reflDepth!: GPUTexture;
+	private reflSampler!: GPUSampler;
+	private reflBind!: GPUBindGroup;
+	private reflPipe: GPURenderPipeline | null = null;
+	private reflHalve: GPURenderPipeline | null = null;
+	/** Each smaller level's face, and the level above it to read. */
+	private reflLevels: { target: GPUTextureView; group: GPUBindGroup }[] = [];
+	private reflGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
+	/** Where the cube was last drawn from; null, to be drawn again. */
+	private reflAt: number[] | null = null;
+
+	private makeReflections(
+		module: GPUShaderModule,
+		layout: GPUBindGroupLayout,
+		buffers: GPUVertexBufferLayout[],
+	): void {
+		const d = this.device;
+		const cube = (size: number, levels: number) =>
+			d.createTexture({
+				size: [size, size, 6],
+				format: "rgba16float",
+				mipLevelCount: levels,
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
+		this.reflCube = cube(PROBE_SIZE, PROBE_LEVELS);
+		this.reflBlank = cube(1, 1);
+		this.reflDepth = d.createTexture({
+			size: [PROBE_SIZE, PROBE_SIZE],
+			format: "depth32float",
+			usage: TEXTURE.RENDER_ATTACHMENT,
+		});
+		this.reflSampler = d.createSampler({
+			magFilter: "linear",
+			minFilter: "linear",
+			mipmapFilter: "linear",
+		});
+		// Each level from the one above it, a face at a time: a texel's four,
+		// averaged by the sampler halfway between them.
+		const halve = d.createShaderModule({
+			code: `@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) i: u32) -> O {
+	var o: O;
+	let q = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+	o.pos = vec4f(q * 2.0 - 1.0, 0.0, 1.0);
+	o.uv = vec2f(q.x, 1.0 - q.y);
+	return o;
+}
+@fragment fn fs(o: O) -> @location(0) vec4f { return textureSampleLevel(src, samp, o.uv, 0.0); }`,
+		});
+		const halveLayout = d.createBindGroupLayout({
+			entries: [
+				{ binding: 0, visibility: STAGE.FRAGMENT, texture: {} },
+				{ binding: 1, visibility: STAGE.FRAGMENT, sampler: {} },
+			],
+		});
+		this.pipeline((p) => (this.reflHalve = p), {
+			layout: d.createPipelineLayout({ bindGroupLayouts: [halveLayout] }),
+			vertex: { module: halve, entryPoint: "vs" },
+			fragment: { module: halve, entryPoint: "fs", targets: [{ format: "rgba16float" }] },
+			primitive: { topology: "triangle-list" },
+		});
+		const halveSampler = d.createSampler({ magFilter: "linear", minFilter: "linear" });
+		const view = (level: number, face: number) =>
+			this.reflCube.createView({
+				dimension: "2d",
+				baseMipLevel: level,
+				mipLevelCount: 1,
+				baseArrayLayer: face,
+				arrayLayerCount: 1,
+			});
+		this.reflLevels = [];
+		for (let level = 1; level < PROBE_LEVELS; level++)
+			for (let face = 0; face < 6; face++)
+				this.reflLevels.push({
+					target: view(level, face),
+					group: d.createBindGroup({
+						layout: halveLayout,
+						entries: [
+							{ binding: 0, resource: view(level - 1, face) },
+							{ binding: 1, resource: halveSampler },
+						],
+					}),
+				});
+		const faceLayout = d.createBindGroupLayout({
+			entries: [{ binding: 0, visibility: STAGE.VERTEX, buffer: {} }],
+		});
+		this.reflGroups = [0, 1, 2, 3, 4, 5].map(() => {
+			const buffer = d.createBuffer({ size: 64, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+			return {
+				buffer,
+				group: d.createBindGroup({
+					layout: faceLayout,
+					entries: [{ binding: 0, resource: { buffer } }],
+				}),
+			};
+		});
+		this.pipeline((p) => (this.reflPipe = p), {
+			layout: d.createPipelineLayout({ bindGroupLayouts: [layout, faceLayout] }),
+			vertex: { module, entryPoint: "vsRefl", buffers },
+			fragment: { module, entryPoint: "fsRefl", targets: [{ format: "rgba16float" }] },
+			// The faces mirror some triangles' winding: both sides drawn.
+			primitive: { topology: "triangle-list", cullMode: "none" },
+			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "less" },
+		});
+	}
+
+	/**
+	 * The reflection cube's six faces, when scene reflections are on and the
+	 * camera is PROBE_STEP studs from where it was last drawn, or what it
+	 * shows changed. Every part, culled for none of the faces.
+	 */
+	private drawReflections(encoder: GPUCommandEncoder, camera: Camera): void {
+		if (!this.reflPipe || !this.reflBind || !featureOn(this.render.features, "sceneReflections"))
+			return;
+		const at = this.reflAt;
+		if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+		this.reflAt = [...camera.eye];
+		const faces = probeFaces(camera.eye, false);
+		const q = this.device.queue;
+		this.reflGroups.forEach(({ buffer, group }, k) => {
+			q.writeBuffer(buffer, 0, faces[k]);
+			const pass = encoder.beginRenderPass({
+				colorAttachments: [
+					{
+						view: this.reflCube.createView({
+							dimension: "2d",
+							baseMipLevel: 0,
+							mipLevelCount: 1,
+							baseArrayLayer: k,
+							arrayLayerCount: 1,
+						}),
+						clearValue: { r: 0, g: 0, b: 0, a: 0 },
+						loadOp: "clear",
+						storeOp: "store",
+					},
+				],
+				depthStencilAttachment: {
+					view: this.reflDepth.createView(),
+					depthClearValue: 1,
+					depthLoadOp: "clear",
+					depthStoreOp: "discard",
+				},
+			});
+			pass.setPipeline(this.reflPipe!);
+			pass.setBindGroup(0, this.reflBind);
+			pass.setBindGroup(1, group);
+			this.solids(pass, this.draws, true);
+			pass.end();
+		});
+		if (!this.reflHalve) return;
+		for (const { target, group } of this.reflLevels) {
+			const pass = encoder.beginRenderPass({
+				colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store" }],
+			});
+			pass.setPipeline(this.reflHalve);
+			pass.setBindGroup(0, group);
+			pass.draw(3);
+			pass.end();
+		}
 	}
 
 	// -- the lighting cells: see SKY_CELL ---------------------------------------------

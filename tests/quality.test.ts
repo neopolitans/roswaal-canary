@@ -66,7 +66,15 @@ describe("quality levels", () => {
 	});
 
 	it("keep Fast (iPad)'s switches at Level 15", () => {
-		const fast: FeatureKey[] = ["softEdges", "skyReflections", "farShadows", "particles", "blur"];
+		// Fast (iPad)'s, and Scene reflections, which came after it, under Sky reflections.
+		const fast: FeatureKey[] = [
+			"softEdges",
+			"skyReflections",
+			"sceneReflections",
+			"farShadows",
+			"particles",
+			"blur",
+		];
 		expect(changedFrom(qualityLevel(15).features).sort()).toEqual([...fast].sort());
 	});
 

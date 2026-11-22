@@ -284,7 +284,7 @@ export function placeEditorRenderingPage(): DocPage {
 					["13–16", "Parts to 2,200–6,000 studs, 4× antialiasing, shadows reaching further"],
 					[
 						"17–21",
-						"Every part, far shadows, soft edges, sky reflections and blur; 21 is As Studio",
+						"Every part, far shadows, soft edges, sky and scene reflections and blur; 21 is As Studio",
 					],
 				],
 			},

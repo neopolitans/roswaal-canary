@@ -9,6 +9,22 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.9",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.6.0: Metal, Glass and Reflectance reflect the place round them, and a dark Sky dims what is in its shade less.",
+		added: [
+			"**Scene reflections**, a Rendering switch under Sky reflections, on from Quality Level 19: Metal, Glass and Reflectance show the place round the camera, drawn into a small cube again as the camera moves. A metal shows it blurred, in its own colour.",
+		],
+		changed: [
+			"**Metal is lit as Studio's is**: less of its colour's own light, and more of what it reflects, fitted to Studio's captures of a Metal block on a lit floor.",
+			"**Reflections show a Sky's own images** where it has them, so a dark space Sky is dark in a metal too.",
+			"**Under a Sky of six images, the shade is darker**, as Studio's captures of a floor in shadow under open sky show.",
+			"**The Place Editor is 0.6.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.8",
 		date: "2026-11-22",
 		headline:

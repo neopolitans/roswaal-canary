@@ -678,6 +678,88 @@ export interface ViewQuality {
 }
 export const FULL_QUALITY: ViewQuality = { distance: null, reach: 1024, blobWidth: null };
 
+/**
+ * Scene reflections: the place round the camera in a cube, PROBE_SIZE texels
+ * a face, drawn again once the camera is PROBE_STEP studs from where it was
+ * drawn, or the parts, the light or the switches change. Metal, Glass and
+ * Reflectance read it where they would read the sky, as Studio's show the
+ * place round them (fitted to captures of a Metal block on a lit floor).
+ */
+export const PROBE_SIZE = 128;
+/** Its levels, each half the last, down to 4 texels; and the level a metal's blur reads. */
+export const PROBE_LEVELS = 6;
+export const PROBE_ROUGH = 4;
+/**
+ * The sphere round the camera a reflection is read from, in studs (or a
+ * little past the part, for one further off): a block on a floor below the
+ * camera reflects the floor beside it, as Studio's does.
+ */
+export const PROBE_RADIUS = 300;
+
+/**
+ * A metal's light: this share of its colour's diffuse light taken away, and
+ * what it reflects added in its own colour, this many times its highlight's
+ * strength. Fitted to Studio's captures of a Metal block on a lit floor
+ * (22 Nov 2026): its sunlit top, which reflects the dark sky, and its shaded
+ * sides, which reflect the floor.
+ */
+export const METAL_DIFFUSE_CUT = 0.7;
+export const METAL_SEEN = 4;
+export const PROBE_STEP = 8;
+export const PROBE_NEAR = 0.5;
+export const PROBE_FAR = 4000;
+
+/**
+ * A cube face: what it looks along (`ma`), and the directions its texels run
+ * across (`sc`) and down (`tc`), as a cube map is read: the face is the
+ * largest of a direction's axes, at (sc / ma + 1) / 2 across and
+ * (tc / ma + 1) / 2 down. +X, -X, +Y, -Y, +Z, -Z.
+ */
+const CUBE_FACES: readonly { sc: number[]; tc: number[]; ma: number[] }[] = [
+	{ sc: [0, 0, -1], tc: [0, -1, 0], ma: [1, 0, 0] },
+	{ sc: [0, 0, 1], tc: [0, -1, 0], ma: [-1, 0, 0] },
+	{ sc: [1, 0, 0], tc: [0, 0, 1], ma: [0, 1, 0] },
+	{ sc: [1, 0, 0], tc: [0, 0, -1], ma: [0, -1, 0] },
+	{ sc: [1, 0, 0], tc: [0, -1, 0], ma: [0, 0, 1] },
+	{ sc: [-1, 0, 0], tc: [0, -1, 0], ma: [0, 0, -1] },
+];
+
+/**
+ * The six faces' view-projections round `eye`, column-major, so a face drawn
+ * with one is read back by a cube lookup the right way round. WebGPU's
+ * texels run down from the top as its clip space's y falls; WebGL's run up
+ * from the bottom as it rises (`upward`), with depth -1 to 1.
+ */
+export function probeFaces(eye: readonly number[], upward: boolean): Float32Array[] {
+	const n = PROBE_NEAR;
+	const f = PROBE_FAR;
+	const [A, B] = upward
+		? [(f + n) / (f - n), (-2 * f * n) / (f - n)]
+		: [f / (f - n), (-f * n) / (f - n)];
+	return CUBE_FACES.map(({ sc, tc, ma }) => {
+		const y = upward ? tc : tc.map((v) => -v);
+		const rows = [sc, y, ma.map((v) => v * A), ma];
+		const m = new Float32Array(16);
+		rows.forEach((r, i) => {
+			m[i] = r[0];
+			m[4 + i] = r[1];
+			m[8 + i] = r[2];
+			m[12 + i] = -(r[0] * eye[0] + r[1] * eye[1] + r[2] * eye[2]) + (i === 2 ? B : 0);
+		});
+		return m;
+	});
+}
+
+/** The face a direction falls on and where, as a cube lookup finds it: for tests. */
+export function cubeLookup(dir: readonly number[]): { face: number; u: number; v: number } {
+	const face = CUBE_FACES.findIndex(
+		({ ma }) => ma[0] * dir[0] + ma[1] * dir[1] + ma[2] * dir[2] >= Math.max(...dir.map(Math.abs)),
+	);
+	const { sc, tc, ma } = CUBE_FACES[face];
+	const dot = (a: number[]) => a[0] * dir[0] + a[1] * dir[1] + a[2] * dir[2];
+	return { face, u: (dot(sc) / dot(ma) + 1) / 2, v: (dot(tc) / dot(ma) + 1) / 2 };
+}
+
 /** The cascades' reaches for a shadow reach: SUN_CASCADES's shares of it. */
 export function cascadeFars(reach: number): number[] {
 	const top = SUN_CASCADES[SUN_CASCADES.length - 1];

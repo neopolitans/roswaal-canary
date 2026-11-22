@@ -31,7 +31,7 @@ import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
 import { type Probe, type StageSink, WaitingClock } from "./profile.js";
-import { FEATURE_BIT, featureBits, passesOf } from "./renderFeatures.js";
+import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
 import { DENSITY_FS_GLSL, DENSITY_GLSL, OVERDRAW_GLSL, VIEWS_GLSL } from "./renderViews.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
 import {
@@ -63,11 +63,19 @@ import {
 	imageOrder,
 	imageQuads,
 	LIGHTS_FULL,
+	METAL_DIFFUSE_CUT,
+	METAL_SEEN,
 	type MeshGeometry,
 	nearSkyCentre,
 	nearSkyInto,
 	OVERDRAW_FULL,
+	PROBE_LEVELS,
+	PROBE_RADIUS,
+	PROBE_ROUGH,
+	PROBE_SIZE,
+	PROBE_STEP,
 	postActive,
+	probeFaces,
 	type RenderSettings,
 	type RenderStats,
 	renderDebug,
@@ -497,6 +505,43 @@ void main() {}`;
 const SURFACE = `
 uniform vec4 M[${MATERIALS.length * 3}];
 uniform mediump sampler2DArray looks;
+// A Sky's six images, for reflections: 1 or more in reflSkyOn when it has
+// them, 2 when Roblox's own sun is drawn over them. As WebGpuView's skyLight.
+uniform mediump sampler2DArray reflSky; uniform float reflSkyOn;
+vec3 reflSkyFace(vec3 d) {
+	vec3 a = abs(d);
+	if (a.x >= a.y && a.x >= a.z) return d.x > 0.0 ? vec3(d.z / a.x, -d.y / a.x, 3.0) : vec3(-d.z / a.x, -d.y / a.x, 4.0);
+	if (a.z >= a.y) return d.z > 0.0 ? vec3(-d.x / a.z, -d.y / a.z, 0.0) : vec3(d.x / a.z, -d.y / a.z, 2.0);
+	return d.y > 0.0 ? vec3(-d.z / a.y, -d.x / a.y, 5.0) : vec3(-d.z / a.y, d.x / a.y, 1.0);
+}
+vec3 skyLight(vec3 dir) {
+	if (reflSkyOn < 0.5) return sky(dir);
+	vec3 f = reflSkyFace(dir);
+	vec3 c = textureLod(reflSky, vec3(f.xy * 0.5 + 0.5, f.z), 0.0).rgb;
+	return pow(c, vec3(2.2)) * ${SKY_GAIN} + (reflSkyOn > 1.5 ? sunLight(dir) : vec3(0.0));
+}
+// Scene reflections' cube, read where the ray from p meets a sphere round the
+// camera: see WebGpuView's sceneSees. Left out of the program that draws it.
+#ifndef REFL_PASS
+uniform highp samplerCube reflCube;
+#endif
+vec4 sceneSees(vec3 p, vec3 dir, float lod) {
+#ifdef REFL_PASS
+	return vec4(0.0);
+#else
+	vec3 o = p - L[6].xyz;
+	float radius = max(${PROBE_RADIUS}.0, length(o) + 50.0);
+	float b = dot(o, dir);
+	float t = -b + sqrt(max(b * b - dot(o, o) + radius * radius, 0.0));
+	return textureLod(reflCube, o + dir * t, lod);
+#endif
+}
+vec3 envSees(vec3 p, vec3 dir, float vis, float lod) {
+	vec3 s = skyLight(dir) * max(vis, 0.05);
+	if (!has(${FEATURE_BIT.sceneReflect})) return s;
+	vec4 e = sceneSees(p, dir, lod);
+	return s * (1.0 - e.a) + e.rgb;
+}
 ${PATTERNS}
 float hash3(vec3 p) { uvec3 q = uvec3(ivec3(p)); return toUnit(mixBits(q.x ^ mixBits(q.y ^ mixBits(q.z)))); }
 float noise3(vec3 p) {
@@ -556,10 +601,12 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		vec3 lamps = vec3(0.0);
 		if (has(${FEATURE_BIT.pointLights} | ${FEATURE_BIT.spotLights} | ${FEATURE_BIT.surfaceLights})) lamps = partLights(world, n, v, a.y * 2.0, lampShine);
 		if (!has(${FEATURE_BIT.lightHighlights})) lampShine = vec3(0.0);
-		c = albedo * (1.0 - a.z * 0.6) * (fill + lit + lamps) + mix(vec3(1.0), albedo, a.z) * (spec * lit + lampShine * a.x * pat.y * 4.6);
+		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps) + mix(vec3(1.0), albedo, a.z) * (spec * lit + lampShine * a.x * pat.y * 4.6);
 		if (has(${FEATURE_BIT.reflections})) {
-			vec3 seen = sky(reflect(-v, n)) * max(vis, 0.05);
-			c += seen * albedo * a.z * a.x * 0.25;
+			vec3 r = reflect(-v, n);
+			vec3 seen = envSees(world, r, vis, 0.0);
+			// A metal shows what is round it, blurred, in its own colour.
+			if (a.z > 0.5) c += envSees(world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)};
 			float mirror = shine;
 			if (b.y > 1.5) mirror = max(mirror, 0.2 + 0.5 * pow(1.0 - abs(dot(n, v)), 3.0));
 			c = mix(c, seen, mirror);
@@ -1118,6 +1165,95 @@ export class WebGl2View implements ViewRenderer {
 	/** The solid parts' depth alone, before they are lit: only where depth is reversed. */
 	private pre: Program | null = null;
 	private main!: Program;
+	private reflProgram!: Program;
+	private reflCube: WebGLTexture | null = null;
+	private reflFbo: WebGLFramebuffer | null = null;
+	/** Where the cube was last drawn from; null, to be drawn again. */
+	private reflAt: number[] | null = null;
+
+	/** Scene reflections' cube and what draws into it: see PROBE_SIZE. Half floats, where they can be drawn into. */
+	private makeReflections(): void {
+		const gl = this.gl;
+		if (!gl.getExtension("EXT_color_buffer_float")) {
+			// Nothing to draw into: a clear cube, so reflections show the sky alone.
+			const blank = gl.createTexture();
+			gl.activeTexture(gl.TEXTURE14);
+			gl.bindTexture(gl.TEXTURE_CUBE_MAP, blank);
+			gl.texStorage2D(gl.TEXTURE_CUBE_MAP, 1, gl.RGBA8, 1, 1);
+			gl.activeTexture(gl.TEXTURE0);
+			return;
+		}
+		this.reflCube = gl.createTexture();
+		gl.activeTexture(gl.TEXTURE14);
+		gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.reflCube);
+		gl.texStorage2D(gl.TEXTURE_CUBE_MAP, PROBE_LEVELS, gl.RGBA16F, PROBE_SIZE, PROBE_SIZE);
+		gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+		gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.activeTexture(gl.TEXTURE0);
+		this.reflFbo = gl.createFramebuffer();
+		const depth = gl.createRenderbuffer();
+		gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+		gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, PROBE_SIZE, PROBE_SIZE);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.reflFbo);
+		gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	}
+
+	/**
+	 * The cube's six faces, as WebGpuView's drawReflections: when scene
+	 * reflections are on and the camera is PROBE_STEP studs from where it was
+	 * last drawn, or what it shows changed. Every part, culled for no face;
+	 * then its smaller levels, for a metal's blur.
+	 */
+	private drawReflections(camera: Camera): void {
+		const gl = this.gl;
+		const cube = this.reflCube;
+		if (!cube || !this.reflFbo || !featureOn(this.render.features, "sceneReflections")) return;
+		const at = this.reflAt;
+		if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+		this.reflAt = [...camera.eye];
+		const faces = probeFaces(camera.eye, true);
+		this.use(this.reflProgram, camera, false);
+		this.usualDepth(true);
+		gl.depthFunc(gl.LESS);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.reflFbo);
+		gl.viewport(0, 0, PROBE_SIZE, PROBE_SIZE);
+		gl.disable(gl.CULL_FACE);
+		gl.disable(gl.BLEND);
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthMask(true);
+		gl.clearColor(0, 0, 0, 0);
+		gl.clearDepth(1);
+		const culled = this.runs;
+		this.runs = new Map();
+		faces.forEach((face, k) => {
+			gl.framebufferTexture2D(
+				gl.FRAMEBUFFER,
+				gl.COLOR_ATTACHMENT0,
+				gl.TEXTURE_CUBE_MAP_POSITIVE_X + k,
+				cube,
+				0,
+			);
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+			gl.uniformMatrix4fv(this.reflProgram.viewProj, false, face);
+			this.solids();
+		});
+		this.runs = culled;
+		gl.framebufferTexture2D(
+			gl.FRAMEBUFFER,
+			gl.COLOR_ATTACHMENT0,
+			gl.TEXTURE_CUBE_MAP_POSITIVE_X,
+			null,
+			0,
+		);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.activeTexture(gl.TEXTURE14);
+		gl.bindTexture(gl.TEXTURE_CUBE_MAP, cube);
+		gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.enable(gl.CULL_FACE);
+		gl.viewport(0, 0, this.width, this.height);
+	}
 	private ids!: Program;
 	private over!: Program;
 	private skyProgram!: Program;
@@ -1209,6 +1345,7 @@ export class WebGl2View implements ViewRenderer {
 		const held = (r: RenderSettings) =>
 			`${passesOf(r.features).thinParts} ${featureBits(r.features) & (FEATURE_BIT.skyShadows | FEATURE_BIT.nearSky)}`;
 		if (held(render) !== held(this.render)) this.nearCentre = null;
+		if (render.features !== this.render.features) this.reflAt = null;
 		this.render = render;
 	}
 
@@ -1671,12 +1808,27 @@ export class WebGl2View implements ViewRenderer {
 		}
 		await this.linkAhead(progress);
 		this.main = this.link(VS, FS);
+		// The reflection cube's faces: the same shading, without reading the cube.
+		this.reflProgram = this.link(
+			VS,
+			FS.replace("#version 300 es\n", "#version 300 es\n#define REFL_PASS\n"),
+		);
+		this.makeReflections();
 		if (clip) this.pre = this.link(VS, FS_DEPTH);
 		// The material table: the same for every frame, so set once.
 		gl.useProgram(this.main.program);
 		gl.uniform4fv(gl.getUniformLocation(this.main.program, "M[0]"), materialBlock());
 		// The material textures, on unit 1 for good: the glow's passes use unit 0.
 		gl.uniform1i(gl.getUniformLocation(this.main.program, "looks"), 1);
+		for (const prog of [this.main, this.reflProgram]) {
+			gl.useProgram(prog.program);
+			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), materialBlock());
+			gl.uniform1i(gl.getUniformLocation(prog.program, "looks"), 1);
+			// The Sky's images stay on unit 4 from the sky's pass; the cube on 14.
+			gl.uniform1i(gl.getUniformLocation(prog.program, "reflSky"), 4);
+			gl.uniform1i(gl.getUniformLocation(prog.program, "reflCube"), 14);
+		}
+		gl.useProgram(this.main.program);
 		this.looks = gl.createTexture()!;
 		gl.activeTexture(gl.TEXTURE1);
 		gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.looks);
@@ -1766,6 +1918,7 @@ export class WebGl2View implements ViewRenderer {
 
 	setLighting(lighting: LightingParams): void {
 		this.lighting = lighting;
+		this.reflAt = null;
 		const sun = lighting.sun.join(",");
 		if (sun !== this.sunKey) {
 			this.sunKey = sun;
@@ -2793,6 +2946,16 @@ export class WebGl2View implements ViewRenderer {
 		);
 		gl.uniform3f(prog.select, SELECT[0], SELECT[1], SELECT[2]);
 		gl.uniform1f(prog.handle, 0);
+		const reflSky = gl.getUniformLocation(prog.program, "reflSkyOn");
+		if (reflSky)
+			gl.uniform1f(
+				reflSky,
+				this.skyOn && passesOf(this.render.features).skyImages
+					? this.lighting.skyboxSun
+						? 2
+						: 1
+					: 0,
+			);
 	}
 
 	private solids(
@@ -2867,6 +3030,9 @@ export class WebGl2View implements ViewRenderer {
 			this.fillCells(camera);
 			clock?.mark("skyCells");
 		}
+		// The parts moved or the light changed: the cube shows them again.
+		if (partsMoved || nearDrawn) this.reflAt = null;
+		this.drawReflections(camera);
 		// The camera's passes from here draw only the chunks in view.
 		this.cull(camera, [...this.draws, ...this.glass]);
 		const culling = passesOf(this.render.features);
@@ -3414,7 +3580,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.activeTexture(gl.TEXTURE0);
 		this.loaded.add(layer);
 		const block = materialBlock(this.loaded);
-		for (const prog of [this.main, this.glowProgram]) {
+		for (const prog of [this.main, this.glowProgram, this.reflProgram]) {
 			gl.useProgram(prog.program);
 			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), block);
 		}

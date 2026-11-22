@@ -24,6 +24,7 @@ export interface RenderFeatures {
 	ambient: boolean;
 	highlights: boolean;
 	skyReflections: boolean;
+	sceneReflections: boolean;
 	sunShadows: boolean;
 	farShadows: boolean;
 	softEdges: boolean;
@@ -118,6 +119,13 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 			f("ambient", "Ambient", 2, "Lighting.Ambient, indoors and out."),
 			f("highlights", "Sun highlights", 2, "The sun's highlight on shiny materials."),
 			f("skyReflections", "Sky reflections", 2, "The sky seen in Metal, Glass and Reflectance."),
+			f(
+				"sceneReflections",
+				"Scene reflections",
+				2,
+				"The place round the camera seen in them too, drawn again as the camera moves.",
+				"skyReflections",
+			),
 		],
 	},
 	{
@@ -313,6 +321,7 @@ export const LEVEL_ADDS: Partial<Record<FeatureKey, number>> = {
 	farShadows: 17,
 	softEdges: 18,
 	skyReflections: 19,
+	sceneReflections: 19,
 	blur: 20,
 };
 
@@ -407,6 +416,8 @@ export const FEATURE_BIT = {
 	leak: 65536,
 	/** No light at all is on: the parts drawn in their colours, as the Surfaces step shows them. */
 	unlit: 16384,
+	/** The place round the camera in reflections, from its cube: see PROBE_SIZE. */
+	sceneReflect: 131072,
 } as const;
 
 export function featureBits(features: RenderFeatures): number {
@@ -418,6 +429,7 @@ export function featureBits(features: RenderFeatures): number {
 		[on("neonFaces"), FEATURE_BIT.neon],
 		[on("highlights"), FEATURE_BIT.highlights],
 		[on("skyReflections"), FEATURE_BIT.reflections],
+		[on("sceneReflections"), FEATURE_BIT.sceneReflect],
 		[on("farShadows"), FEATURE_BIT.farShadows],
 		[on("skyShadows"), FEATURE_BIT.skyShadows],
 		[on("nearSkyMaps"), FEATURE_BIT.nearSky],

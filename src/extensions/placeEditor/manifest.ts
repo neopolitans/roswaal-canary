@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.5.0",
+	version: "0.6.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.6.0",
+			roswaal: "1.1.0-canary.9",
+			date: "2026-11-22",
+			text: "Scene reflections: Metal, Glass and Reflectance show the place round the camera, from Quality Level 19. Metal is refitted to Studio's, reflections show a Sky's own images, and the shade under a Sky of six images is darker, as Studio's is.",
+		},
 		{
 			version: "0.5.0",
 			roswaal: "1.1.0-canary.8",

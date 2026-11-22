@@ -211,8 +211,9 @@ export function readLighting(doc: RbxDocument): LightingParams {
 	const skyFill = prop(lighting, "EnvironmentDiffuseScale", 0);
 	// With EnvironmentDiffuseScale at 0 the fill is gone and OutdoorAmbient alone
 	// is left. Under a Sky of six images of its own the fill is grey, not the
-	// default sky's blue: fitted to the same capture, under a dark space Sky.
-	const fill = skyboxOf(sky) ? [0.77, 0.77, 0.77] : FILL;
+	// default sky's blue: fitted under a dark space Sky to Studio's captures of
+	// a grey floor in shadow under open sky, beside it in the sun (22 Nov 2026).
+	const fill = skyboxOf(sky) ? [0.52, 0.52, 0.52] : FILL;
 	const skyLight = fill.map((v) => v * skyFill * (0.06 + 0.94 * day));
 	const ambient = linRgb(prop(lighting, "OutdoorAmbient", [0.5, 0.5, 0.5])).map(
 		(v, i) => v + skyLight[i],

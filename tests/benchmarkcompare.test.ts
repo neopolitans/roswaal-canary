@@ -93,8 +93,8 @@ describe("comparing two benchmark runs", () => {
 		const after = BEFORE.map((t) => t * 1.0);
 		after[2] = 7;
 		const level = compareRuns(run("a", before), run("b", after)).levels[0];
-		// Its passes were 50% apart: a 30% change is inside that.
-		expect(level.stations[2].band).toBeCloseTo(0.5, 6);
+		// Its passes were 50% apart, and the other run, measured once, is taken as as noisy: the two add.
+		expect(level.stations[2].band).toBeCloseTo(Math.hypot(0.5, 0.5), 6);
 		expect(level.stations[2].before).toBe(10);
 		expect(level.stations[2].verdict).toBe("within noise");
 	});

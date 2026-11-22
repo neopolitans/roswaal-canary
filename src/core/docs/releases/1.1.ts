@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.23",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.17.1: a benchmark comparison calls a change only past three deviations of the noise.",
+		changed: [
+			"**A benchmark comparison's noise band is three deviations, not two**, and a run measured once is taken to be as noisy as the other run's two passes, the two noises added. Comparing two iPad runs where nothing drawn had changed, two of eighteen stations were called changed; now none are.",
+			"**The Place Editor is 0.17.1.**",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.22",
 		date: "2026-11-22",
 		headline:

@@ -8,9 +8,15 @@
  * 3% faster to 46% slower). So the median change across the stations is
  * taken as the run's drift: the one or two stations a release changed do not
  * move a median. Each station's change is judged after that drift, against a
- * band of how far the stations scatter round it (about two deviations, from
+ * band of how far the stations scatter round it (three deviations, from
  * their median absolute deviation, 5% at least), widened by a station's own
- * two passes where it was measured twice.
+ * two passes where it was measured twice: a run of one pass is taken to be as
+ * noisy as the other's, and the two noises add.
+ *
+ * Three deviations, not two: canary.21 against canary.22 on an iPad, where
+ * nothing drawn had changed, called two of eighteen stations changed at two.
+ * An iPad's GPU changes its clock with how hard it is worked, so the noise
+ * comes in bursts, and a light station's two passes were 20 to 35% apart.
  */
 
 import type { BenchmarkLevelResult, BenchmarkResult, BenchmarkStationResult } from "./result.js";
@@ -99,9 +105,9 @@ function compareLevel(
 	const logs = pairs.map((p) => Math.log(p.after / p.before));
 	const centre = median(logs);
 	const drift = Math.exp(centre);
-	// About two deviations: 1.4826 times the median absolute deviation is one, for a normal spread.
+	// Three deviations: 1.4826 times the median absolute deviation is one, for a normal spread.
 	const mad = median(logs.map((l) => Math.abs(l - centre))) * 1.4826;
-	const band = Math.max(NOISE_FLOOR, Math.exp(2 * mad) - 1);
+	const band = Math.max(NOISE_FLOOR, Math.exp(3 * mad) - 1);
 	return {
 		label: a.label === b.label ? a.label : `${a.label} → ${b.label}`,
 		by: gpu ? "GPU" : "waited frame",
@@ -110,7 +116,10 @@ function compareLevel(
 		stations: pairs.map(({ s, t, before, after }) => {
 			const ratio = after / before;
 			const adjusted = ratio / drift;
-			const own = Math.max(band, passSpread(s, gpu), passSpread(t, gpu));
+			// Each run's own noise: a run measured once taken as noisy as the other; the two add.
+			const ownBefore = s.repeat ? passSpread(s, gpu) : passSpread(t, gpu);
+			const ownAfter = t.repeat ? passSpread(t, gpu) : passSpread(s, gpu);
+			const own = Math.max(band, Math.hypot(ownBefore, ownAfter));
 			return {
 				n: s.n,
 				name: s.name,
@@ -180,7 +189,7 @@ export function comparisonReport(c: Comparison): string {
 		);
 		if (level.band > 0.15)
 			lines.push(
-				`  Noise this wide hides changes under about ${Math.round(level.band * 100)}%. Each station twice, or a cooler device, narrows it; at about two deviations, one station in twenty is outside it by chance.`,
+				`  Noise this wide hides changes under about ${Math.round(level.band * 100)}%. Each station twice, or a cooler device, narrows it.`,
 			);
 		lines.push(
 			`  ${"Station".padEnd(28)}${"Before".padStart(10)}${"After".padStart(10)}${"Change".padStart(9)}${"After drift".padStart(13)}  Verdict`,

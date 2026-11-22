@@ -9,6 +9,21 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.11",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.8.0: render scale is a share of the page's own pixels, and Native draws a Retina screen's every pixel.",
+		added: [
+			"**Native** in Render scale: every pixel the screen has, twice as many each way on a Retina screen.",
+		],
+		changed: [
+			"**Render scale is a share of the page's own pixels**, before a Retina screen doubles them. Quality Levels 10 to 17 draw at 100% of them, a quarter of an iPad's pixels, and Native from Level 18. A screen with one pixel to the page's draws as before.",
+			"**The profile times still-frame TAA and moving beams and particles alone**: their own frames wait while it runs.",
+			"**The Place Editor is 0.8.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.10",
 		date: "2026-11-22",
 		headline:

@@ -280,11 +280,11 @@ export function placeEditorRenderingPage(): DocPage {
 				rows: [
 					["1–5", "Parts to 500–1,550 studs, soft blurred sun shadows, no glow"],
 					["6–9", "Neon glow, then beams, highlights and bloom"],
-					["10–12", "Sharp sun shadows near the camera, at the screen's full resolution, FXAA"],
+					["10–12", "Sharp sun shadows near the camera, at the page's own resolution, FXAA"],
 					["13–16", "Parts to 2,200–6,000 studs, SMAA, shadows reaching further"],
 					[
 						"17–21",
-						"Every part, far shadows, soft edges, sky and scene reflections, blur, and MSAA 4× from 18; 21 is As Studio",
+						"Every part, far shadows, soft edges, sky and scene reflections, blur, and from 18 MSAA 4× at the screen's native resolution; 21 is As Studio",
 					],
 				],
 			},

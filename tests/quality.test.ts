@@ -34,7 +34,7 @@ describe("quality levels", () => {
 		expect(top.features).toEqual(STUDIO_FEATURES);
 		expect(top.distance).toBeNull();
 		expect(top.antialias).toBe("msaa4");
-		expect(top.scale).toBe(1);
+		expect(top.scale).toBe("native");
 		expect(top.reach).toBe(578);
 	});
 
@@ -100,7 +100,15 @@ describe("quality levels", () => {
 			"msaa4",
 			"msaa4",
 		]);
-		expect([1, 2, 3, 9, 10].map((n) => qualityLevel(n).scale)).toEqual([0.5, 0.5, 0.75, 0.75, 1]);
+		expect([1, 2, 3, 9, 10, 17, 18].map((n) => qualityLevel(n).scale)).toEqual([
+			0.5,
+			0.5,
+			0.75,
+			0.75,
+			1,
+			1,
+			"native",
+		]);
 	});
 
 	it("reach as far as Studio's sharp shadows did, the stand-in further and blurred", () => {

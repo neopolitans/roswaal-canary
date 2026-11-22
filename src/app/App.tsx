@@ -480,7 +480,9 @@ export function App() {
 				renderScale:
 					sceneView.renderScale === "auto" || sceneView.renderScale === undefined
 						? "auto"
-						: Number(sceneView.renderScale) / 100,
+						: sceneView.renderScale === "native"
+							? "native"
+							: Number(sceneView.renderScale) / 100,
 				antialias: antialiasSetting(sceneView.antialiasing),
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined

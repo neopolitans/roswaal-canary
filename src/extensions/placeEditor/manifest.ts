@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.7.0",
+	version: "0.8.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.8.0",
+			roswaal: "1.1.0-canary.11",
+			date: "2026-11-22",
+			text: "Render scale is a share of the page's own pixels, and Native draws every pixel of a Retina screen. Quality Levels 10 to 17 draw at 100%, Native from 18. The profile times still-frame TAA alone.",
+		},
 		{
 			version: "0.7.0",
 			roswaal: "1.1.0-canary.10",

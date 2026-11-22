@@ -118,8 +118,12 @@ export interface ViewportOptions {
 	frameRate: number | "vsync" | "unlimited";
 	/** Alt and a click, or a long press, picks one Model further in each time, rather than the part. */
 	altClickSteps: boolean;
-	/** The share of the screen's pixels across and down the place is drawn at; Automatic, the quality level's. */
-	renderScale?: number | "auto";
+	/**
+	 * The share of the page's own pixels across and down the place is drawn
+	 * at (CSS pixels: a Retina screen has twice as many each way); "native",
+	 * every pixel the screen has; Automatic, the quality level's.
+	 */
+	renderScale?: number | "native" | "auto";
 	/** Antialiasing: see antialias.ts; unset, the quality level's. Changing it builds the view again. */
 	antialias?: AntialiasMode;
 	/** Settings' Quality: a level, 1 to 21, or Automatic. Unset, Level 21. */
@@ -1959,10 +1963,16 @@ export class ViewportController {
 		if (next !== null) void this.toLevel(next, true);
 	}
 
+	/**
+	 * Canvas pixels to a CSS pixel: the render scale's share of the page's
+	 * pixels, never past the screen's own (at most 2, as a phone's 3 costs
+	 * more than it shows).
+	 */
 	private pixelRatio(): number {
+		const native = Math.min(2, devicePixelRatio || 1);
 		const setting = this.options.renderScale ?? "auto";
 		const scale = setting === "auto" ? this.level().scale : setting;
-		return Math.min(2, devicePixelRatio || 1) * scale * this.resolutionScale;
+		return Math.min(native, scale === "native" ? native : scale) * this.resolutionScale;
 	}
 
 	private fit(): void {
@@ -2036,7 +2046,8 @@ export class ViewportController {
 			// Beams and particles that move keep the view drawing, at the frame
 			// rate's pace, until nothing moves, the Rendering panel turns them
 			// off, or the tab is hidden; shown again, it carries on.
-			if (this.view.animates() && !document.hidden) this.redraw(true);
+			// Not while a profile runs: its frames are timed one at a time, alone.
+			if (this.view.animates() && !document.hidden && !this.state.profiling) this.redraw(true);
 		};
 		this.nextFrame(draw);
 	}
@@ -2165,7 +2176,7 @@ export class ViewportController {
 		// Its size on the page, before the antialiasing sweep replaces the canvas.
 		const box = canvas.getBoundingClientRect();
 		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
-		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round((this.pixelRatio() / Math.min(2, devicePixelRatio || 1)) * 100)}%`;
+		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)`;
 		const steps = RENDER_STEPS.length;
 		// The switches turned off one at a time: those of these groups that are on.
 		const alone = WITHOUT_GROUPS.map((title) => ({

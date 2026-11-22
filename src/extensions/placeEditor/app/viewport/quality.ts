@@ -18,8 +18,11 @@ export interface QualityLevel {
 	level: number;
 	/** How far from the camera parts are drawn, in studs; null, all of them. */
 	distance: number | null;
-	/** The share of the screen's pixels across and down. */
-	scale: number;
+	/**
+	 * The share of the page's own pixels across and down (CSS pixels, before
+	 * a Retina screen doubles them); "native", every pixel the screen has.
+	 */
+	scale: number | "native";
 	/**
 	 * Antialiasing: none, then a pass over the frame, which costs a tablet
 	 * least, then four samples a pixel.
@@ -84,7 +87,7 @@ function makeLevel(level: number): QualityLevel {
 	return {
 		level,
 		distance: stepped(DISTANCE, level),
-		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : 1,
+		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : level <= 17 ? 1 : "native",
 		antialias: level >= 18 ? "msaa4" : level >= 13 ? "smaa" : level >= 10 ? "fxaa" : "off",
 		reach: stepped(REACH, level),
 		shadowMap: level <= 9 ? 512 : level <= 12 ? 1024 : 2048,

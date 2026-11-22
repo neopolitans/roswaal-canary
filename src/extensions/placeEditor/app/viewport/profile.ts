@@ -23,6 +23,7 @@
 /** A frame's stages, in the order they are drawn. Not every renderer has every one. */
 export const STAGES = [
 	"skyMaps",
+	"skyOpen",
 	"shadows",
 	"skyCells",
 	"glowSources",
@@ -38,6 +39,7 @@ export type Stage = (typeof STAGES)[number];
 
 export const STAGE_LABELS: Record<Stage, string> = {
 	skyMaps: "Sky maps",
+	skyOpen: "Thin parts opened",
 	shadows: "Sun shadows",
 	skyCells: "Lighting cells",
 	glowSources: "Glow sources",
@@ -52,6 +54,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
 /** A stage's name as a column of the per-level table: short. */
 export const STAGE_SHORT: Record<Stage, string> = {
 	skyMaps: "Sky maps",
+	skyOpen: "Thin parts",
 	shadows: "Shadows",
 	skyCells: "Cells",
 	glowSources: "Glow src",
@@ -68,7 +71,9 @@ export const STAGE_HINTS: Record<Stage, string> = {
 	skyMaps:
 		"The sun's and the sky's maps: drawn when the place, the sun or the camera's area changes.",
 	shadows: "The sun's shadow cascades.",
-	skyCells: "The lighting cells around the camera.",
+	skyCells: "The lighting cells around the camera, found again from the near sky maps.",
+	skyOpen:
+		"The near sky maps with what is thinner than a window strut taken out: four passes over each map.",
 	glowSources: "Neon and CrackedLava drawn for their glow.",
 	occlusion: "The solid parts' depth, for occlusion culling.",
 	sky: "The sky behind the place.",

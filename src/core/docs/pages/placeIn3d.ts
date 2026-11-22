@@ -445,7 +445,7 @@ export function placeEditorPerformancePage(): DocPage {
 					],
 					[
 						"Stages",
-						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under. Where the GPU has timers, the same stages by its own clock, which leaves out the waits; the sun's maps are drawn every frame here, as when the camera moves",
+						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under. Where the GPU has timers, the same stages by its own clock, which leaves out the waits; the sun's maps are drawn every frame here, as when the camera moves. When the sky maps are drawn again, the thin parts taken out of the near ones and the lighting cells are stages of their own",
 					],
 					[
 						"Base",
@@ -465,7 +465,7 @@ export function placeEditorPerformancePage(): DocPage {
 					],
 					[
 						"Antialiasing",
-						"One frame in each antialiasing this device draws, the view built again for each, so they compare",
+						"One frame in each antialiasing this device draws, the view built again for each, so they compare. Multisampling also with the parts shaded and depth-tested in one draw",
 					],
 					[
 						"Shader precision",

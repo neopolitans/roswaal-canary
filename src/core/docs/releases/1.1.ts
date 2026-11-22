@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.16",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.12.0: the profile times multisampling with one draw, and says what a sky map redraw costs.",
+		added: [
+			"**The profile's MSAA 4×, one draw row**: multisampling with the parts shaded and depth-tested in one draw.",
+			"**The sky maps' redraw in three stages**: the maps, the thin parts taken out of the near ones, and the lighting cells.",
+		],
+		changed: ["**The Place Editor is 0.12.0.**"],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.15",
 		date: "2026-11-22",
 		headline:

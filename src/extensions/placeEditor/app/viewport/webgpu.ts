@@ -2953,7 +2953,7 @@ export class WebGpuView implements ViewRenderer {
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
 		const mapsDue = this.skyDirty || this.sunDirty || nearMoved;
 		if (mapsDue)
-			this.drawSkyMaps(
+			encoder = this.drawSkyMaps(
 				encoder,
 				{
 					far: this.skyDirty,
@@ -2962,7 +2962,6 @@ export class WebGpuView implements ViewRenderer {
 				},
 				centre,
 			);
-		if (mapsDue) encoder = this.cut(encoder, "skyMaps");
 		// While the stages are profiled, the sun's maps are drawn every frame,
 		// as when the camera moves: a still camera draws them only once.
 		this.drawCascades(encoder, camera, partsMoved || this.clock !== null);
@@ -4714,9 +4713,9 @@ fn along(pos: vec4f) -> f32 {
 		encoder: GPUCommandEncoder,
 		which: { far: boolean; sun: boolean; near: boolean },
 		centre: number[],
-	): void {
+	): GPUCommandEncoder {
 		// Shadows frozen from the Rendering panel: the maps drawn last are sampled as they are.
-		if (this.render.freezeShadows) return;
+		if (this.render.freezeShadows) return encoder;
 		this.skyDirty = false;
 		this.sunDirty = false;
 		this.nearCentre = centre;
@@ -4725,7 +4724,7 @@ fn along(pos: vec4f) -> f32 {
 		const block = skyBlock(box, this.lighting?.sun ?? [0, 1, 0], true);
 		if (box) nearSkyInto(block, box, centre, true);
 		q.writeBuffer(this.skyUniform, 0, block);
-		if (!box) return;
+		if (!box) return encoder;
 		this.skyViewGroups.forEach(({ buffer, group }, k) => {
 			const drawn = k < SKY_VIEWS ? which.far : k === SKY_VIEWS ? which.sun : which.near;
 			if (!drawn) return;
@@ -4746,8 +4745,18 @@ fn along(pos: vec4f) -> f32 {
 			pass.end();
 		});
 		if (which.near) this.redrawn.nearMaps++;
-		if (which.near && passesOf(this.render.features).thinParts) this.openNearMaps(encoder);
-		if (which.near) this.fillCells(encoder);
+		// While profiling, each part a stage of its own: the maps, the thin
+		// parts taken out of the near ones, and the cells found from them.
+		let at = this.cut(encoder, "skyMaps");
+		if (which.near && passesOf(this.render.features).thinParts) {
+			this.openNearMaps(at);
+			at = this.cut(at, "skyOpen");
+		}
+		if (which.near) {
+			this.fillCells(at);
+			at = this.cut(at, "skyCells");
+		}
+		return at;
 	}
 
 	setLook(layer: number, levels: readonly (HTMLCanvasElement | ImageBitmap)[]): void {

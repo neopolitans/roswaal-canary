@@ -24226,6 +24226,7 @@ textarea.tb:where(:disabled) {
 }
 
 .profile-stage-skyMaps,
+.profile-stage-skyOpen,
 .profile-stage-skyCells {
 	background: var(--fg-faint);
 }

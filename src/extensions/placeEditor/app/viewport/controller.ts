@@ -2339,6 +2339,9 @@ export class ViewportController {
 			(steps + 1) +
 			3 +
 			view.antialiasModes().length +
+			(view.setDepthPath
+				? view.antialiasModes().filter((m) => antialiasInfo(m).samples > 1).length
+				: 0) +
 			TOP_LEVEL +
 			alone.reduce((n, g) => n + g.features.length, 0) +
 			(view.setDepthPath ? 2 : 0) +
@@ -2459,6 +2462,15 @@ export class ViewportController {
 				await this.restartView();
 				await this.viewSettled();
 				antialias.push(await this.timeWaited(label, 30));
+				// Multisampled, with the parts shaded and depth-tested in one draw too:
+				// the depth pre-pass stores every sample's depth between its passes.
+				const made = this.view;
+				if (antialiasInfo(mode).samples > 1 && made?.setDepthPath) {
+					phase(`Antialiasing ${label}, one draw`);
+					made.setDepthPath("lean");
+					antialias.push(await this.timeWaited(`${label}, one draw`, 30));
+					made.setDepthPath("auto");
+				}
 			}
 			this.options = options;
 			if (this.view?.antialias !== this.antialiasMode()) {

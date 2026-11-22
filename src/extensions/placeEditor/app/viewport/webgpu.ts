@@ -2706,11 +2706,21 @@ export class WebGpuView implements ViewRenderer {
 		samples: number;
 		onTop: GPURenderPipeline;
 		occluded: GPURenderPipeline;
+		rows: GPURenderPipeline;
 		overlay: GPURenderPipeline;
 		maskLayout: GPUBindGroupLayout;
+		rowsLayout: GPUBindGroupLayout;
 		overlayLayout: GPUBindGroupLayout;
 	};
-	private hlGroups: { mask: GPUBindGroup; overlay: GPUBindGroup } | null = null;
+	/**
+	 * Along each row, the nearest highlighted pixel within the outline's
+	 * width: its Highlight, and how far plus one (0, none). The overlay looks
+	 * up and down these, so the outline is 2 x (2r + 1) reads a pixel rather
+	 * than (2r + 1)^2: 81 at a Retina screen's 4 pixel outline, about 5 ms of
+	 * an iPad Mini's frame (Benchmark 1).
+	 */
+	private hlRows?: GPUTexture;
+	private hlGroups: { mask: GPUBindGroup; rows: GPUBindGroup; overlay: GPUBindGroup } | null = null;
 	/** The parts' shader module and vertex buffers, for pipelines made later. */
 	private partModule?: GPUShaderModule;
 	private partBuffers?: GPUVertexBufferLayout[];
@@ -2784,6 +2794,7 @@ struct HlSlot { fill: vec4f, outline: vec4f };
 struct HlU { slots: array<HlSlot, 32>, info: vec4f };
 @group(0) @binding(0) var mask: ${many ? "texture_multisampled_2d<u32>" : "texture_2d<u32>"};
 @group(0) @binding(1) var<uniform> hl: HlU;
+@group(0) @binding(2) var rows: texture_2d<u32>;
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
 	let q = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
 	return vec4f(q * 2.0 - 1.0, 0.0, 1.0);
@@ -2793,9 +2804,23 @@ fn at(c: vec2i) -> u32 {
 	if (any(c < vec2i(0)) || any(c >= size)) { return 0u; }
 	return textureLoad(mask, c, 0).r;
 }
+// Along the row: the nearest highlighted pixel within the outline's width,
+// its Highlight and how far, plus one; (0, 0) where there is none.
+@fragment fn fsRows(@builtin(position) pos: vec4f) -> @location(0) vec4u {
+	let c = vec2i(pos.xy);
+	let n = i32(ceil(hl.info.y));
+	var best = 0u;
+	var far = 1000;
+	for (var dx = -n; dx <= n; dx++) {
+		let t = at(c + vec2i(dx, 0));
+		if (t != 0u && abs(dx) < far) { best = t; far = abs(dx); }
+	}
+	return vec4u(best, select(0u, u32(far) + 1u, best != 0u), 0u, 0u);
+}
 // Over the finished picture: the fill where a Highlight's parts are; its
 // outline in the pixels just outside them, hl.info.y wide (2 of the page's
-// pixels, as Studio's), the nearest Highlight's.
+// pixels, as Studio's), the nearest Highlight's: the rows' nearest, up and
+// down, by their distance.
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
 	let c = vec2i(pos.xy);
 	let s = at(c);
@@ -2806,21 +2831,41 @@ fn at(c: vec2i) -> u32 {
 	}
 	let r = hl.info.y;
 	let n = i32(ceil(r));
+	let size = vec2i(textureDimensions(rows));
 	var best = 0u;
 	var near = 1e9;
 	for (var dy = -n; dy <= n; dy++) {
-		for (var dx = -n; dx <= n; dx++) {
-			let d = f32(dx * dx + dy * dy);
-			if (d > r * r + 0.5 || d >= near) { continue; }
-			let t = at(c + vec2i(dx, dy));
-			if (t != 0u) { best = t; near = d; }
-		}
+		let q = c + vec2i(0, dy);
+		if (q.y < 0 || q.y >= size.y) { continue; }
+		let row = textureLoad(rows, q, 0);
+		if (row.g == 0u) { continue; }
+		let dx = f32(row.g - 1u);
+		let d = dx * dx + f32(dy * dy);
+		if (d > r * r + 0.5 || d >= near) { continue; }
+		best = row.r;
+		near = d;
 	}
 	if (best == 0u) { discard; }
 	let o = hl.slots[best].outline;
 	if (o.a <= 0.0) { discard; }
 	return o;
 }`,
+		});
+		const rowsLayout = d.createBindGroupLayout({
+			entries: [
+				{
+					binding: 0,
+					visibility: STAGE.FRAGMENT,
+					texture: { sampleType: "uint", multisampled: many },
+				},
+				{ binding: 1, visibility: STAGE.FRAGMENT, buffer: {} },
+			],
+		});
+		const rows = d.createRenderPipeline({
+			layout: d.createPipelineLayout({ bindGroupLayouts: [rowsLayout] }),
+			vertex: { module: overlayModule, entryPoint: "vs" },
+			fragment: { module: overlayModule, entryPoint: "fsRows", targets: [{ format: "rg8uint" }] },
+			primitive: { topology: "triangle-list" },
 		});
 		const overlayLayout = d.createBindGroupLayout({
 			entries: [
@@ -2830,6 +2875,7 @@ fn at(c: vec2i) -> u32 {
 					texture: { sampleType: "uint", multisampled: many },
 				},
 				{ binding: 1, visibility: STAGE.FRAGMENT, buffer: {} },
+				{ binding: 2, visibility: STAGE.FRAGMENT, texture: { sampleType: "uint" } },
 			],
 		});
 		const overlay = d.createRenderPipeline({
@@ -2854,8 +2900,10 @@ fn at(c: vec2i) -> u32 {
 			samples: this.samples,
 			onTop: mask(true),
 			occluded: mask(false),
+			rows,
 			overlay,
 			maskLayout,
+			rowsLayout,
 			overlayLayout,
 		};
 		this.hlGroups = null;
@@ -2880,15 +2928,22 @@ fn at(c: vec2i) -> u32 {
 			mask.sampleCount !== this.samples
 		) {
 			mask?.destroy();
+			this.hlRows?.destroy();
 			this.hlMask = d.createTexture({
 				size: [this.width, this.height],
 				format: "r8uint",
 				sampleCount: this.samples,
 				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
 			});
+			this.hlRows = d.createTexture({
+				size: [this.width, this.height],
+				format: "rg8uint",
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
 			this.hlGroups = null;
 		}
 		const view = this.hlMask!.createView();
+		const rowsView = this.hlRows!.createView();
 		if (!this.hlGroups)
 			this.hlGroups = {
 				mask: d.createBindGroup({
@@ -2898,11 +2953,19 @@ fn at(c: vec2i) -> u32 {
 						{ binding: 3, resource: { buffer: hl.params } },
 					],
 				}),
+				rows: d.createBindGroup({
+					layout: pipes.rowsLayout,
+					entries: [
+						{ binding: 0, resource: view },
+						{ binding: 1, resource: { buffer: hl.params } },
+					],
+				}),
 				overlay: d.createBindGroup({
 					layout: pipes.overlayLayout,
 					entries: [
 						{ binding: 0, resource: view },
 						{ binding: 1, resource: { buffer: hl.params } },
+						{ binding: 2, resource: rowsView },
 					],
 				}),
 			};
@@ -2937,6 +3000,21 @@ fn at(c: vec2i) -> u32 {
 			for (const list of lists) this.solids(pass, list, true);
 		}
 		pass.end();
+		const along = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
+			colorAttachments: [
+				{
+					view: rowsView,
+					clearValue: { r: 0, g: 0, b: 0, a: 0 },
+					loadOp: "clear",
+					storeOp: "store",
+				},
+			],
+		});
+		along.setPipeline(pipes.rows);
+		along.setBindGroup(0, this.hlGroups.rows);
+		along.draw(3);
+		along.end();
 		const over = encoder.beginRenderPass({
 			timestampWrites: this.stamp(null),
 			colorAttachments: [{ view: target, loadOp: "load", storeOp: "store" }],

@@ -5,20 +5,29 @@
  * Editor's.
  */
 
-export type BenchmarkKind = "current" | "sweep";
+/** "ab": each station's still frame with one render switch on and off, in turn. */
+export type BenchmarkKind = "current" | "sweep" | "ab";
 
 /** What a run is asked for: its kind, and whether each station is measured twice. */
 export interface BenchmarkRequest {
 	kind: BenchmarkKind;
 	/** 2: each station measured again in a second pass, for its own noise; twice as long. */
 	passes: 1 | 2;
+	/** For an A/B run: the render switch measured on and off, by its key ("occlusionCulling"). */
+	ab?: string;
 }
 
 export const BENCHMARK_EVENT = "roswaal:benchmark";
 
-export function startBenchmark(kind: BenchmarkKind, passes: 1 | 2 = twiceWanted() ? 2 : 1): void {
+export function startBenchmark(
+	kind: BenchmarkKind,
+	passes: 1 | 2 = twiceWanted() ? 2 : 1,
+	ab?: string,
+): void {
 	window.dispatchEvent(
-		new CustomEvent<BenchmarkRequest>(BENCHMARK_EVENT, { detail: { kind, passes } }),
+		new CustomEvent<BenchmarkRequest>(BENCHMARK_EVENT, {
+			detail: { kind, passes, ...(ab ? { ab } : {}) },
+		}),
 	);
 }
 

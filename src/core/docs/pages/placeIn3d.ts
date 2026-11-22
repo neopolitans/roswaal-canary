@@ -538,6 +538,9 @@ export function placeEditorPerformancePage(): DocPage {
 					"Each station's score is the frames a second its GPU time allows, beside the rate its waited " +
 					"frame allows; the run's is their geometric mean. Scores compare within one benchmark version. " +
 					'The tanks are Teensy Tiny Tankery models by MayLizbeth ("extraclear"), CC BY 4.0. ' +
+					"A run draws with the Rendering panel's switches as they are, and its report names any that are off. " +
+					"**A/B a switch**, in Settings, measures every station with one switch on, off, on and off, back to " +
+					"back, so a warming device slows both alike, and says what the switch saves or costs at each. " +
 					"**Copy report** gives the text; **Download results** saves the whole run as JSON.",
 			},
 			{

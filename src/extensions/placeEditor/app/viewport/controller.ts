@@ -79,6 +79,8 @@ import {
 	changedFrom,
 	FEATURE_GROUPS,
 	FEATURES,
+	type FeatureKey,
+	featureOn,
 	litFor,
 	RENDER_STEPS,
 	type RenderFeatures,
@@ -2231,6 +2233,13 @@ export class ViewportController {
 		passes?: 1 | 2;
 		/** "busy": frames timed with the GPU kept busy (Benchmark 2); "waited", one at a time (Benchmark 1). */
 		measure?: "waited" | "busy";
+		/** The render switches to draw with: the editor's, where it has a view. */
+		features?: RenderFeatures;
+		/**
+		 * An A/B run's switch: each station's still frame measured with it on,
+		 * off, on and off again, back to back, so warming falls on both alike.
+		 */
+		ab?: FeatureKey;
 		benchmark: number;
 		seed: number;
 		onProgress: (progress: BenchmarkProgress) => void;
@@ -2242,9 +2251,13 @@ export class ViewportController {
 		this.auto = null;
 		const startLevel = this.state.quality.level;
 		const levels: (number | null)[] =
-			run.kind === "sweep" ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
-		const passes = run.passes ?? 1;
+			run.kind === "sweep" && !run.ab ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
+		const passes = run.ab ? 1 : (run.passes ?? 1);
 		const busy = run.measure === "busy";
+		const renderWas = this.state.render;
+		const base = run.features ?? renderWas.features;
+		if (run.features) this.setRender({ ...renderWas, features: run.features });
+		const switchedOff = FEATURES.filter((f) => !featureOn(base, f.key)).map((f) => f.label);
 		const timeStill = (label: string) =>
 			busy ? this.timeBusy(label, 60) : this.timeWaited(label, 60);
 		const variants = run.stations.reduce((n, s) => n + s.variants.length, 0) * passes;
@@ -2253,8 +2266,14 @@ export class ViewportController {
 			benchmark: run.benchmark,
 			seed: run.seed,
 			kind: run.kind,
-			...((run.passes ?? 1) > 1 ? { passes: run.passes } : {}),
+			...(passes > 1 ? { passes } : {}),
 			...(busy ? { measure: "busy" as const } : {}),
+			...(switchedOff.length > 0 ? { switchedOff } : {}),
+			...(run.ab
+				? {
+						ab: { feature: run.ab, label: FEATURES.find((f) => f.key === run.ab)?.label ?? run.ab },
+					}
+				: {}),
 			release: RELEASES[0]?.version ?? "",
 			date: new Date().toISOString(),
 			renderer: this.view.backend,
@@ -2303,6 +2322,46 @@ export class ViewportController {
 							const until = performance.now() + variant.settleMs;
 							while (performance.now() < until && !run.cancelled())
 								await this.waitedFrames(1, 1000);
+						}
+						if (run.ab) {
+							const on: Timed[] = [];
+							const off: Timed[] = [];
+							for (const turn of [true, false, true, false]) {
+								if (run.cancelled()) break;
+								this.setRender({
+									...this.state.render,
+									features: { ...base, [run.ab]: turn },
+								});
+								await this.viewSettled();
+								await this.waitedFrames(10, 2000);
+								report(label, station, variant.label, turn ? "Switch on" : "Switch off");
+								const timed = await timeStill(station.name);
+								(turn ? on : off).push(timed);
+								lastFrame = timed.median;
+							}
+							this.setRender({ ...this.state.render, features: base });
+							const stats = this.view?.stats();
+							if (on.length === 2 && off.length === 2)
+								rows.push({
+									n: station.n,
+									id: station.id,
+									name: station.name,
+									variant: variant.label,
+									still: on[0],
+									ab: { on, off },
+									gpu: [],
+									gpuTotal: { median: Number.NaN, p95: Number.NaN },
+									moving: [],
+									counts: {
+										draws: stats?.draws ?? 0,
+										instances: stats?.instances ?? 0,
+										triangles: stats?.triangles ?? 0,
+										particles: stats?.particles ?? 0,
+										beams: stats?.beams ?? 0,
+									},
+								});
+							done++;
+							continue;
 						}
 						report(label, station, variant.label, "Still");
 						const still = await timeStill(station.name);
@@ -2385,6 +2444,7 @@ export class ViewportController {
 			this.set({ profiling: null });
 			this.options = options;
 			this.auto = auto;
+			if (this.state.render.features !== renderWas.features) this.setRender(renderWas);
 			if (levels[0] !== null && this.state.quality.level !== startLevel)
 				await this.toLevel(startLevel, false);
 		}

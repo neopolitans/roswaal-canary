@@ -31,6 +31,8 @@ export interface BenchmarkStationResult {
 	still: Timed;
 	/** The same, measured again in a second pass over the stations, where the run measured each twice. */
 	repeat?: Timed;
+	/** An A/B run's measurements: its switch on, off, on, off, in that order. */
+	ab?: { on: Timed[]; off: Timed[] };
 	/** The GPU's own time by stage, sun maps drawn every frame as when moving. */
 	gpu: StageRow[];
 	gpuTotal: { median: number; p95: number };
@@ -54,6 +56,10 @@ export interface BenchmarkResult {
 	kind: BenchmarkKind;
 	/** 2 where each station was measured twice (its `repeat`); absent in a run of one pass. */
 	passes?: number;
+	/** The render switches that were off for the run, by their names in the Rendering panel. */
+	switchedOff?: string[];
+	/** An A/B run's switch, by its key and its name. */
+	ab?: { feature: string; label: string };
 	/**
 	 * "busy": frames timed with the GPU kept busy, two in flight, so the
 	 * still frame's `median` is the time between frames (Benchmark 2). Its
@@ -121,12 +127,14 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	const lines: string[] = [];
 	const total = runScore(result);
 	lines.push(
-		`Roswaal Benchmark ${result.benchmark} · Roswaal ${result.release} · ${result.kind === "sweep" ? "Full sweep" : "Current settings"}`,
+		`Roswaal Benchmark ${result.benchmark} · Roswaal ${result.release} · ${result.ab ? `A/B: ${result.ab.label}` : result.kind === "sweep" ? "Full sweep" : "Current settings"}`,
 	);
 	lines.push(
 		`Renderer: ${result.renderer} · GPU: ${result.gpu} · GPU timers: ${result.gpuTimers ? "yes" : "no"} · Pixel ratio ${Number(result.pixelRatio.toFixed(2))}`,
 	);
 	lines.push(`Browser: ${result.userAgent}`);
+	if (result.switchedOff?.length)
+		lines.push(`Switched off in the Rendering panel: ${result.switchedOff.join(", ")}`);
 	if (result.measure === "busy")
 		lines.push(
 			"Measured with the GPU kept busy, two frames in flight: the time between frames, and the GPU's own time for one, at its full clock.",
@@ -137,6 +145,10 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	lines.push(
 		`Score: ${score(total.gpu)} by the GPU's time, ${score(total.waited)} by the ${result.measure === "busy" ? "frame interval" : "waited frame"}`,
 	);
+	if (result.ab) {
+		lines.push(...abReport(result));
+		return lines.join("\n");
+	}
 	for (const level of result.levels) {
 		const ls = levelScore(level);
 		lines.push("");
@@ -177,6 +189,73 @@ export function benchmarkReport(result: BenchmarkResult): string {
 		}
 	}
 	return lines.join("\n");
+}
+
+/** What an A/B run found at a station: the switch's saving (positive) or cost, and whether it is clear. */
+export interface AbFinding {
+	on: number;
+	off: number;
+	/** Off minus on, in milliseconds: what the switch saves where positive. */
+	saves: number;
+	/** How far the measurements on either side were apart: a smaller difference is not called. */
+	noise: number;
+	verdict: "pays" | "costs" | "no clear difference";
+}
+
+/** The least difference an A/B run calls, in milliseconds: a fast GPU's timer steps are about 0.067. */
+export const AB_FLOOR_MS = 0.15;
+
+export function abFinding(s: BenchmarkStationResult, gpu: boolean): AbFinding | null {
+	if (!s.ab) return null;
+	const time = (t: Timed) => (gpu ? (t.gpuMs ?? Number.NaN) : t.median);
+	const on = s.ab.on.map(time);
+	const off = s.ab.off.map(time);
+	if (![...on, ...off].every(Number.isFinite)) return null;
+	const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+	const saves = mean(off) - mean(on);
+	const noise = Math.max(Math.abs(on[0] - on[1]), Math.abs(off[0] - off[1]), AB_FLOOR_MS);
+	return {
+		on: mean(on),
+		off: mean(off),
+		saves,
+		noise,
+		verdict: saves > noise ? "pays" : -saves > noise ? "costs" : "no clear difference",
+	};
+}
+
+function abReport(result: BenchmarkResult): string[] {
+	const ab = result.ab;
+	if (!ab) return [];
+	const gpu = result.gpuTimers;
+	const lines: string[] = [];
+	lines.push(
+		`Each station measured with ${ab.label} on, off, on and off, back to back, by the ${gpu ? "GPU's own time" : "frame interval"}.`,
+	);
+	for (const level of result.levels) {
+		lines.push("");
+		lines.push(
+			`${level.label} · ${level.canvas.width}×${level.canvas.height} · ${level.antialias}`,
+		);
+		lines.push(
+			`  ${"Station".padEnd(28)}${"On".padStart(10)}${"Off".padStart(10)}${"Saves".padStart(10)}  Verdict`,
+		);
+		for (const s of level.stations) {
+			const f = abFinding(s, gpu);
+			if (!f) continue;
+			const name = `${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`;
+			const saves = `${f.saves >= 0 ? "+" : "−"}${msText(Math.abs(f.saves))}`;
+			const verdict =
+				f.verdict === "pays"
+					? `pays ${msText(f.saves)}`
+					: f.verdict === "costs"
+						? `costs ${msText(-f.saves)}`
+						: `no clear difference (±${msText(f.noise)})`;
+			lines.push(
+				`  ${name.padEnd(28)}${msText(f.on).padStart(10)}${msText(f.off).padStart(10)}${saves.padStart(10)}  ${verdict}`,
+			);
+		}
+	}
+	return lines;
 }
 
 /** The run as a file's name: roswaal-benchmark-1-2026-11-22T10-30.json. */

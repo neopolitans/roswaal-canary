@@ -9,10 +9,12 @@ import { useState } from "react";
 import { Group, Row } from "../../../app/settingsParts.jsx";
 import { CompareView, readResultFiles } from "../app/benchmark/CompareView.jsx";
 import type { BenchmarkResult } from "../app/benchmark/result.js";
+import { FEATURES } from "../app/viewport/renderFeatures.js";
 import { setTwiceWanted, startBenchmark, twiceWanted } from "../benchmarkEvent.js";
 
 export function BenchmarkSection() {
 	const [twice, setTwice] = useState(twiceWanted);
+	const [abKey, setAbKey] = useState("occlusionCulling");
 	const [pair, setPair] = useState<[BenchmarkResult, BenchmarkResult] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	return (
@@ -26,6 +28,26 @@ export function BenchmarkSection() {
 				</button>
 				<button type="button" className="tb" onClick={() => startBenchmark("sweep")}>
 					Full sweep
+				</button>
+			</Row>
+			<Row
+				label="A/B a switch"
+				help="Measures every station with one Rendering panel switch on, off, on and off, back to back, so a warming device slows both alike, and says what the switch saves or costs at each. About 3 minutes."
+			>
+				<select
+					className="tb"
+					value={abKey}
+					aria-label="The switch to measure"
+					onChange={(e) => setAbKey(e.target.value)}
+				>
+					{FEATURES.map((f) => (
+						<option key={f.key} value={f.key}>
+							{f.label}
+						</option>
+					))}
+				</select>
+				<button type="button" className="tb" onClick={() => startBenchmark("ab", 1, abKey)}>
+					Run A/B
 				</button>
 			</Row>
 			<Row

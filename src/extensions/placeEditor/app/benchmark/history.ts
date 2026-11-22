@@ -38,6 +38,8 @@ export function runBefore(run: BenchmarkResult): BenchmarkResult | null {
 			(r) =>
 				r.date !== run.date &&
 				r.benchmark === run.benchmark &&
+				!r.ab &&
+				!run.ab &&
 				r.gpu === run.gpu &&
 				r.levels.some((l) => run.levels.some((m) => m.level === l.level)),
 		) ?? null

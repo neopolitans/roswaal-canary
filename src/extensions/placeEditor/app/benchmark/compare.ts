@@ -145,6 +145,16 @@ function compareLevel(
 /** `after` against `before`: each level they share, by its level number. */
 export function compareRuns(before: BenchmarkResult, after: BenchmarkResult): Comparison {
 	const warnings: string[] = [];
+	// An A/B run measures a switch, not the stations' scores.
+	if (before.ab || after.ab)
+		return {
+			before,
+			after,
+			levels: [],
+			warnings: [
+				"One of these is an A/B run, which measures a switch rather than the stations: its own report says what the switch saves.",
+			],
+		};
 	// Another benchmark measures other scenes, or the same ones another way: no station compares.
 	if (before.benchmark !== after.benchmark)
 		return {

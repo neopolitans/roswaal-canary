@@ -2163,9 +2163,13 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 1, visibility: STAGE.FRAGMENT, sampler: {} },
 			],
 		});
+		// Mipmapped, as the material textures are: a 1024 image on a far face
+		// sampled at full size sparkled, and cost the iPad 3.7 ms for 162 faces.
 		this.imageSampler = d.createSampler({
 			magFilter: "linear",
 			minFilter: "linear",
+			mipmapFilter: "linear",
+			maxAnisotropy: 4,
 			addressModeU: "repeat",
 			addressModeV: "repeat",
 		});
@@ -4099,9 +4103,11 @@ fn at(c: vec2i) -> u32 {
 
 	setImage(asset: string, image: ImageBitmap): void {
 		if (this.imageGroups.has(asset)) return;
+		const levels = Math.floor(Math.log2(Math.max(image.width, image.height, 1))) + 1;
 		const texture = this.device.createTexture({
 			size: [image.width, image.height],
 			format: "rgba8unorm",
+			mipLevelCount: levels,
 			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT,
 		});
 		this.device.queue.copyExternalImageToTexture(
@@ -4109,6 +4115,7 @@ fn at(c: vec2i) -> u32 {
 			{ texture, premultipliedAlpha: false },
 			[image.width, image.height],
 		);
+		this.makeImageMips(texture, levels);
 		const group = this.device.createBindGroup({
 			layout: this.imageLayout,
 			entries: [
@@ -4117,6 +4124,75 @@ fn at(c: vec2i) -> u32 {
 			],
 		});
 		this.imageGroups.set(asset, { texture, group });
+	}
+
+	private imageHalve: { pipe: GPURenderPipeline; layout: GPUBindGroupLayout } | null = null;
+
+	/**
+	 * An image's mip levels, each from the one above it: a texel's four,
+	 * averaged by the sampler halfway between them, as WebGL2's
+	 * generateMipmap makes them.
+	 */
+	private makeImageMips(texture: GPUTexture, levels: number): void {
+		if (levels < 2) return;
+		const d = this.device;
+		if (!this.imageHalve) {
+			const module = d.createShaderModule({
+				code: `@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) i: u32) -> O {
+	var o: O;
+	let q = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+	o.pos = vec4f(q * 2.0 - 1.0, 0.0, 1.0);
+	o.uv = vec2f(q.x, 1.0 - q.y);
+	return o;
+}
+@fragment fn fs(o: O) -> @location(0) vec4f { return textureSampleLevel(src, samp, o.uv, 0.0); }`,
+			});
+			const layout = d.createBindGroupLayout({
+				entries: [
+					{ binding: 0, visibility: STAGE.FRAGMENT, texture: {} },
+					{ binding: 1, visibility: STAGE.FRAGMENT, sampler: {} },
+				],
+			});
+			const pipe = d.createRenderPipeline({
+				layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
+				vertex: { module, entryPoint: "vs" },
+				fragment: { module, entryPoint: "fs", targets: [{ format: "rgba8unorm" }] },
+				primitive: { topology: "triangle-list" },
+			});
+			this.imageHalve = { pipe, layout };
+		}
+		const { pipe, layout } = this.imageHalve;
+		const encoder = d.createCommandEncoder();
+		for (let level = 1; level < levels; level++) {
+			const group = d.createBindGroup({
+				layout,
+				entries: [
+					{
+						binding: 0,
+						resource: texture.createView({ baseMipLevel: level - 1, mipLevelCount: 1 }),
+					},
+					{ binding: 1, resource: this.skySampler },
+				],
+			});
+			const pass = encoder.beginRenderPass({
+				colorAttachments: [
+					{
+						view: texture.createView({ baseMipLevel: level, mipLevelCount: 1 }),
+						loadOp: "clear",
+						storeOp: "store",
+						clearValue: { r: 0, g: 0, b: 0, a: 0 },
+					},
+				],
+			});
+			pass.setPipeline(pipe);
+			pass.setBindGroup(0, group);
+			pass.draw(3);
+			pass.end();
+		}
+		d.queue.submit([encoder.finish()]);
 	}
 
 	/** One layer's images whose texture has arrived, onto their faces, farthest first. */

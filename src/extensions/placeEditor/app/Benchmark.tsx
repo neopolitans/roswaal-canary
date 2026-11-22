@@ -32,6 +32,7 @@ import {
 	type ViewportOptions,
 } from "./viewport/controller.js";
 import { msText } from "./viewport/profile.js";
+import { isFeatureKey, type RenderFeatures } from "./viewport/renderFeatures.js";
 
 const score = (v: number) => (Number.isFinite(v) ? Math.round(v).toLocaleString("en") : "–");
 
@@ -61,16 +62,23 @@ async function saveResults(result: BenchmarkResult): Promise<void> {
 export function Benchmark({
 	kind,
 	passes = 1,
+	ab,
+	features,
 	options,
 }: {
 	kind: BenchmarkKind;
 	passes?: 1 | 2;
+	/** For an A/B run: the switch measured on and off. */
+	ab?: string;
+	/** The editor's render switches, which the run draws with; every one on where absent. */
+	features?: RenderFeatures;
 	options: ViewportOptions;
 }) {
 	const holder = useRef<HTMLDivElement>(null);
 	const text = useRef<HTMLTextAreaElement>(null);
 	// As they were when the run began: Settings changed meanwhile do not restart it.
 	const [settings] = useState(options);
+	const [switches] = useState(features);
 	const [progress, setProgress] = useState<BenchmarkProgress | null>(null);
 	const [result, setResult] = useState<BenchmarkResult | null>(null);
 	const [failed, setFailed] = useState<string | null>(null);
@@ -100,6 +108,8 @@ export function Benchmark({
 					stations: STATIONS,
 					kind,
 					passes,
+					...(switches ? { features: switches } : {}),
+					...(ab && isFeatureKey(ab) ? { ab } : {}),
 					measure: BENCHMARK_MEASURE,
 					benchmark: BENCHMARK_VERSION,
 					seed: BENCHMARK_SEED,
@@ -123,7 +133,7 @@ export function Benchmark({
 			stopped = true;
 			unmount();
 		};
-	}, [kind, passes, settings]);
+	}, [kind, passes, ab, settings, switches]);
 
 	const report = result ? benchmarkReport(result) : "";
 	const copy = async () => {

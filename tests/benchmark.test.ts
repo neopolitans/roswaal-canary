@@ -6,7 +6,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { compareRuns } from "../src/extensions/placeEditor/app/benchmark/compare.js";
 import {
+	abFinding,
 	type BenchmarkResult,
 	type BenchmarkStationResult,
 	benchmarkReport,
@@ -148,6 +150,8 @@ describe("a benchmark's scores", () => {
 		expect(busy).toContain("Measured with the GPU kept busy, two frames in flight");
 		expect(busy).toMatch(/Station\s+GPU\s+Interval/);
 		expect(busy).toContain("by the frame interval");
+		const off = benchmarkReport({ ...result, switchedOff: ["Occlusion culling"] });
+		expect(off).toContain("Switched off in the Rendering panel: Occlusion culling");
 	});
 });
 
@@ -197,5 +201,68 @@ describe("the models and textures it carries", () => {
 			new Set(place.images?.map((i) => i.asset).filter((a) => a.startsWith("benchmark/"))),
 		);
 		expect(place.images?.[0].asset).toMatch(new RegExp(`^${benchmarkAsset("")}`));
+	});
+});
+
+describe("an A/B run", () => {
+	const timed = (gpuMs: number) => ({ label: "", median: gpuMs + 1, p95: gpuMs + 1, gpuMs });
+	const measured = (on: number[], off: number[]): BenchmarkStationResult => ({
+		...station(1, on[0], on[0] + 1),
+		ab: { on: on.map(timed), off: off.map(timed) },
+	});
+
+	it("says a switch pays where turning it off costs more than its own measurements vary", () => {
+		expect(abFinding(measured([10, 10.2], [12, 12.3]), true)).toMatchObject({
+			verdict: "pays",
+			saves: expect.closeTo(2.05, 6),
+		});
+		expect(abFinding(measured([10, 10.2], [8, 8.1]), true)?.verdict).toBe("costs");
+		// The two measurements either side were a millisecond apart: half a millisecond is not called.
+		expect(abFinding(measured([10, 11], [10.5, 11.5]), true)?.verdict).toBe("no clear difference");
+		// Nor is a difference a fast GPU's timer cannot resolve.
+		expect(abFinding(measured([0.2, 0.2], [0.33, 0.33]), true)?.verdict).toBe(
+			"no clear difference",
+		);
+		expect(abFinding(station(1, 4, 5), true)).toBeNull();
+	});
+
+	it("reports what the switch saves at each station, and is never compared as a run", () => {
+		const result: BenchmarkResult = {
+			benchmark: 3,
+			seed: 1,
+			kind: "ab",
+			ab: { feature: "occlusionCulling", label: "Occlusion culling" },
+			release: "1.1.0-canary.27",
+			date: "2026-11-22T12:00:00.000Z",
+			renderer: "WebGPU",
+			gpu: "apple",
+			gpuTimers: true,
+			pixelRatio: 2,
+			userAgent: "Test",
+			levels: [
+				{
+					label: "Level 21",
+					level: 21,
+					canvas: { width: 2266, height: 1316 },
+					antialias: "Off",
+					stations: [
+						measured([10, 10.2], [12, 12.3]),
+						{ ...measured([6, 6], [4, 4.1]), n: 2, name: "Station 2" },
+					],
+				},
+			],
+		};
+		const text = benchmarkReport(result);
+		expect(text).toContain("· A/B: Occlusion culling");
+		expect(text).toMatch(/1 Station 1\s+10\.1 ms\s+12\.2 ms\s+\+2\.05 ms\s+pays 2\.05 ms/);
+		expect(text).toMatch(/2 Station 2\s+6\.00 ms\s+4\.05 ms\s+−1\.95 ms\s+costs 1\.95 ms/);
+		const plain = {
+			...result,
+			ab: undefined,
+			kind: "current" as const,
+			date: "2026-11-22T11:00:00.000Z",
+		};
+		expect(compareRuns(plain, result).levels).toEqual([]);
+		expect(compareRuns(plain, result).warnings[0]).toMatch(/A\/B run/);
 	});
 });

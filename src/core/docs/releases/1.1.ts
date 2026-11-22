@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.27",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.20.0: a benchmark A/B of one render switch, and mipmapped Decals and Textures.",
+		changed: [
+			"**A/B a switch**, in Settings › Scene view, measures every benchmark station with one Rendering panel switch on, off, on and off, back to back, and says what the switch saves or costs at each.",
+			"**The benchmark draws with the Rendering panel's switches**, where it drew with every switch on. Its report names any that are off.",
+			"**Decals and Textures are mipmapped in WebGPU**, as in WebGL2: a far face no longer sparkles, and its image costs less to draw.",
+			"**The Place Editor is 0.20.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.26",
 		date: "2026-11-22",
 		headline: "The Place Editor is 0.19.0: Roswaal Benchmark 3, with real models and textures.",

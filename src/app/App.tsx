@@ -509,13 +509,25 @@ export function App() {
 	// Roswaal Benchmark: asked for from Settings or the Rendering panel. The
 	// editor stays as it is underneath, its own view paused; Esc or the logo
 	// stops the run and brings it back.
-	const [benchmark, setBenchmark] = useState<BenchmarkRequest | null>(null);
+	// It draws with the editor's render switches as they are when it starts (the Rendering panel's).
+	type Features = ReturnType<NonNullable<typeof viewport>["renderSettings"]>["features"];
+	const [benchmark, setBenchmark] = useState<(BenchmarkRequest & { features?: Features }) | null>(
+		null,
+	);
+	const viewportNow = useRef(viewport);
+	viewportNow.current = viewport;
 	useEffect(() => {
 		const start = (e: Event) => {
 			const asked = (e as CustomEvent<BenchmarkRequest>).detail;
-			if (asked?.kind !== "current" && asked?.kind !== "sweep") return;
+			if (asked?.kind !== "current" && asked?.kind !== "sweep" && asked?.kind !== "ab") return;
+			if (asked.kind === "ab" && !asked.ab) return;
 			setSettingsOpen(false);
-			setBenchmark({ kind: asked.kind, passes: asked.passes === 2 ? 2 : 1 });
+			setBenchmark({
+				kind: asked.kind,
+				passes: asked.passes === 2 && asked.kind !== "ab" ? 2 : 1,
+				...(asked.ab ? { ab: asked.ab } : {}),
+				features: viewportNow.current?.renderSettings().features,
+			});
 		};
 		window.addEventListener(BENCHMARK_EVENT, start);
 		return () => window.removeEventListener(BENCHMARK_EVENT, start);
@@ -3182,6 +3194,8 @@ export function App() {
 						<viewer.Benchmark
 							kind={benchmark.kind}
 							passes={benchmark.passes}
+							ab={benchmark.ab}
+							features={benchmark.features}
 							options={viewOptions}
 						/>
 					)}

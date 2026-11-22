@@ -237,6 +237,11 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 ];
 
 export const FEATURES: readonly FeatureInfo[] = FEATURE_GROUPS.flatMap((g) => g.features);
+
+/** Whether `key` names one of the switches: a key read back from an event or a file. */
+export function isFeatureKey(key: string): key is FeatureKey {
+	return FEATURES.some((f) => f.key === key);
+}
 const BY_KEY = new Map(FEATURES.map((i) => [i.key, i]));
 
 /** Everything on: the picture as Studio draws it. */

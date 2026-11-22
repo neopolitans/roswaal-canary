@@ -1,9 +1,11 @@
 /**
- * Roswaal Benchmark 1: its places are generated the same way every time, as
+ * Roswaal Benchmark: its places are generated the same way every time, as
  * the plan promises, and its scores and report say what was measured.
  */
 
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	type BenchmarkResult,
 	type BenchmarkStationResult,
@@ -16,17 +18,34 @@ import {
 	STATIONS,
 	seeded,
 } from "../src/extensions/placeEditor/app/benchmark/stations.js";
-import { SCENE_KINDS } from "../src/extensions/placeEditor/core/scene.js";
+import { readGlb } from "../src/extensions/placeEditor/core/glb.js";
+import { benchmarkAsset, SCENE_KINDS } from "../src/extensions/placeEditor/core/scene.js";
 
 const parts = (place: {
 	kinds: Record<string, { count: number }>;
 	translucent: Record<string, { count: number }>;
 }) => SCENE_KINDS.reduce((n, k) => n + place.kinds[k].count + place.translucent[k].count, 0);
 
-describe("Roswaal Benchmark 1's places", () => {
-	it("is version 2, with thirteen stations in run order", () => {
-		expect(BENCHMARK_VERSION).toBe(2);
-		expect(STATIONS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+// The carried models and textures, read from the repository rather than fetched.
+beforeAll(() => {
+	vi.stubGlobal("fetch", async (url: string) => {
+		const bytes = readFileSync(fileURLToPath(url));
+		return new Response(bytes);
+	});
+});
+afterAll(() => vi.unstubAllGlobals());
+
+describe("Roswaal Benchmark's places", () => {
+	it("is version 3, with fifteen stations in run order", () => {
+		expect(BENCHMARK_VERSION).toBe(3);
+		expect(STATIONS.map((s) => s.n)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+		expect(STATIONS.map((s) => s.id).slice(0, 5)).toEqual([
+			"empty",
+			"materials",
+			"textures",
+			"shapes",
+			"meshes",
+		]);
 		expect(STATIONS.find((s) => s.id === "lights")?.variants.map((v) => v.label)).toEqual([
 			"10 lights",
 			"20 lights",
@@ -35,26 +54,27 @@ describe("Roswaal Benchmark 1's places", () => {
 		]);
 	});
 
-	it("are made the same way every time: the seeded generator and the places it makes", () => {
+	it("are made the same way every time: the seeded generator and the places it makes", async () => {
 		const a = seeded(1);
 		const b = seeded(1);
 		expect([a(), a(), a()]).toEqual([b(), b(), b()]);
 		const shapes = STATIONS.find((s) => s.id === "shapes")!.variants[0];
-		const one = shapes.place();
-		const two = shapes.place();
+		const one = await shapes.place();
+		const two = await shapes.place();
 		expect(Array.from(one.kinds.block.data)).toEqual(Array.from(two.kinds.block.data));
 		expect(parts(one)).toBe(1201);
 	});
 
-	it("hold what each station is for", () => {
-		const place = (id: string, i = 0) => STATIONS.find((s) => s.id === id)!.variants[i].place();
-		expect(parts(place("dense"))).toBe(1 + 140 * 140);
-		expect(place("lights", 3).lights?.length).toBe(100 * 20);
-		expect(place("highlights").highlights).toHaveLength(4);
-		const effects = place("effects", 2).effects;
+	it("hold what each station is for", async () => {
+		const place = (id: string, i = 0) =>
+			Promise.resolve(STATIONS.find((s) => s.id === id)!.variants[i].place());
+		expect(parts(await place("dense"))).toBe(1 + 140 * 140);
+		expect((await place("lights", 3)).lights?.length).toBe(100 * 20);
+		expect((await place("highlights")).highlights).toHaveLength(4);
+		const effects = (await place("effects", 2)).effects;
 		expect(effects?.beams).toHaveLength(100);
 		expect(effects?.emitters).toHaveLength(20);
-		const air = place("air").lighting;
+		const air = (await place("air")).lighting;
 		expect(air.post.bloom).toBeDefined();
 		expect(air.post.blur).toBe(4);
 	});
@@ -128,5 +148,54 @@ describe("a benchmark's scores", () => {
 		expect(busy).toContain("Measured with the GPU kept busy, two frames in flight");
 		expect(busy).toMatch(/Station\s+GPU\s+Interval/);
 		expect(busy).toContain("by the frame interval");
+	});
+});
+
+describe("the models and textures it carries", () => {
+	const station = (id: string) =>
+		Promise.resolve(STATIONS.find((s) => s.id === id)!.variants[0].place());
+
+	it("reads every tank as its parts, emblems left out", () => {
+		const tiger = readGlb(
+			new Uint8Array(
+				readFileSync(
+					new URL("../src/extensions/placeEditor/app/benchmark/tanks/TigerI.glb", import.meta.url),
+				),
+			),
+		);
+		expect(tiger).toHaveLength(25);
+		expect(tiger.reduce((n, p) => n + p.mesh.indices.length / 3, 0)).toBe(4934);
+		const churchill = readGlb(
+			new Uint8Array(
+				readFileSync(
+					new URL(
+						"../src/extensions/placeEditor/app/benchmark/tanks/Churchill_VII.glb",
+						import.meta.url,
+					),
+				),
+			),
+		);
+		expect(churchill.some((p) => /emblem|gloriana/i.test(p.name))).toBe(false);
+	});
+
+	it("lays out ninety-six tanks of MeshParts, each mesh carried, none asked of Roblox", async () => {
+		const place = await station("meshes");
+		const meshes = place.provided?.meshes;
+		expect(meshes?.size).toBe(298);
+		// Every mesh the place names is one it carries.
+		for (const use of place.meshes ?? []) expect(meshes?.has(use.asset)).toBe(true);
+		expect(place.meshes?.every((use) => use.asset.startsWith("benchmark/"))).toBe(true);
+		expect(place.kinds.mesh.count).toBe(6 * 298);
+		const again = await station("meshes");
+		expect(Array.from(again.kinds.mesh.data)).toEqual(Array.from(place.kinds.mesh.data));
+	});
+
+	it("puts a texture on every face of the wall, and tiles the floor", async () => {
+		const place = await station("textures");
+		expect(place.images).toHaveLength(24 * 6 + 18);
+		expect(new Set(place.images?.map((i) => i.asset))).toEqual(
+			new Set(place.images?.map((i) => i.asset).filter((a) => a.startsWith("benchmark/"))),
+		);
+		expect(place.images?.[0].asset).toMatch(new RegExp(`^${benchmarkAsset("")}`));
 	});
 });

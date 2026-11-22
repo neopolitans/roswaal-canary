@@ -69,10 +69,12 @@ export async function loadImages(
 	assets: readonly string[],
 	show: (asset: string, image: ImageBitmap) => void,
 ): Promise<NotAsked | null> {
-	if (assets.length === 0) return null;
+	// Only Roblox's ids, which are numbers: a benchmark's own is handed to the viewer, never asked for.
+	const roblox = assets.filter((a) => /^\d+$/.test(a));
+	if (roblox.length === 0) return null;
 	const why = await notAsked();
 	if (why) return why;
-	const unique = [...new Set(assets)];
+	const unique = [...new Set(roblox)];
 	const ready = await ensure(unique);
 
 	const draw = async (asked: string, bytes: Uint8Array) => {

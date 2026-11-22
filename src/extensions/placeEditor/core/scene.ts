@@ -25,6 +25,27 @@
  */
 
 import { assetIdOf } from "../../../core/rbx/browse.js";
+
+/**
+ * A mesh or image Roswaal carries for its benchmark, rather than one from
+ * Roblox: `roswaal://benchmark/<name>` in the place, `benchmark/<name>` as an
+ * asset. Never a number, so never asked of Roblox: the loaders ask only for
+ * Roblox's numeric ids, and the benchmark hands these to the viewer itself.
+ */
+export function benchmarkContent(name: string): string {
+	return `roswaal://benchmark/${name}`;
+}
+
+export function benchmarkAsset(name: string): string {
+	return `benchmark/${name}`;
+}
+
+/** An asset id from a ContentId: Roblox's, or one of the benchmark's own. */
+function sceneAssetOf(raw: string): string | undefined {
+	const own = /^roswaal:\/\/benchmark\/([A-Za-z0-9_.-]+)$/.exec(raw);
+	return own ? benchmarkAsset(own[1]) : assetIdOf(raw);
+}
+
 import { type RbxInstance, stringProp } from "../../../core/rbx/dom.js";
 import { type SceneEffects, sceneEffects } from "./effects.js";
 import { type SceneGizmos, sceneGizmos } from "./gizmos.js";
@@ -558,7 +579,7 @@ export function buildPlaceScene(
 		// The mesh this row draws, once it is here: its place in `meshes`, plus one.
 		let mesh = 0;
 		if (kind === "mesh") {
-			const asset = assetIdOf((stringProp(modifier ?? inst, "MeshId") ?? "").trim());
+			const asset = sceneAssetOf((stringProp(modifier ?? inst, "MeshId") ?? "").trim());
 			const scale = modifier && (vec3(modifier, "Scale") ?? [1, 1, 1]).map((v, a) => v / size[a]);
 			if (asset && (!scale || scale.every(Number.isFinite))) {
 				const key = scale ? `${asset}|${scale.map((v) => v.toFixed(6)).join(",")}` : asset;
@@ -692,7 +713,7 @@ const IMAGE_LIFT = 0.02;
 function imageAsset(inst: RbxInstance): string | undefined {
 	const content = inst.props.get("TextureContent")?.value as { uri?: string } | undefined;
 	const raw = content?.uri ?? stringProp(inst, "Texture") ?? "";
-	return assetIdOf(raw.trim());
+	return sceneAssetOf(raw.trim());
 }
 
 function numberProp(inst: RbxInstance, name: string, fallback: number): number {

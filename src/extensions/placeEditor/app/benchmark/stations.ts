@@ -1,6 +1,7 @@
 /**
- * Roswaal Benchmark 1: the places the benchmark draws, generated here from a
- * fixed seed rather than stored, a station at a time.
+ * Roswaal Benchmark 3: the places the benchmark draws, generated here from a
+ * fixed seed rather than stored, a station at a time, with the models and
+ * textures it carries (see assets.ts).
  *
  * Each station is a small place of its own, so one station's particles are
  * not simulated while another is measured, and its parts do not widen the
@@ -8,24 +9,32 @@
  * what it looks at. A station may come in variants (the Lights station's 10,
  * 20, 50 and 100 lights), each measured on its own.
  *
- * Benchmark 1 is frozen once released: a changed scene is Benchmark 2, so a
- * score always says what it measured. Change BENCHMARK_VERSION with it.
+ * A benchmark is frozen once released: a changed scene, or a change in how
+ * it is measured, is the next one, so a score always says what it measured.
+ * Change BENCHMARK_VERSION with it.
  */
 
 import { outlinePlace } from "../../../../core/rbx/browse.js";
 import type { Prop, PropType, RbxDocument, RbxInstance } from "../../../../core/rbx/dom.js";
 import { readLighting } from "../../core/lighting.js";
 import { MATERIALS } from "../../core/materials.js";
-import { buildPlaceScene } from "../../core/scene.js";
+import type { FileMesh } from "../../core/mesh.js";
+import { benchmarkAsset, benchmarkContent, buildPlaceScene } from "../../core/scene.js";
 import type { ViewportPlace } from "../viewport/controller.js";
+import { loadTanks, loadTextures, TANK_NAMES, TEXTURE_NAMES } from "./assets.js";
 
 /**
  * 2: Benchmark 1's scenes, measured with the GPU kept busy (two frames in
  * flight) rather than one frame at a time: an iPad's GPU set its clock by
  * the gaps, so its timers timed the clock as much as the scenes.
  */
-export const BENCHMARK_VERSION = 2;
-/** How Benchmark 2 times its frames: see ViewportController.busyFrames. */
+export const BENCHMARK_VERSION = 3;
+/**
+ * 3: Benchmark 2, with two stations of real assets: Textures (Kenney's
+ * prototype textures as Texture instances) and Meshes (96 tanks of
+ * MayLizbeth's, 1,788 MeshParts).
+ */
+/** How Benchmarks 2 and 3 time their frames: see ViewportController.busyFrames. */
 export const BENCHMARK_MEASURE = "busy" as const;
 export const BENCHMARK_SEED = 1;
 
@@ -38,8 +47,8 @@ export interface StationPose {
 export interface StationVariant {
 	/** Beside the station's name in the report: "50 lights". Empty for a station of one. */
 	label: string;
-	/** The place, made when it is measured. */
-	place: () => ViewportPlace;
+	/** The place, made when it is measured: once what it carries has been fetched, for some. */
+	place: () => ViewportPlace | Promise<ViewportPlace>;
 	/** Frames drawn and not measured first, for effects to fill in: particles take their lifetime. */
 	settleMs?: number;
 }
@@ -534,6 +543,103 @@ function airPlace(): ViewportPlace {
 }
 
 /** A city grid of 140 by 140 blocks: 19,600 parts. */
+/** How many studs a metre is: Roblox's own guide has a stud at 0.28 m. */
+const STUDS_PER_METRE = 1 / 0.28;
+
+/** Its tracks and wheels darker than its hull, as the part names say. */
+const RUNNING_GEAR = /track|suspension|hubcap|wheel|roadwheel/i;
+
+/**
+ * Ninety-six tanks, the sixteen models six times over, each part a MeshPart
+ * of its own as a Roblox model would have them: 1,788 MeshParts and 386,520
+ * triangles, of 298 meshes.
+ */
+async function meshesPlace(): Promise<ViewportPlace> {
+	const tanks = await loadTanks();
+	const rand = seeded(BENCHMARK_SEED + 5);
+	const parts = [baseplate(1200)];
+	const meshes = new Map<string, FileMesh>();
+	const COLUMNS = TANK_NAMES.length;
+	const ROWS = 6;
+	for (let row = 0; row < ROWS; row++)
+		TANK_NAMES.forEach((name, column) => {
+			const tank = tanks.get(name) ?? [];
+			const yaw = rand() * Math.PI * 2;
+			const rotation = aboutY(yaw);
+			const at = [(column - (COLUMNS - 1) / 2) * 60, 0, (row - (ROWS - 1) / 2) * 70];
+			const body = hue(rand(), 0.35, 0.7);
+			// Stood on the ground: the tank's lowest point at y 0.
+			const floor = Math.min(...tank.map((p) => p.min[1]));
+			tank.forEach((piece, i) => {
+				const asset = `${name}.${i}`;
+				meshes.set(benchmarkAsset(asset), piece.mesh);
+				const size = [0, 1, 2].map((a) =>
+					Math.max((piece.max[a] - piece.min[a]) * STUDS_PER_METRE, 0.05),
+				);
+				const local = [0, 1, 2].map(
+					(a) => ((piece.min[a] + piece.max[a]) / 2 - (a === 1 ? floor : 0)) * STUDS_PER_METRE,
+				);
+				const turned = [0, 1, 2].map(
+					(r) =>
+						rotation[r * 3] * local[0] +
+						rotation[r * 3 + 1] * local[1] +
+						rotation[r * 3 + 2] * local[2],
+				);
+				const mesh = part({
+					className: "MeshPart",
+					name: piece.name.trim() || "Part",
+					at: turned.map((v, a) => v + at[a]),
+					size,
+					rotation,
+					colour: RUNNING_GEAR.test(piece.name) ? [58, 56, 54] : body,
+					material: "SmoothPlastic",
+				});
+				mesh.props.set("MeshId", { type: "Content", value: benchmarkContent(asset) });
+				parts.push(mesh);
+			});
+		});
+	return { ...placeOf(parts), provided: { meshes } };
+}
+
+/**
+ * Kenney's prototype textures as Texture instances: a wall of blocks with a
+ * texture on every face, and a floor tiled with them, 162 images in all.
+ */
+async function texturesPlace(): Promise<ViewportPlace> {
+	const loaded = await loadTextures();
+	const rand = seeded(BENCHMARK_SEED + 3);
+	const parts = [baseplate()];
+	const texture = (name: string, face: number, tile: number) => {
+		const made = inst("Texture", "Texture", {
+			Face: ["Enum", face],
+			StudsPerTileU: ["Float32", tile],
+			StudsPerTileV: ["Float32", tile],
+		});
+		made.props.set("Texture", { type: "Content", value: benchmarkContent(name) });
+		return made;
+	};
+	for (let x = 0; x < 6; x++)
+		for (let y = 0; y < 4; y++) {
+			const faces = [0, 1, 2, 3, 4, 5].map((face) =>
+				texture(
+					TEXTURE_NAMES[Math.floor(rand() * TEXTURE_NAMES.length)],
+					face,
+					4 + Math.floor(rand() * 3) * 4,
+				),
+			);
+			parts.push(part({ at: [(x - 2.5) * 20, 9 + y * 20, 0], size: [16, 16, 16] }, faces));
+		}
+	for (let x = 0; x < 3; x++)
+		for (let z = 0; z < 6; z++)
+			parts.push(
+				part({ at: [(x - 1) * 40, 0.5, 30 + z * 20], size: [40, 1, 20] }, [
+					texture(TEXTURE_NAMES[(x * 6 + z) % TEXTURE_NAMES.length], 1, 8),
+				]),
+			);
+	const images = new Map([...loaded].map(([name, image]) => [benchmarkAsset(name), image]));
+	return { ...placeOf(parts), provided: { images } };
+}
+
 function densePlace(): ViewportPlace {
 	const rand = seeded(BENCHMARK_SEED + 12);
 	const parts = [baseplate(1600)];
@@ -551,9 +657,10 @@ function densePlace(): ViewportPlace {
 	return placeOf(parts);
 }
 
-const one = (place: () => ViewportPlace, settleMs?: number): StationVariant[] => [
-	{ label: "", place, ...(settleMs ? { settleMs } : {}) },
-];
+const one = (
+	place: () => ViewportPlace | Promise<ViewportPlace>,
+	settleMs?: number,
+): StationVariant[] => [{ label: "", place, ...(settleMs ? { settleMs } : {}) }];
 
 export const STATIONS: readonly Station[] = [
 	{
@@ -574,6 +681,14 @@ export const STATIONS: readonly Station[] = [
 	},
 	{
 		n: 3,
+		id: "textures",
+		name: "Textures",
+		measures: "Texture instances, tiled, on every face",
+		pose: { eye: [0, 60, 190], at: [0, 30, 40] },
+		variants: one(texturesPlace),
+	},
+	{
+		n: 4,
 		id: "shapes",
 		name: "Shapes",
 		measures: "Shape variety and instancing",
@@ -581,7 +696,15 @@ export const STATIONS: readonly Station[] = [
 		variants: one(shapesPlace),
 	},
 	{
-		n: 4,
+		n: 5,
+		id: "meshes",
+		name: "Meshes",
+		measures: "MeshParts: many meshes, many triangles",
+		pose: { eye: [-360, 150, -290], at: [0, 0, 20] },
+		variants: one(meshesPlace),
+	},
+	{
+		n: 6,
 		id: "skyLight",
 		name: "Sky light",
 		measures: "Sky shadows, near maps, thin parts, cells",
@@ -589,7 +712,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(skyLightPlace),
 	},
 	{
-		n: 5,
+		n: 7,
 		id: "sunShadows",
 		name: "Sun shadows",
 		measures: "Cascades, reach, soft edges, far shadows",
@@ -597,7 +720,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(sunShadowsPlace),
 	},
 	{
-		n: 6,
+		n: 8,
 		id: "lights",
 		name: "Lights",
 		measures: "The per-pixel light loop",
@@ -608,7 +731,7 @@ export const STATIONS: readonly Station[] = [
 		})),
 	},
 	{
-		n: 7,
+		n: 9,
 		id: "seeThrough",
 		name: "See-through",
 		measures: "The blended pass and its sorting",
@@ -616,7 +739,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(seeThroughPlace),
 	},
 	{
-		n: 8,
+		n: 10,
 		id: "glow",
 		name: "Glow",
 		measures: "Glow sources, blur, bloom",
@@ -624,7 +747,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(glowPlace),
 	},
 	{
-		n: 9,
+		n: 11,
 		id: "effects",
 		name: "Effects",
 		// To 20,000: the most particles Roswaal keeps alive in a view (PARTICLES_MOST).
@@ -638,7 +761,7 @@ export const STATIONS: readonly Station[] = [
 		})),
 	},
 	{
-		n: 10,
+		n: 12,
 		id: "highlights",
 		name: "Highlights",
 		measures: "The Highlight mask and overlay",
@@ -646,7 +769,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(highlightsPlace),
 	},
 	{
-		n: 11,
+		n: 13,
 		id: "air",
 		name: "Air and post",
 		measures: "Atmosphere, fog, Bloom, ColorCorrection, Blur",
@@ -654,7 +777,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(airPlace),
 	},
 	{
-		n: 12,
+		n: 14,
 		id: "dense",
 		name: "Dense",
 		measures: "Draw counts, culling, many shadow casters",
@@ -662,7 +785,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(densePlace),
 	},
 	{
-		n: 13,
+		n: 15,
 		id: "moving",
 		name: "Moving",
 		measures: "What each control's motion costs",

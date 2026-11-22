@@ -16,6 +16,8 @@ is written by hand, edited, reformatted, or reconstructed from a template.
 | `bakinglab.txt` | [`TheRealMJP/BakingLab` · `LICENSE`](https://github.com/TheRealMJP/BakingLab/blob/master/LICENSE) | 2026-11-05 |
 | `ambientcg.txt` | [Creative Commons · CC0 1.0 legal code](https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt) | 2026-11-06 |
 | `smaa.txt` | [`iryoku/smaa` · `LICENSE.txt`](https://github.com/iryoku/smaa/blob/master/LICENSE.txt) | 2026-11-22 |
+| `teensy-tiny-tankery.txt` | [Creative Commons · CC BY 4.0 legal code](https://creativecommons.org/licenses/by/4.0/legalcode.txt) | 2026-11-22 |
+| `kenney-prototype-textures.txt` | [Kenney · Prototype Textures 1.0 · `License.txt`](https://kenney.nl/assets/prototype-textures) | 2026-11-22 |
 
 `luau-site.txt` covers the Luau logo, whose two squares are the `.luau` file icon. It was fetched
 directly, and reaches a user under **Settings → Licences** as the theme licences do.
@@ -71,3 +73,10 @@ internet. When a theme's `source` URL changes, re-fetch the licence at the same 
 `smaa.txt` covers the viewport's SMAA antialiasing: `src/extensions/placeEditor/app/viewport/smaaTables.ts` carries
 the reference's `Textures/AreaTex.h` and `Textures/SearchTex.h` tables, compressed but byte for byte, and
 `antialias.ts` its edge detection, searches, area lookups and blending, carried over to WGSL and GLSL.
+
+`teensy-tiny-tankery.txt` covers the sixteen tank models in `src/extensions/placeEditor/app/benchmark/tanks/`,
+Teensy Tiny Tankery models by MayLizbeth ("extraclear"), who licensed them to Roswaal under CC BY 4.0. It is
+the licence's legal code, fetched directly; the folder's `README.md` credits them and lists what was changed.
+`kenney-prototype-textures.txt` covers the twelve textures in `src/extensions/placeEditor/app/benchmark/textures/`,
+from Kenney's Prototype Textures 1.0: the `License.txt` that ships with the pack, which dedicates it to the
+public domain under CC0 1.0.

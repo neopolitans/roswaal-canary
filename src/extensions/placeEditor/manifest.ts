@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.18.1",
+	version: "0.19.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -50,6 +50,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.19.0",
+			roswaal: "1.1.0-canary.26",
+			date: "2026-11-22",
+			text: 'Roswaal Benchmark 3: a Meshes station of 96 tanks by MayLizbeth ("extraclear"), CC BY 4.0, and a Textures station of Kenney\'s prototype textures.',
+		},
 		{
 			version: "0.18.1",
 			roswaal: "1.1.0-canary.25",

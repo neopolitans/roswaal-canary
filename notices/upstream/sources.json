@@ -108,5 +108,25 @@
 		"source": "iryoku/smaa · LICENSE.txt",
 		"url": "https://github.com/iryoku/smaa/blob/master/LICENSE.txt",
 		"retrieved": "2026-11-22"
+	},
+	{
+		"file": "teensy-tiny-tankery.txt",
+		"name": "Teensy Tiny Tankery models",
+		"holder": "MayLizbeth (\"extraclear\")",
+		"spdx": "CC-BY-4.0",
+		"covers": "The benchmark's sixteen tank models, on its Meshes station.",
+		"source": "creativecommons.org · licenses/by/4.0/legalcode.txt",
+		"url": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",
+		"retrieved": "2026-11-22"
+	},
+	{
+		"file": "kenney-prototype-textures.txt",
+		"name": "Kenney Prototype Textures",
+		"holder": "Kenney",
+		"spdx": "CC0-1.0",
+		"covers": "The benchmark's twelve prototype textures, on its Textures station.",
+		"source": "Kenney · Prototype Textures 1.0 · License.txt",
+		"url": "https://kenney.nl/assets/prototype-textures",
+		"retrieved": "2026-11-22"
 	}
 ]

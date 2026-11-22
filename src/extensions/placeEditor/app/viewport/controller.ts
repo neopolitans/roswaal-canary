@@ -247,6 +247,15 @@ export type ViewportPlace = PlaceScene & {
 	lighting: LightingParams;
 	outline: PlaceOutline;
 	stamp?: string;
+	/**
+	 * Meshes and images the place carries itself, by asset id: a benchmark's
+	 * own (see `benchmarkAsset`), never downloaded. Into the caches as the
+	 * place is set, so they are drawn as though they had already arrived.
+	 */
+	provided?: {
+		meshes?: ReadonlyMap<string, FileMesh>;
+		images?: ReadonlyMap<string, ImageBitmap>;
+	};
 };
 
 /** A drag let go: what moved, by what rigid move of the world, for App to write into the place. */
@@ -477,6 +486,10 @@ export class ViewportController {
 
 	/** The place to draw, from the host: again after the file changes. */
 	setPlace(place: ViewportPlace): void {
+		for (const [asset, mesh] of place.provided?.meshes ?? [])
+			this.meshCache.set(asset, Promise.resolve(mesh));
+		for (const [asset, image] of place.provided?.images ?? [])
+			this.images.set(asset, Promise.resolve(image));
 		// A drag under way was of the place as it was: what is read now stands.
 		this.drag = null;
 		this.place = place;
@@ -2281,7 +2294,7 @@ export class ViewportController {
 					for (const variant of station.variants) {
 						if (run.cancelled()) break;
 						report(label, station, variant.label, "Building");
-						this.setPlace(variant.place());
+						this.setPlace(await variant.place());
 						this.pose(station.pose.eye, station.pose.at);
 						await this.viewSettled();
 						report(label, station, variant.label, "Settling");
@@ -2347,7 +2360,7 @@ export class ViewportController {
 							const row = rows[i++];
 							if (run.cancelled() || !row) break;
 							report(label, station, variant.label, "Again");
-							this.setPlace(variant.place());
+							this.setPlace(await variant.place());
 							this.pose(station.pose.eye, station.pose.at);
 							await this.viewSettled();
 							await this.waitedFrames(10, 2000);

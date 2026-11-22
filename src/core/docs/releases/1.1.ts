@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.26",
+		date: "2026-11-22",
+		headline: "The Place Editor is 0.19.0: Roswaal Benchmark 3, with real models and textures.",
+		changed: [
+			"**Roswaal Benchmark 3** adds two stations. Meshes draws 96 tanks as 1,788 MeshParts, Teensy Tiny Tankery models by MayLizbeth (\"extraclear\") under CC BY 4.0. Textures puts Kenney's prototype textures, CC0, on every face of a wall of blocks. Its scores do not compare with Benchmark 2's.",
+			"**The benchmark carries its own models and textures**, fetched when a run first needs them. They are never asked of Roblox, and no sign-in is needed.",
+			"**Roswaal reads binary glTF (.glb) files**: their meshes, with positions, normals and texture coordinates, for the benchmark's tanks.",
+			"**The Place Editor is 0.19.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.25",
 		date: "2026-11-22",
 		headline: "The Place Editor is 0.18.1: Benchmark 2 reads times between a coarse clock's steps.",

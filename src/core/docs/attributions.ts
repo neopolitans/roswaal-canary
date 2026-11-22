@@ -269,6 +269,32 @@ export const ATTRIBUTIONS: Attribution[] = [
 		url: "https://ambientcg.com/",
 	},
 	{
+		name: "Kenney Prototype Textures",
+		usage: "included",
+		licenceFile: "kenney-prototype-textures",
+		holder: "Kenney",
+		licence: "CC0-1.0",
+		ships: true,
+		where:
+			"`src/extensions/placeEditor/app/benchmark/textures/`. Licence: `notices/upstream/kenney-prototype-textures.txt`.",
+		note: "Roswaal draws twelve of its textures on the benchmark's Textures station.",
+		url: "https://kenney.nl/assets/prototype-textures",
+	},
+	{
+		// Licensed to Roswaal by the models' author, who is also Roswaal's; credited as they asked.
+		name: "Teensy Tiny Tankery models",
+		usage: "included",
+		licenceFile: "teensy-tiny-tankery",
+		holder: 'MayLizbeth ("extraclear")',
+		licence: "CC-BY-4.0",
+		ships: true,
+		where:
+			"`src/extensions/placeEditor/app/benchmark/tanks/`. Licence: `notices/upstream/teensy-tiny-tankery.txt`.",
+		note:
+			"Roswaal draws sixteen of its tank models on the benchmark's Meshes station. Changed: " +
+			"converted to glTF, emblem parts left out, two tanks rescaled.",
+	},
+	{
 		name: "SMAA",
 		usage: "included",
 		licenceFile: "smaa",

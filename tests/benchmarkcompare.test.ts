@@ -118,6 +118,17 @@ describe("comparing two benchmark runs", () => {
 		);
 	});
 
+	it("refuses to compare two benchmarks", () => {
+		const two = run("b", BEFORE);
+		two.benchmark = 2;
+		const c = compareRuns(run("a", BEFORE), two);
+		expect(c.levels).toEqual([]);
+		expect(c.warnings).toEqual([
+			"These are Benchmark 1 and Benchmark 2, which measure differently, so they cannot be compared. Compare two runs of the same benchmark.",
+		]);
+		expect(comparisonReport(c)).toContain("cannot be compared");
+	});
+
 	it("reports the drift, the noise, each station's change before and after it, and when the noise is too wide", () => {
 		const after = BEFORE.map((t, i) => t * (i % 2 ? 1.5 : 0.8));
 		const text = comparisonReport(

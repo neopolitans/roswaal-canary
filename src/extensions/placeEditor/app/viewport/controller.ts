@@ -61,6 +61,7 @@ import {
 	spread,
 	stageRows,
 	stagesTotal,
+	steady,
 	type Timed,
 } from "./profile.js";
 import {
@@ -2079,13 +2080,15 @@ export class ViewportController {
 		await view?.settled();
 		await new Promise((r) => setTimeout(r, 50));
 		view?.setProfiling(null);
+		// Each the middle of many rounded times (see steady): `median` here is that, not a median.
 		return {
 			label,
 			...spread(intervals),
-			...(gpu.length >= Math.min(5, n) ? { gpuMs: spread(gpu).median } : {}),
-			...(cpu.length > 0 ? { cpuMs: spread(cpu).median } : {}),
+			median: steady(intervals),
+			...(gpu.length >= Math.min(5, n) ? { gpuMs: steady(gpu) } : {}),
+			...(cpu.length > 0 ? { cpuMs: steady(cpu) } : {}),
 			...(effects.length > 0
-				? { cpuSteps: { effects: spread(effects).median, culling: spread(culling).median } }
+				? { cpuSteps: { effects: steady(effects), culling: steady(culling) } }
 				: {}),
 		};
 	}
@@ -2150,10 +2153,11 @@ export class ViewportController {
 			rows.push({
 				label,
 				...spread(times),
+				...(busy ? { median: steady(times) } : {}),
 				frames: times.length,
 				stages: stageRows(frames),
-				gpu: stageRows(gpuFrames),
-				gpuTotal: stagesTotal(gpuFrames),
+				gpu: stageRows(gpuFrames, busy ? steady : undefined),
+				gpuTotal: stagesTotal(gpuFrames, busy ? steady : undefined),
 				redrawn:
 					was && now
 						? {
@@ -2321,8 +2325,8 @@ export class ViewportController {
 							name: station.name,
 							variant: variant.label,
 							still,
-							gpu: stageRows(gpuFrames),
-							gpuTotal: stagesTotal(gpuFrames),
+							gpu: stageRows(gpuFrames, busy ? steady : undefined),
+							gpuTotal: stagesTotal(gpuFrames, busy ? steady : undefined),
 							moving,
 							counts: {
 								draws: stats?.draws ?? 0,

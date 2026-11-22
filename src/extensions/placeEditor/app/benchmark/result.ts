@@ -56,7 +56,9 @@ export interface BenchmarkResult {
 	passes?: number;
 	/**
 	 * "busy": frames timed with the GPU kept busy, two in flight, so the
-	 * still frame's `median` is the time between frames (Benchmark 2).
+	 * still frame's `median` is the time between frames (Benchmark 2). Its
+	 * times are the mean of each set's middle 80%, not medians, since 1.1.0-canary.25:
+	 * a coarse clock (Safari's whole milliseconds) rounded every median.
 	 * Absent: one at a time, waited for (Benchmark 1).
 	 */
 	measure?: "busy";
@@ -153,7 +155,9 @@ export function benchmarkReport(result: BenchmarkResult): string {
 			);
 		}
 		lines.push("");
-		lines.push("  Each station's GPU stages, and its CPU's steps (medians):");
+		lines.push(
+			`  Each station's GPU stages, and its CPU's steps (${result.measure === "busy" ? "the middle 80%'s means" : "medians"}):`,
+		);
 		for (const s of level.stations) {
 			const stages = s.gpu.map((r) => `${STAGE_SHORT[r.stage]} ${msText(r.median)}`).join(" · ");
 			const steps = s.still.cpuSteps;

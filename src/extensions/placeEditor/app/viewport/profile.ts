@@ -229,6 +229,21 @@ export function spread(values: readonly number[]): { median: number; p95: number
 	return { median, p95: at(0.95) };
 }
 
+/**
+ * The middle of a set of times that a coarse clock has rounded: the mean of
+ * the middle 80%, so one hitch at either end does not move it. A median of
+ * rounded times is itself a rounded time: Safari counts the page's time in
+ * whole milliseconds, and Chrome's GPU timer in steps of about 0.067 ms,
+ * where a mean of many falls between the steps.
+ */
+export function steady(values: readonly number[]): number {
+	const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+	if (sorted.length === 0) return Number.NaN;
+	const cut = sorted.length >= 10 ? Math.floor(sorted.length * 0.1) : 0;
+	const middle = sorted.slice(cut, sorted.length - cut);
+	return middle.reduce((a, b) => a + b, 0) / middle.length;
+}
+
 /** A stage's row in the profile: in how many frames it was drawn, and its times. */
 export interface StageRow {
 	stage: Stage;
@@ -238,19 +253,25 @@ export interface StageRow {
 }
 
 /** Each stage drawn in the frames, in drawing order, with its median and slow-frame times. */
-export function stageRows(frames: readonly StageFrame[]): StageRow[] {
+export function stageRows(frames: readonly StageFrame[], centre?: typeof steady): StageRow[] {
 	const rows: StageRow[] = [];
 	for (const stage of STAGES) {
 		const times = frames.map((f) => f[stage]).filter((t): t is number => t !== undefined);
 		if (times.length === 0) continue;
-		rows.push({ stage, frames: times.length, ...spread(times) });
+		const s = spread(times);
+		rows.push({ stage, frames: times.length, ...s, ...(centre ? { median: centre(times) } : {}) });
 	}
 	return rows;
 }
 
 /** A frame's stages added up, for the total under the rows. */
-export function stagesTotal(frames: readonly StageFrame[]): { median: number; p95: number } {
-	return spread(frames.map((f) => Object.values(f).reduce((a, b) => a + (b ?? 0), 0)));
+export function stagesTotal(
+	frames: readonly StageFrame[],
+	centre?: typeof steady,
+): { median: number; p95: number } {
+	const totals = frames.map((f) => Object.values(f).reduce((a, b) => a + (b ?? 0), 0));
+	const s = spread(totals);
+	return centre ? { ...s, median: centre(totals) } : s;
 }
 
 /** One measurement of the free-running frame: the setting, and its frame times. */

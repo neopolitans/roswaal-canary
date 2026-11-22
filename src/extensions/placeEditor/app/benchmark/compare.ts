@@ -145,10 +145,16 @@ function compareLevel(
 /** `after` against `before`: each level they share, by its level number. */
 export function compareRuns(before: BenchmarkResult, after: BenchmarkResult): Comparison {
 	const warnings: string[] = [];
+	// Another benchmark measures other scenes, or the same ones another way: no station compares.
 	if (before.benchmark !== after.benchmark)
-		warnings.push(
-			`Different benchmarks: ${before.benchmark} and ${after.benchmark}. Their scenes differ.`,
-		);
+		return {
+			before,
+			after,
+			levels: [],
+			warnings: [
+				`These are Benchmark ${before.benchmark} and Benchmark ${after.benchmark}, which measure differently, so they cannot be compared. Compare two runs of the same benchmark.`,
+			],
+		};
 	if (before.gpu !== after.gpu || before.renderer !== after.renderer)
 		warnings.push(
 			`Different devices or renderers: ${before.renderer} on ${before.gpu}, and ${after.renderer} on ${after.gpu}.`,

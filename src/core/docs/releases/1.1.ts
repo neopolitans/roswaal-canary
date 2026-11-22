@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.25",
+		date: "2026-11-22",
+		headline: "The Place Editor is 0.18.1: Benchmark 2 reads times between a coarse clock's steps.",
+		changed: [
+			"**Benchmark 2's times are the mean of each set's middle 80%**, not its median, so they fall between a clock's steps: Safari counts in whole milliseconds, and a fast GPU's timer in steps of about 0.067 ms.",
+			"**Comparing runs of two different benchmarks** now says they cannot be compared, rather than giving a drift and noise for scenes measured differently.",
+			"**The Place Editor is 0.18.1.**",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.24",
 		date: "2026-11-22",
 		headline:

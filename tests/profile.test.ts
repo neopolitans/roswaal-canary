@@ -14,6 +14,7 @@ import {
 	type StageFrame,
 	spread,
 	stageRows,
+	steady,
 	stepCosts,
 	WaitingClock,
 } from "../src/extensions/placeEditor/app/viewport/profile.js";
@@ -92,6 +93,22 @@ describe("reading a frame's GPU stamps", () => {
 
 	it("leaves the gap before a pass that begins after the last one ended out", () => {
 		expect(passTimes(at(0, 2, 5, 6))).toEqual([2, 1]);
+	});
+});
+
+describe("the middle of rounded times", () => {
+	it("falls between a coarse clock's steps, where a median cannot", () => {
+		// Frames of 5.4 ms on a clock of whole milliseconds: 60% read 5, 40% read 6.
+		const rounded = Array.from({ length: 50 }, (_, i) => (i % 5 < 3 ? 5 : 6));
+		expect(spread(rounded).median).toBe(5);
+		expect(steady(rounded)).toBeCloseTo(5.4, 1);
+	});
+
+	it("is not moved by a hitch at either end", () => {
+		const times = [...Array(18).fill(4), 40, 0.01];
+		expect(steady(times)).toBe(4);
+		expect(steady([3, 5])).toBe(4);
+		expect(steady([])).toBeNaN();
 	});
 });
 

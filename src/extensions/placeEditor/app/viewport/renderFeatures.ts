@@ -50,6 +50,8 @@ export interface RenderFeatures {
 	frustumCulling: boolean;
 	occlusionCulling: boolean;
 	thinWallsBlockSky: boolean;
+	highlightObjects: boolean;
+	seeThroughHighlights: boolean;
 }
 
 export type FeatureKey = keyof RenderFeatures;
@@ -191,6 +193,7 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 			f("bloom", "Bloom", 10, "A BloomEffect over the whole picture."),
 			f("colourCorrection", "Colour correction", 10, "A ColorCorrectionEffect."),
 			f("blur", "Blur", 10, "A BlurEffect."),
+			f("highlightObjects", "Highlights", 10, "Highlight instances' fill and outline."),
 		],
 	},
 	{
@@ -219,6 +222,14 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 				0,
 				"Closed rooms stay dark whatever their walls' thickness. Studio lets the sky through walls thinner than its 4-stud lighting cells.",
 				undefined,
+				true,
+			),
+			f(
+				"seeThroughHighlights",
+				"Transparent parts show Highlight",
+				0,
+				"Parts with a Transparency keep their Highlight's fill and outline, fully transparent ones too. Studio leaves them out.",
+				"highlightObjects",
 				true,
 			),
 		],

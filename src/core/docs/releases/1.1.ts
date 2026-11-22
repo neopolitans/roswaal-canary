@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.19",
+		date: "2026-11-22",
+		headline: "The Place Editor is 0.15.0: Highlight instances are drawn, as Studio draws them.",
+		added: [
+			"**Highlights**: a Highlight's FillColor over the parts it covers and a 2 pixel OutlineColor line round them, over what is in front with DepthMode AlwaysOnTop, where they are seen with Occluded. A Highlight covers its Adornee, or its parent, and every part in it; parts with a Transparency are left out, as in Studio. With WebGPU.",
+			"**The Rendering panel's Highlights switch**, under Post effects.",
+			"**Transparent parts show Highlight**, a Roswaal fix in the Rendering panel, off unless chosen: parts with a Transparency keep their Highlight, fully transparent ones too, for carousels and scene renders.",
+		],
+		changed: ["**The Place Editor is 0.15.0.**"],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.18",
 		date: "2026-11-22",
 		headline:

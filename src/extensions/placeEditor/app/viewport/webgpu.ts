@@ -11,7 +11,13 @@
 
 import { type LightingParams, lightingBlock } from "../../core/lighting.js";
 import { MATERIAL_TEXTURES, MATERIALS, materialBlock } from "../../core/materials.js";
-import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
+import {
+	HIGHLIGHT_LIMIT,
+	type PlaceScene,
+	SCENE_KINDS,
+	SCENE_STRIDE,
+	type SceneHighlight,
+} from "../../core/scene.js";
 import {
 	AA_WGSL,
 	type AntialiasMode,
@@ -674,6 +680,30 @@ struct ReflU { viewProj: mat4x4f };
 	return o;
 }
 @fragment fn fsRefl(i: VOut) -> @location(0) vec4f { return vec4f(surface(i).rgb, 1.0); }
+// Highlight instances' mask: each pixel the Highlight of the part there, 1 to
+// 31; 0, none. hlRows, by part row: its Highlight, 256 for a part with a
+// Transparency, 512 for DepthMode AlwaysOnTop. hl.info.x: parts with a
+// Transparency drawn too (Roswaal's switch). See WebGpuView.drawHighlights.
+struct HlSlot { fill: vec4f, outline: vec4f };
+struct HlU { slots: array<HlSlot, 32>, info: vec4f };
+@group(1) @binding(2) var<storage, read> hlRows: array<u32>;
+@group(1) @binding(3) var<uniform> hl: HlU;
+override HL_ON_TOP: bool = false;
+struct MOut { @builtin(position) @invariant clip: vec4f, @location(0) @interpolate(flat) slot: u32 };
+@vertex fn vsMask(v: VIn) -> MOut {
+	let s = shade(v);
+	var r = 0u;
+	if (v.id < arrayLength(&hlRows)) { r = hlRows[v.id]; }
+	var o: MOut;
+	o.slot = r & 255u;
+	o.clip = s.clip;
+	// Not this pass's: off the view, so nothing of it is drawn.
+	if (o.slot == 0u || ((r & 256u) != 0u && hl.info.x < 0.5) || ((r & 512u) != 0u) != HL_ON_TOP) {
+		o.clip = vec4f(2.0, 2.0, 2.0, 1.0);
+	}
+	return o;
+}
+@fragment fn fsMask(i: MOut) -> @location(0) u32 { return i.slot; }
 // The parts' transform, shared by the parts and the handles: an entry point cannot call another.
 fn shade(v: VIn) -> VOut {
 	let m = mat3x3f(v.c0, v.c1, v.c2);
@@ -1256,6 +1286,17 @@ interface Draw {
 	count: number;
 	/** The solid parts' chunks, for culling: see culling.ts. */
 	chunks?: Chunk[];
+	/** Whether a Highlight covers any of its parts: drawn into the highlights' mask. */
+	highlighted?: boolean;
+}
+
+/** Whether any of `count` rows in `data` is a part in `ids`. */
+function rowsIn(data: Float32Array, count: number, ids: ReadonlySet<number>): boolean {
+	if (ids.size === 0 || count === 0) return false;
+	const words = new Uint32Array(data.buffer, data.byteOffset, count * SCENE_STRIDE);
+	// A row's id: its 14th word (see scene.ts).
+	for (let i = 0; i < count; i++) if (ids.has(words[i * SCENE_STRIDE + 13])) return true;
+	return false;
 }
 
 /**
@@ -1397,6 +1438,8 @@ export class WebGpuView implements ViewRenderer {
 	private blended!: GPURenderPipeline;
 	/** See-through Glass: its depth first, then its colour, so nothing see-through shows behind it. */
 	private glass: Draw[] = [];
+	/** Fully transparent parts a Highlight covers: the highlights' mask alone draws them. */
+	private ghosts: Draw[] = [];
 	private glassHides = true;
 	private scene?: PlaceScene;
 	private glassDepth!: GPURenderPipeline;
@@ -2252,6 +2295,8 @@ export class WebGpuView implements ViewRenderer {
 			});
 		line((p) => (this.lines = p), "always");
 		line((p) => (this.linesBehind = p), "greater-equal");
+		this.partModule = module;
+		this.partBuffers = buffers;
 		this.pipeline((p) => (this.ids = p), {
 			layout: pipelineLayout,
 			vertex: { module, entryPoint: "vs", buffers },
@@ -2514,7 +2559,7 @@ export class WebGpuView implements ViewRenderer {
 	}
 
 	setScene(scene: PlaceScene, moving = false): void {
-		for (const d of [...this.draws, ...this.clear, ...this.glass]) {
+		for (const d of [...this.draws, ...this.clear, ...this.glass, ...this.ghosts]) {
 			for (const b of [d.vertices, d.indices, d.instances]) b.destroy();
 			d.edges?.buffer.destroy();
 		}
@@ -2538,6 +2583,9 @@ export class WebGpuView implements ViewRenderer {
 		this.glowing = sceneGlows(scene);
 		this.grainy = sceneGrainy(scene);
 		const sets = seeThroughSets(scene, this.glassHides);
+		const lit = new Set<number>();
+		for (const h of scene.highlights ?? [])
+			for (const id of [...h.parts, ...h.seeThrough]) lit.add(id);
 		type Rows = { data: Float32Array; count: number };
 		const add = (
 			mesh: { vertices: Float32Array; indices: Uint16Array | Uint32Array },
@@ -2558,6 +2606,7 @@ export class WebGpuView implements ViewRenderer {
 					...shape(),
 					instances: this.make(chunked.data, BUFFER.VERTEX),
 					count: glass.count,
+					highlighted: rowsIn(chunked.data, glass.count, lit),
 					chunks: chunked.chunks,
 				});
 			}
@@ -2568,6 +2617,7 @@ export class WebGpuView implements ViewRenderer {
 					...shape(),
 					instances: this.make(chunked.data, BUFFER.VERTEX),
 					count: solid.count,
+					highlighted: rowsIn(chunked.data, solid.count, lit),
 					chunks: chunked.chunks,
 				});
 			}
@@ -2576,6 +2626,7 @@ export class WebGpuView implements ViewRenderer {
 					...shape(),
 					instances: this.make(seen.data, BUFFER.VERTEX),
 					count: seen.count,
+					highlighted: rowsIn(seen.data, seen.count, lit),
 					source: seen.data,
 					sorted: new Float32Array(seen.data.length),
 				});
@@ -2600,6 +2651,295 @@ export class WebGpuView implements ViewRenderer {
 					glass.meshes.get(slot) ?? none,
 				);
 		}
+		this.ghosts = [];
+		const ghost = (
+			mesh: { vertices: Float32Array; indices: Uint16Array | Uint32Array },
+			rows: { data: Float32Array; count: number },
+		) => {
+			if (rows.count === 0) return;
+			this.ghosts.push({
+				mesh,
+				vertices: this.make(mesh.vertices, BUFFER.VERTEX),
+				indices: this.make(mesh.indices, BUFFER.INDEX),
+				indexCount: mesh.indices.length,
+				format: mesh.indices instanceof Uint32Array ? "uint32" : "uint16",
+				instances: this.make(rows.data, BUFFER.VERTEX),
+				count: rows.count,
+				highlighted: true,
+			});
+		};
+		const ghosts = scene.ghosts;
+		if (ghosts)
+			for (const kind of SCENE_KINDS) {
+				if (kind !== "mesh") {
+					ghost(meshFor(kind), ghosts[kind]);
+					continue;
+				}
+				const split = splitByMesh(ghosts.mesh, (slot) => this.meshes.has(slot));
+				ghost(meshFor("mesh"), split.rest);
+				for (const [slot, mesh] of this.meshes) {
+					const rows = split.meshes.get(slot);
+					if (rows) ghost(mesh, rows);
+				}
+			}
+		this.setHighlights(scene.highlights);
+	}
+
+	// -- Highlight instances: a mask of the parts each covers, then its fill and outline --
+
+	/** The highlights' rows and colours on the GPU; null, none in the place. */
+	private hl: {
+		rows: GPUBuffer;
+		params: GPUBuffer;
+		data: Float32Array;
+		onTop: boolean;
+		occluded: boolean;
+	} | null = null;
+	/** The mask, its pipelines and their groups, made when first drawn. */
+	private hlMask?: GPUTexture;
+	private hlPipes?: {
+		samples: number;
+		onTop: GPURenderPipeline;
+		occluded: GPURenderPipeline;
+		overlay: GPURenderPipeline;
+		maskLayout: GPUBindGroupLayout;
+		overlayLayout: GPUBindGroupLayout;
+	};
+	private hlGroups: { mask: GPUBindGroup; overlay: GPUBindGroup } | null = null;
+	/** The parts' shader module and vertex buffers, for pipelines made later. */
+	private partModule?: GPUShaderModule;
+	private partBuffers?: GPUVertexBufferLayout[];
+
+	private setHighlights(list: readonly SceneHighlight[] | undefined): void {
+		this.hl?.rows.destroy();
+		this.hl?.params.destroy();
+		this.hl = null;
+		this.hlGroups = null;
+		if (!list || list.length === 0) return;
+		const shown = list.slice(0, HIGHLIGHT_LIMIT);
+		let top = 0;
+		for (const h of shown) for (const id of [...h.parts, ...h.seeThrough]) top = Math.max(top, id);
+		const rows = new Uint32Array(top + 1);
+		// Slot 0 unused; then each slot's fill and outline, then the info vec4.
+		const data = new Float32Array(32 * 8 + 4);
+		shown.forEach((h, i) => {
+			const slot = i + 1;
+			const top = h.onTop ? 512 : 0;
+			for (const id of h.parts) rows[id] = slot | top;
+			for (const id of h.seeThrough) rows[id] = slot | top | 256;
+			data.set(
+				[...h.fill, 1 - h.fillTransparency, ...h.outline, 1 - h.outlineTransparency],
+				slot * 8,
+			);
+		});
+		const params = this.device.createBuffer({
+			size: data.byteLength,
+			usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
+		});
+		this.hl = {
+			rows: this.make(rows, BUFFER.STORAGE),
+			params,
+			data,
+			onTop: shown.some((h) => h.onTop),
+			occluded: shown.some((h) => !h.onTop),
+		};
+	}
+
+	/** The mask's two pipelines and the overlay's, for this view's samples. */
+	private highlightPipes(): NonNullable<WebGpuView["hlPipes"]> | null {
+		if (this.hlPipes?.samples === this.samples) return this.hlPipes;
+		const module = this.partModule;
+		const buffers = this.partBuffers;
+		if (!module || !buffers) return null;
+		const d = this.device;
+		const maskLayout = d.createBindGroupLayout({
+			entries: [
+				{ binding: 2, visibility: STAGE.VERTEX, buffer: { type: "read-only-storage" } },
+				{ binding: 3, visibility: STAGE.VERTEX, buffer: {} },
+			],
+		});
+		const mask = (onTop: boolean) =>
+			d.createRenderPipeline({
+				layout: d.createPipelineLayout({ bindGroupLayouts: [this.layout, maskLayout] }),
+				vertex: { module, entryPoint: "vsMask", buffers, constants: { HL_ON_TOP: onTop ? 1 : 0 } },
+				fragment: { module, entryPoint: "fsMask", targets: [{ format: "r8uint" }] },
+				primitive: { topology: "triangle-list", cullMode: "back" },
+				// Occluded: where the part is the nearest thing drawn, as the parts' own depths say.
+				depthStencil: {
+					format: "depth32float",
+					depthWriteEnabled: false,
+					depthCompare: onTop ? "always" : "greater-equal",
+				},
+				multisample: { count: this.samples },
+			});
+		const many = this.samples > 1;
+		const overlayModule = d.createShaderModule({
+			code: /* wgsl */ `
+struct HlSlot { fill: vec4f, outline: vec4f };
+struct HlU { slots: array<HlSlot, 32>, info: vec4f };
+@group(0) @binding(0) var mask: ${many ? "texture_multisampled_2d<u32>" : "texture_2d<u32>"};
+@group(0) @binding(1) var<uniform> hl: HlU;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+	let q = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+	return vec4f(q * 2.0 - 1.0, 0.0, 1.0);
+}
+fn at(c: vec2i) -> u32 {
+	let size = vec2i(textureDimensions(mask));
+	if (any(c < vec2i(0)) || any(c >= size)) { return 0u; }
+	return textureLoad(mask, c, 0).r;
+}
+// Over the finished picture: the fill where a Highlight's parts are; its
+// outline in the pixels just outside them, hl.info.y wide (2 of the page's
+// pixels, as Studio's), the nearest Highlight's.
+@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+	let c = vec2i(pos.xy);
+	let s = at(c);
+	if (s != 0u) {
+		let f = hl.slots[s].fill;
+		if (f.a <= 0.0) { discard; }
+		return f;
+	}
+	let r = hl.info.y;
+	let n = i32(ceil(r));
+	var best = 0u;
+	var near = 1e9;
+	for (var dy = -n; dy <= n; dy++) {
+		for (var dx = -n; dx <= n; dx++) {
+			let d = f32(dx * dx + dy * dy);
+			if (d > r * r + 0.5 || d >= near) { continue; }
+			let t = at(c + vec2i(dx, dy));
+			if (t != 0u) { best = t; near = d; }
+		}
+	}
+	if (best == 0u) { discard; }
+	let o = hl.slots[best].outline;
+	if (o.a <= 0.0) { discard; }
+	return o;
+}`,
+		});
+		const overlayLayout = d.createBindGroupLayout({
+			entries: [
+				{
+					binding: 0,
+					visibility: STAGE.FRAGMENT,
+					texture: { sampleType: "uint", multisampled: many },
+				},
+				{ binding: 1, visibility: STAGE.FRAGMENT, buffer: {} },
+			],
+		});
+		const overlay = d.createRenderPipeline({
+			layout: d.createPipelineLayout({ bindGroupLayouts: [overlayLayout] }),
+			vertex: { module: overlayModule, entryPoint: "vs" },
+			fragment: {
+				module: overlayModule,
+				entryPoint: "fs",
+				targets: [
+					{
+						format: this.format,
+						blend: {
+							color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+							alpha: { srcFactor: "zero", dstFactor: "one" },
+						},
+					},
+				],
+			},
+			primitive: { topology: "triangle-list" },
+		});
+		this.hlPipes = {
+			samples: this.samples,
+			onTop: mask(true),
+			occluded: mask(false),
+			overlay,
+			maskLayout,
+			overlayLayout,
+		};
+		this.hlGroups = null;
+		return this.hlPipes;
+	}
+
+	/**
+	 * The Highlights over the finished picture in `target`: the parts each
+	 * covers into the mask, tested against the parts' depth where it is
+	 * Occluded, then its fill and outline blended over. As Studio's, measured.
+	 */
+	private drawHighlights(encoder: GPUCommandEncoder, target: GPUTextureView): void {
+		const hl = this.hl;
+		const pipes = this.highlightPipes();
+		if (!hl || !pipes || !this.depth) return;
+		const d = this.device;
+		const mask = this.hlMask;
+		if (
+			!mask ||
+			mask.width !== this.width ||
+			mask.height !== this.height ||
+			mask.sampleCount !== this.samples
+		) {
+			mask?.destroy();
+			this.hlMask = d.createTexture({
+				size: [this.width, this.height],
+				format: "r8uint",
+				sampleCount: this.samples,
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
+			this.hlGroups = null;
+		}
+		const view = this.hlMask!.createView();
+		if (!this.hlGroups)
+			this.hlGroups = {
+				mask: d.createBindGroup({
+					layout: pipes.maskLayout,
+					entries: [
+						{ binding: 2, resource: { buffer: hl.rows } },
+						{ binding: 3, resource: { buffer: hl.params } },
+					],
+				}),
+				overlay: d.createBindGroup({
+					layout: pipes.overlayLayout,
+					entries: [
+						{ binding: 0, resource: view },
+						{ binding: 1, resource: { buffer: hl.params } },
+					],
+				}),
+			};
+		const seeThrough = featureOn(this.render.features, "seeThroughHighlights");
+		// The outline 2 of the page's pixels wide, as Studio's at 100%: more of the canvas's on a Retina screen.
+		const css = this.canvas?.clientWidth || this.width;
+		const wide = Math.max(1, Math.min(4, (2 * this.width) / Math.max(1, css)));
+		hl.data.set([seeThrough ? 1 : 0, wide, 0, 0], 32 * 8);
+		d.queue.writeBuffer(hl.params, 0, hl.data);
+		const pass = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
+			colorAttachments: [
+				{ view, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
+			],
+			depthStencilAttachment: {
+				view: this.depth.createView(),
+				depthLoadOp: "load",
+				depthStoreOp: "discard",
+			},
+		});
+		pass.setBindGroup(0, this.bind);
+		pass.setBindGroup(1, this.hlGroups.mask);
+		const lists = [this.draws, this.glass, this.clear, ...(seeThrough ? [this.ghosts] : [])].map(
+			(list) => list.filter((draw) => draw.highlighted),
+		);
+		for (const [on, pipe] of [
+			[hl.occluded, pipes.occluded],
+			[hl.onTop, pipes.onTop],
+		] as const) {
+			if (!on) continue;
+			pass.setPipeline(pipe);
+			for (const list of lists) this.solids(pass, list, true);
+		}
+		pass.end();
+		const over = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
+			colorAttachments: [{ view: target, loadOp: "load", storeOp: "store" }],
+		});
+		over.setPipeline(pipes.overlay);
+		over.setBindGroup(0, this.hlGroups.overlay);
+		over.draw(3);
+		over.end();
 	}
 
 	/** The meshes rows name, by their place in the scene's list. */
@@ -2938,6 +3278,9 @@ export class WebGpuView implements ViewRenderer {
 		const show = passesOf(this.render.features);
 		const heat = sharesView(mode);
 		const wire = mode === "wireframe";
+		// Highlight instances, over the picture as Studio draws them: not on a heatmap or the wireframe.
+		const hlOn =
+			this.hl !== null && !heat && !wire && featureOn(this.render.features, "highlightObjects");
 		// The heatmaps and the wireframe are the place's shapes alone; the sun
 		// maps' tints are left as they are drawn.
 		const tinted = mode === "sunMaps";
@@ -3049,7 +3392,8 @@ export class WebGpuView implements ViewRenderer {
 				view: this.depth!.createView(),
 				depthClearValue: 0,
 				depthLoadOp: load ? "load" : "clear",
-				depthStoreOp: glow ? "store" : "discard",
+				// Kept for the glow, and for a Highlight with DepthMode Occluded.
+				depthStoreOp: glow || hlOn ? "store" : "discard",
 			},
 		});
 		pass.setBindGroup(0, this.bind);
@@ -3141,7 +3485,7 @@ export class WebGpuView implements ViewRenderer {
 				depthStencilAttachment: {
 					view: this.depth!.createView(),
 					depthLoadOp: "load",
-					depthStoreOp: "discard",
+					depthStoreOp: hlOn ? "store" : "discard",
 				},
 			});
 			pass.setPipeline(this.composite);
@@ -3173,6 +3517,7 @@ export class WebGpuView implements ViewRenderer {
 		}
 		pass.end();
 		if (aaOn) this.antialiasPasses(encoder, canvasView);
+		if (hlOn) this.drawHighlights(encoder, canvasView);
 		this.stampsAre(glow ? "composite" : "place");
 		const read = this.readStamps(encoder);
 		this.device.queue.submit([encoder.finish()]);

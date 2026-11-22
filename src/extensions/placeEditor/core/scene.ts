@@ -96,6 +96,100 @@ export interface PlaceScene {
 	effects?: SceneEffects;
 	/** The place's Attachments, welds and constraints, for the viewer's gizmos: see `gizmos.ts`. */
 	gizmos?: SceneGizmos;
+	/** The Highlights in Workspace that are on: see `sceneHighlights`. */
+	highlights?: SceneHighlight[];
+	/**
+	 * Fully transparent parts a Highlight covers, otherwise left out: drawn
+	 * only into the highlights' mask, with Roswaal's "Transparent parts show
+	 * Highlight" on.
+	 */
+	ghosts?: Record<SceneKind, { data: Float32Array; count: number }>;
+}
+
+/**
+ * A Highlight as Studio draws it, measured 22 Nov 2026: FillColor blended over
+ * the finished picture at 1 - FillTransparency, and a 2 pixel OutlineColor
+ * line just outside what it covers; over everything in front with DepthMode
+ * AlwaysOnTop, where it is seen with Occluded. A part with any Transparency
+ * is left out.
+ */
+export interface SceneHighlight {
+	/** Its parts by row: the Adornee, else the Highlight's parent, and every part in it. */
+	parts: number[];
+	/** Those with a Transparency above 0, which Studio leaves out. */
+	seeThrough: number[];
+	/** Colour3s, 0 to 1. */
+	fill: number[];
+	fillTransparency: number;
+	outline: number[];
+	outlineTransparency: number;
+	/** DepthMode AlwaysOnTop: drawn over what is in front of it. */
+	onTop: boolean;
+}
+
+/** The most Highlights Roblox draws at once. */
+export const HIGHLIGHT_LIMIT = 31;
+
+/** Each Highlight in `workspace` that is on, the first HIGHLIGHT_LIMIT, with the parts it covers. */
+export function workspaceHighlights(
+	workspace: RbxInstance | undefined,
+): { highlight: RbxInstance; parts: RbxInstance[] }[] {
+	const out: { highlight: RbxInstance; parts: RbxInstance[] }[] = [];
+	if (!workspace) return out;
+	const inWorkspace = (inst: RbxInstance | null | undefined): boolean => {
+		for (let at = inst; at; at = at.parent) if (at === workspace) return true;
+		return false;
+	};
+	const visit = (inst: RbxInstance) => {
+		if (out.length >= HIGHLIGHT_LIMIT) return;
+		if (inst.className === "Highlight" && inst.props.get("Enabled")?.value !== false) {
+			const adornee =
+				(inst.props.get("Adornee")?.value as RbxInstance | null | undefined) ?? inst.parent;
+			if (adornee && inWorkspace(adornee)) {
+				const parts: RbxInstance[] = [];
+				const take = (at: RbxInstance) => {
+					if (PARTS.has(at.className)) parts.push(at);
+					for (const child of at.children) take(child);
+				};
+				take(adornee);
+				if (parts.length > 0) out.push({ highlight: inst, parts });
+			}
+		}
+		for (const child of inst.children) visit(child);
+	};
+	visit(workspace);
+	return out;
+}
+
+/** The highlights as the renderers read them: see SceneHighlight. */
+export function sceneHighlights(
+	found: readonly { highlight: RbxInstance; parts: RbxInstance[] }[],
+	idOf: (inst: RbxInstance) => number | undefined,
+): SceneHighlight[] {
+	const colour = (inst: RbxInstance, name: string, fallback: number[]) => {
+		const v = inst.props.get(name)?.value;
+		return Array.isArray(v) && v.length >= 3 ? (v as number[]).slice(0, 3) : fallback;
+	};
+	return found.map(({ highlight: h, parts }) => {
+		const opaque: number[] = [];
+		const seeThrough: number[] = [];
+		for (const part of parts) {
+			const id = idOf(part);
+			if (id === undefined) continue;
+			const t = part.props.get("Transparency")?.value;
+			(typeof t === "number" && t > 0 ? seeThrough : opaque).push(id);
+		}
+		return {
+			parts: opaque,
+			seeThrough,
+			fill: colour(h, "FillColor", [1, 0, 0]),
+			fillTransparency: numberProp(h, "FillTransparency", 0.5),
+			outline: colour(h, "OutlineColor", [1, 1, 1]),
+			outlineTransparency: numberProp(h, "OutlineTransparency", 0),
+			// HighlightDepthMode: AlwaysOnTop 0, Occluded 1.
+			onTop: h.props.get("DepthMode")?.value !== 1,
+		};
+	});
 }
 
 /**
@@ -353,6 +447,15 @@ export function buildPlaceScene(
 	const meshSlots = new Map<string, number>();
 	const locked: number[] = [];
 	let transparent = 0;
+	// Fully transparent parts a Highlight covers: kept, for the highlights' mask alone.
+	const highlighted = workspaceHighlights(workspace);
+	const ghostParts = new Set<RbxInstance>();
+	for (const { parts } of highlighted)
+		for (const part of parts) {
+			const t = part.props.get("Transparency")?.value;
+			if (typeof t === "number" && t >= 0.999) ghostParts.add(part);
+		}
+	const ghostLists = empty();
 
 	const visit = (inst: RbxInstance) => {
 		for (const child of inst.children) visit(child);
@@ -367,6 +470,7 @@ export function buildPlaceScene(
 			if (id !== undefined) locked.push(id);
 		}
 		const transparency = inst.props.get("Transparency")?.value;
+		const ghost = ghostParts.has(inst);
 		if (typeof transparency === "number" && transparency >= 0.999) {
 			transparent++;
 			// The part is not drawn, but its Decals and Textures still are, as
@@ -387,7 +491,8 @@ export function buildPlaceScene(
 			if (id !== undefined && cf && size && !modified && (kind === "block" || kind === "mesh"))
 				for (const image of faceImages(inst, id, cf.rotation, cf.position, size))
 					images.push({ ...image, layer: "solid" });
-			return;
+			// Drawn only into the highlights' mask, when Roswaal's switch asks for it.
+			if (!ghost) return;
 		}
 		const id = idOf(inst);
 		const cf = inst.props.get("CFrame")?.value as
@@ -467,12 +572,12 @@ export function buildPlaceScene(
 			}
 		}
 		// Decals and Textures: on a block or a mesh, which are drawn as their box.
-		if ((kind === "block" || kind === "mesh") && !modifier) {
+		if ((kind === "block" || kind === "mesh") && !modifier && !ghost) {
 			const layer: SceneImage["layer"] = through ? "seeThrough" : "solid";
 			for (const image of faceImages(inst, id, r, cf.position, size))
 				images.push({ ...image, layer });
 		}
-		(through ? seeThrough : lists)[kind].push(
+		(ghost ? ghostLists : through ? seeThrough : lists)[kind].push(
 			x[0] * sx,
 			x[1] * sx,
 			x[2] * sx,
@@ -489,6 +594,7 @@ export function buildPlaceScene(
 			id,
 			(material | (shine << 8)) + mesh * 65536 + (casts ? 0 : NO_SHADOW),
 		);
+		if (ghost) return;
 		positions.push(p[0], p[1], p[2]);
 		// The pivot, where it is not the drawn box's centre and axes.
 		const pivotOffset = inst.props.get("PivotOffset")?.value as Frame | undefined;
@@ -535,6 +641,10 @@ export function buildPlaceScene(
 	};
 	const lights = sceneLights(workspace);
 	if (lights.length > 0) scene.lights = lights;
+	if (highlighted.length > 0) {
+		scene.highlights = sceneHighlights(highlighted, idOf);
+		if (ghostParts.size > 0) scene.ghosts = pack(ghostLists);
+	}
 	const effects = sceneEffects(workspace, idOf);
 	if (effects.beams.length > 0 || effects.emitters.length > 0) scene.effects = effects;
 	const gizmos = sceneGizmos(workspace, idOf);

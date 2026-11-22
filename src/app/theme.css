@@ -24208,6 +24208,58 @@ textarea.tb:where(:disabled) {
 	text-align: right;
 }
 
+/* A quality level: its bar split by stage, and what it drew at under it. */
+.place-prop.profile-row.profile-level {
+	grid-template-areas:
+		"name time second"
+		"bar bar bar"
+		"facts facts facts";
+}
+
+.profile-stacked {
+	display: flex;
+}
+
+.profile-stacked > .profile-stage {
+	border-radius: 0;
+	flex: none;
+}
+
+.profile-stage-skyMaps,
+.profile-stage-skyCells {
+	background: var(--fg-faint);
+}
+
+.profile-stage-shadows {
+	background: var(--accent);
+}
+
+.profile-stage-glowSources,
+.profile-stage-composite {
+	background: var(--warning, #c98a1b);
+}
+
+.profile-stage-occlusion,
+.profile-stage-sky {
+	background: var(--fg-muted, var(--fg-faint));
+}
+
+.profile-stage-place {
+	background: var(--success, #3f9f5f);
+}
+
+.profile-stage-effects,
+.profile-stage-marks {
+	background: var(--danger, #c0504d);
+}
+
+.profile-level-facts {
+	grid-area: facts;
+	font-size: var(--text-sm);
+	color: var(--fg-faint);
+	font-variant-numeric: tabular-nums;
+}
+
 .profile-second {
 	min-width: 5.5em;
 	font-size: var(--text-sm);

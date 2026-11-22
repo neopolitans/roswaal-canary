@@ -9,6 +9,26 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.14",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.10.0: the profile says what each quality level draws, and where its time goes.",
+		added: [
+			"**Each quality level's stages in the profile**, with what the level drew at: the canvas, antialiasing, the sun's map and reach, the glow's size, draw calls and the switches it adds.",
+			"**The GPU's own time for each stage** where it has timers, beside the waited times.",
+			"**The level, antialiasing and camera the profile began from**, at the top of the report, so two profiles can be taken from the same spot.",
+		],
+		changed: [
+			"**The profile's steps add only the switches the view has on**, so the last step is the view as set.",
+			"**The sun's maps are drawn every frame while the stages are profiled**, as when the camera moves.",
+			"**The Place Editor is 0.10.0.**",
+		],
+		fixed: [
+			"**The report's Antialiasing names the mode drawn** (FXAA, SMAA), not only its samples.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.13",
 		date: "2026-11-22",
 		headline:

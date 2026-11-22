@@ -3303,7 +3303,9 @@ export class WebGl2View implements ViewRenderer {
 			);
 			clock?.mark("skyMaps");
 		}
-		this.drawCascades(camera, partsMoved);
+		// While the stages are profiled, the sun's maps are drawn every frame,
+		// as when the camera moves: a still camera draws them only once.
+		this.drawCascades(camera, partsMoved || this.clock !== null);
 		clock?.mark("shadows");
 		if (nearDrawn) {
 			this.fillCells(camera);

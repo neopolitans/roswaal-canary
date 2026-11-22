@@ -49,6 +49,20 @@ export const STAGE_LABELS: Record<Stage, string> = {
 	marks: "Selection and handles",
 };
 
+/** A stage's name as a column of the per-level table: short. */
+export const STAGE_SHORT: Record<Stage, string> = {
+	skyMaps: "Sky maps",
+	shadows: "Shadows",
+	skyCells: "Cells",
+	glowSources: "Glow src",
+	occlusion: "Occlusion",
+	sky: "Sky",
+	place: "Parts",
+	effects: "Effects",
+	composite: "Post",
+	marks: "Marks",
+};
+
 /** What each stage draws, for the row's hover. */
 export const STAGE_HINTS: Record<Stage, string> = {
 	skyMaps:
@@ -220,6 +234,12 @@ export interface ProfileFacts {
 	renderScale: string;
 	/** The depth path drawn: "full" or "lean", or "" where the renderer has one. */
 	depthPath: string;
+	/** The level the view was at when the profile began: "Automatic, Level 12", say. */
+	quality: string;
+	/** The antialiasing drawn then, by name. */
+	antialias: string;
+	/** Where the camera was, so two profiles can be taken from the same spot. */
+	camera: string;
 	draws: number;
 	instances: number;
 	triangles: number;
@@ -238,6 +258,9 @@ export interface ProfileResult {
 	frame: Timed;
 	stages: StageRow[];
 	stageTotal: { median: number; p95: number };
+	/** The same frames' stages by the GPU's own timers, where it has them: no waits in them. */
+	gpuStages: StageRow[];
+	gpuStageTotal: { median: number; p95: number };
 	/** Frames profiled stage by stage: slower than free running, since each stage is waited for. */
 	stageFrames: number;
 	steps: Timed[];
@@ -254,10 +277,51 @@ export interface ProfileResult {
 	depthPath: Timed[];
 	/** One frame with WebGPU's shader in half precision, and in full, where the device has half. */
 	precision: Timed[];
-	/** One frame at each quality level, 1 to 21, with the level's own scale and antialiasing. */
-	quality: Timed[];
+	/** Each quality level, 1 to 21, with its own scale and antialiasing: its frame, its stages, what it set. */
+	quality: LevelRow[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
 	clock: number;
+}
+
+/** One quality level as the sweep drew it: its frame and stages, and what it set. */
+export interface LevelRow extends Timed {
+	level: number;
+	canvas: { width: number; height: number };
+	/** The antialiasing drawn, by name. */
+	antialias: string;
+	/** Each sun shadow map's side, in texels. */
+	shadowMap: number;
+	/** How far the sun's sharp shadows reach, in studs. */
+	reach: number;
+	/** The soft stand-in below Level 10 rather than sharp shadows. */
+	blobs: boolean;
+	/** How far parts are drawn, in studs; null, all of them. */
+	distance: number | null;
+	/** Neon's glow: not drawn, found at half the view's size, or at its size. */
+	glow: "off" | "half" | "full";
+	/** The switches this level turns on that the level below has off, by name. */
+	adds: string[];
+	stages: StageRow[];
+	stageTotal: { median: number; p95: number };
+	/** Its stages by the GPU's own timers, where it has them. */
+	gpu: StageRow[];
+	gpuTotal: { median: number; p95: number };
+	draws: number;
+	instances: number;
+	triangles: number;
+}
+
+/** What a level draws, in a line: for the panel and the report. */
+export function levelSettings(r: LevelRow): string {
+	return [
+		`${r.canvas.width}×${r.canvas.height}`,
+		r.antialias,
+		r.blobs ? `soft shadows, map ${r.shadowMap}` : `sun map ${r.shadowMap}, reach ${r.reach}`,
+		`glow ${r.glow}`,
+		r.distance === null ? "every distance" : `to ${r.distance.toLocaleString("en")} studs`,
+		`${r.draws.toLocaleString("en")} draws`,
+		`${Math.round(r.triangles).toLocaleString("en")} triangles`,
+	].join(" · ");
 }
 
 /** "12.3 ms", or a dash for what was not measured. */
@@ -323,11 +387,13 @@ export function profileReport(result: ProfileResult): string {
 		`Renderer: ${facts.renderer} · GPU: ${facts.gpu} · GPU timers: ${facts.gpuTimers ? "yes" : "no"}`,
 	);
 	lines.push(
-		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${Number(facts.pixelRatio.toFixed(2))}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}${facts.depthPath ? ` · Depth: ${facts.depthPath}` : ""}`,
+		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${Number(facts.pixelRatio.toFixed(2))}×) · Antialiasing: ${facts.antialias || `${facts.samples}×`} · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}${facts.depthPath ? ` · Depth: ${facts.depthPath}` : ""}`,
 	);
 	lines.push(
 		`Last frame: ${facts.draws.toLocaleString("en")} draw calls, ${facts.instances.toLocaleString("en")} instances, ${Math.round(facts.triangles).toLocaleString("en")} triangles, ${facts.beams} beams, ${facts.particles.toLocaleString("en")} particles`,
 	);
+	if (facts.quality) lines.push(`Quality: ${facts.quality}`);
+	if (facts.camera) lines.push(`Camera: ${facts.camera}`);
 	lines.push(`Clock step: ${msText(result.clock)}`);
 	lines.push(`Browser: ${facts.userAgent}`);
 	lines.push("");
@@ -349,6 +415,19 @@ export function profileReport(result: ProfileResult): string {
 	lines.push(
 		`  ${"All stages".padEnd(24)} ${msText(result.stageTotal.median).padStart(9)} ${msText(result.stageTotal.p95).padStart(9)}`,
 	);
+	if (result.gpuStages.length > 0) {
+		lines.push("");
+		lines.push(
+			"The same stages by the GPU's own timers, sun maps drawn every frame (median, slow frames):",
+		);
+		for (const row of result.gpuStages)
+			lines.push(
+				`  ${STAGE_LABELS[row.stage].padEnd(24)} ${msText(row.median).padStart(9)} ${msText(row.p95).padStart(9)}`,
+			);
+		lines.push(
+			`  ${"All stages".padEnd(24)} ${msText(result.gpuStageTotal.median).padStart(9)} ${msText(result.gpuStageTotal.p95).padStart(9)}`,
+		);
+	}
 	lines.push("");
 	lines.push("Base, every feature off (frame):");
 	for (const b of result.base)
@@ -408,6 +487,40 @@ export function profileReport(result: ProfileResult): string {
 			lines.push(
 				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
 			);
+		// The GPU's own times where it has them: the waited times charge a
+		// stage for waiting on the screen.
+		const timers = result.quality.some((r) => r.gpu.length > 0);
+		const rowsOf = (r: LevelRow) => (timers ? r.gpu : r.stages);
+		const totalOf = (r: LevelRow) => (timers ? r.gpuTotal : r.stageTotal);
+		const shown = STAGES.filter((s) =>
+			result.quality.some((r) => rowsOf(r).some((x) => x.stage === s)),
+		);
+		if (shown.length > 0) {
+			lines.push("");
+			lines.push(
+				timers
+					? "Each level's stages by the GPU's own timers, sun maps drawn every frame as when the camera moves (medians):"
+					: "Each level's stages, waited for one at a time (medians):",
+			);
+			lines.push(
+				`  ${"Level".padEnd(7)}${"Frame".padStart(9)}${shown.map((s) => STAGE_SHORT[s].padStart(10)).join("")}${"Total".padStart(9)}`,
+			);
+			for (const r of result.quality) {
+				const cells = shown.map((s) => {
+					const x = rowsOf(r).find((y) => y.stage === s);
+					return (x ? msText(x.median) : "–").padStart(10);
+				});
+				lines.push(
+					`  ${String(r.level).padEnd(7)}${msText(r.median).padStart(9)}${cells.join("")}${msText(totalOf(r).median).padStart(9)}`,
+				);
+			}
+		}
+		lines.push("");
+		lines.push("What each level draws:");
+		for (const r of result.quality) {
+			lines.push(`  Level ${String(r.level).padEnd(3)} ${levelSettings(r)}`);
+			if (r.adds.length > 0) lines.push(`            adds ${r.adds.join(", ")}`);
+		}
 	}
 	return lines.join("\n");
 }

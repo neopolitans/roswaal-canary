@@ -109,6 +109,9 @@ const RESULT: ProfileResult = {
 		frameRate: "vsync",
 		renderScale: "Automatic, 75%",
 		depthPath: "lean",
+		quality: "Automatic, Level 12",
+		antialias: "FXAA",
+		camera: "eye (1, 2, 3) · looking at (0, 0, 0) · 60 studs out",
 		draws: 12,
 		instances: 40,
 		triangles: 2400,
@@ -121,6 +124,8 @@ const RESULT: ProfileResult = {
 	frame: { label: "One frame", median: 80, p95: 110 },
 	stages: [{ stage: "place", frames: 90, median: 40, p95: 50 }],
 	stageTotal: { median: 90, p95: 110 },
+	gpuStages: [{ stage: "place", frames: 90, median: 12, p95: 14 }],
+	gpuStageTotal: { median: 12, p95: 14 },
 	stageFrames: 90,
 	base: [
 		{ label: "Empty frame", median: 20, p95: 22 },
@@ -157,8 +162,54 @@ const RESULT: ProfileResult = {
 		{ label: "Lean, for tile GPUs", median: 20, p95: 22 },
 	],
 	quality: [
-		{ label: "Level 1", median: 8, p95: 9 },
-		{ label: "Level 21", median: 40, p95: 45 },
+		{
+			label: "Level 1",
+			median: 8,
+			p95: 9,
+			level: 1,
+			canvas: { width: 372, height: 500 },
+			antialias: "Off",
+			shadowMap: 512,
+			reach: 384,
+			blobs: true,
+			distance: 500,
+			glow: "off",
+			adds: [],
+			stages: [
+				{ stage: "shadows", frames: 20, median: 1, p95: 2 },
+				{ stage: "place", frames: 20, median: 3, p95: 4 },
+			],
+			stageTotal: { median: 4, p95: 6 },
+			gpu: [
+				{ stage: "shadows", frames: 20, median: 0.5, p95: 1 },
+				{ stage: "place", frames: 20, median: 2, p95: 3 },
+			],
+			gpuTotal: { median: 2.5, p95: 4 },
+			draws: 10,
+			instances: 30,
+			triangles: 1200,
+		},
+		{
+			label: "Level 21",
+			median: 40,
+			p95: 45,
+			level: 21,
+			canvas: { width: 1488, height: 2000 },
+			antialias: "MSAA 4×",
+			shadowMap: 2048,
+			reach: 578,
+			blobs: false,
+			distance: null,
+			glow: "full",
+			adds: ["Blur"],
+			stages: [{ stage: "place", frames: 20, median: 30, p95: 33 }],
+			stageTotal: { median: 30, p95: 33 },
+			gpu: [{ stage: "place", frames: 20, median: 20, p95: 22 }],
+			gpuTotal: { median: 20, p95: 22 },
+			draws: 12,
+			instances: 40,
+			triangles: 2400,
+		},
 	],
 	clock: 1,
 };
@@ -201,6 +252,18 @@ describe("what the profile says", () => {
 			/Shader precision, the view built again for each:\n\s+Half precision\s+18\.0 ms/,
 		);
 		expect(text).toMatch(/Parts' depth only\s+not here/);
+		expect(text).toContain("Quality: Automatic, Level 12");
+		expect(text).toContain("Antialiasing: FXAA");
+		expect(text).toMatch(
+			/Each level's stages by the GPU's own timers[^\n]*\n\s+Level\s+Frame\s+Shadows\s+Parts\s+Total\n\s+1\s+8\.00 ms\s+0\.50 ms\s+2\.00 ms\s+2\.50 ms\n\s+21\s+40\.0 ms\s+–\s+20\.0 ms\s+20\.0 ms/,
+		);
+		expect(text).toMatch(
+			/The same stages by the GPU's own timers[^\n]*\n\s+Parts and images\s+12\.0 ms\s+14\.0 ms\n\s+All stages\s+12\.0 ms/,
+		);
+		expect(text).toContain(
+			"Level 1   372×500 · Off · soft shadows, map 512 · glow off · to 500 studs · 10 draws · 1,200 triangles",
+		);
+		expect(text).toMatch(/Level 21 [^\n]*MSAA 4×[^\n]*every distance[^\n]*\n\s+adds Blur/);
 		expect(text).toMatch(/Without Sky shadows\s+30\.0 ms\s+50\.0 ms/);
 	});
 });

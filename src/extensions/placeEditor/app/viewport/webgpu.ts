@@ -39,7 +39,7 @@ import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geom
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
-import { type Probe, QueueClock, type Stage, type StageSink } from "./profile.js";
+import { type Probe, QueueClock, type Stage, type StageFrame, type StageSink } from "./profile.js";
 import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
@@ -1562,41 +1562,78 @@ export class WebGpuView implements ViewRenderer {
 	 * The GPU's time for each pass, where the browser can time passes: a pair
 	 * of stamps a pass, read back a frame or so later and summed by kind.
 	 */
-	private static readonly STAMPS = 32;
-	private timing?: { set: GPUQuerySet; resolve: GPUBuffer; read: GPUBuffer; busy: boolean };
-	private stamps: ("shadows" | "scene" | "post")[] = [];
+	private static readonly STAMPS = 128;
+	/**
+	 * The stamps' query set and resolve buffer, and buffers to read them back
+	 * in: a few, so a frame's stamps are read while the last frame's still are.
+	 */
+	private timing?: { set: GPUQuerySet; resolve: GPUBuffer; free: GPUBuffer[]; made: number };
+	private static readonly STAMP_READS = 4;
+	/**
+	 * Each stamped pass's kind, for Automatic (null: stamped only for a
+	 * profile), and its profile stage, given when the stage is cut.
+	 */
+	private stamps: ("shadows" | "scene" | "post" | null)[] = [];
+	private stampStages: (Stage | undefined)[] = [];
 	private gpuTimes: RenderStats["gpu"] = null;
-	private stamp(kind: "shadows" | "scene" | "post"): GPURenderPassTimestampWrites | undefined {
+	/** While profiling: each frame's GPU time by stage, from the stamps. */
+	private gpuSink: StageSink | null = null;
+	private stamp(
+		kind: "shadows" | "scene" | "post" | null,
+	): GPURenderPassTimestampWrites | undefined {
 		const t = this.timing;
-		if (!t || t.busy || (this.stamps.length + 1) * 2 > WebGpuView.STAMPS) return undefined;
+		if (kind === null && !this.gpuSink) return undefined;
+		if (!t || (this.stamps.length + 1) * 2 > WebGpuView.STAMPS) return undefined;
 		const at = this.stamps.length * 2;
 		this.stamps.push(kind);
 		return { querySet: t.set, beginningOfPassWriteIndex: at, endOfPassWriteIndex: at + 1 };
 	}
+	/** The passes stamped since the last cut belong to `stage`. */
+	private stampsAre(stage: Stage): void {
+		for (let i = this.stampStages.length; i < this.stamps.length; i++) this.stampStages[i] = stage;
+	}
 	private readStamps(encoder: GPUCommandEncoder): (() => void) | undefined {
 		const t = this.timing;
 		const kinds = this.stamps;
+		const stages = this.stampStages;
+		const gpuSink = this.gpuSink;
 		this.stamps = [];
+		this.stampStages = [];
 		if (!t || kinds.length === 0) return undefined;
+		let read = t.free.pop();
+		if (!read && t.made < WebGpuView.STAMP_READS) {
+			t.made++;
+			read = this.device.createBuffer({
+				size: WebGpuView.STAMPS * 8,
+				usage: BUFFER.MAP_READ | BUFFER.COPY_DST,
+			});
+		}
+		// Every buffer still being read: this frame goes untimed.
+		if (!read) return undefined;
+		const into = read;
 		const bytes = kinds.length * 16;
 		encoder.resolveQuerySet(t.set, 0, kinds.length * 2, t.resolve, 0);
-		encoder.copyBufferToBuffer(t.resolve, 0, t.read, 0, bytes);
+		encoder.copyBufferToBuffer(t.resolve, 0, into, 0, bytes);
 		return () => {
-			t.busy = true;
-			t.read.mapAsync(MAP_READ, 0, bytes).then(
+			into.mapAsync(MAP_READ, 0, bytes).then(
 				() => {
-					const ns = new BigUint64Array(t.read.getMappedRange(0, bytes));
+					const ns = new BigUint64Array(into.getMappedRange(0, bytes));
 					const sum = { shadows: 0, scene: 0, post: 0 };
+					const byStage: StageFrame = {};
 					kinds.forEach((kind, j) => {
 						const took = Number(ns[j * 2 + 1] - ns[j * 2]);
-						if (took > 0 && took < 1e9) sum[kind] += took / 1e6;
+						if (!(took > 0 && took < 1e9)) return;
+						if (kind) sum[kind] += took / 1e6;
+						const stage = stages[j];
+						if (stage) byStage[stage] = (byStage[stage] ?? 0) + took / 1e6;
 					});
-					t.read.unmap();
-					t.busy = false;
+					into.unmap();
+					t.free.push(into);
 					this.gpuTimes = sum;
+					gpuSink?.(byStage);
 				},
 				() => {
-					t.busy = false;
+					t.free.push(into);
 				},
 			);
 		};
@@ -1801,8 +1838,8 @@ export class WebGpuView implements ViewRenderer {
 					size: n * 8,
 					usage: BUFFER.QUERY_RESOLVE | BUFFER.COPY_SRC,
 				}),
-				read: this.device.createBuffer({ size: n * 8, usage: BUFFER.MAP_READ | BUFFER.COPY_DST }),
-				busy: false,
+				free: [],
+				made: 0,
 			};
 		}
 		this.context = canvas.getContext("webgpu") as GPUCanvasContext;
@@ -2862,7 +2899,9 @@ export class WebGpuView implements ViewRenderer {
 				centre,
 			);
 		if (mapsDue) encoder = this.cut(encoder, "skyMaps");
-		this.drawCascades(encoder, camera, partsMoved);
+		// While the stages are profiled, the sun's maps are drawn every frame,
+		// as when the camera moves: a still camera draws them only once.
+		this.drawCascades(encoder, camera, partsMoved || this.clock !== null);
 		// The parts moved or the light changed: the cube shows them again.
 		if (partsMoved || mapsDue) this.reflAt = null;
 		this.drawReflections(encoder, camera);
@@ -3060,6 +3099,7 @@ export class WebGpuView implements ViewRenderer {
 		}
 		pass.end();
 		if (aaOn) this.antialiasPasses(encoder, canvasView);
+		this.stampsAre(glow ? "composite" : "place");
 		const read = this.readStamps(encoder);
 		this.device.queue.submit([encoder.finish()]);
 		if (clock) {
@@ -3086,8 +3126,9 @@ export class WebGpuView implements ViewRenderer {
 	private clock: QueueClock | null = null;
 	private gpuName = "";
 
-	setProfiling(sink: StageSink | null): void {
+	setProfiling(sink: StageSink | null, gpu: StageSink | null = null): void {
 		this.clock = sink ? new QueueClock(sink) : null;
+		this.gpuSink = sink && this.timing ? gpu : null;
 	}
 
 	finished(): Promise<void> {
@@ -3104,6 +3145,7 @@ export class WebGpuView implements ViewRenderer {
 	/** A profile's empty frame: the targets cleared and resolved to the screen, nothing drawn. */
 	private drawEmpty(encoder: GPUCommandEncoder, started: number): void {
 		const pass = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
 			colorAttachments: [
 				{
 					...this.into(this.context.getCurrentTexture().createView()),
@@ -3128,14 +3170,27 @@ export class WebGpuView implements ViewRenderer {
 		this.cpuMs = performance.now() - started;
 	}
 
-	deviceFacts(): { gpu: string; timers: boolean; samples: number; half?: boolean } {
-		return { gpu: this.gpuName, timers: !!this.timing, samples: this.samples, half: this.halfOn };
+	deviceFacts(): {
+		gpu: string;
+		timers: boolean;
+		samples: number;
+		half?: boolean;
+		glowHalf?: boolean;
+	} {
+		return {
+			gpu: this.gpuName,
+			timers: !!this.timing,
+			samples: this.samples,
+			half: this.halfOn,
+			glowHalf: this.glowHalf(),
+		};
 	}
 
 	/** While profiling, ends a stage: what it encoded is submitted, and drawing goes on in a new encoder. */
 	private cut(encoder: GPUCommandEncoder, stage: Stage): GPUCommandEncoder {
 		const clock = this.clock;
 		if (!clock) return encoder;
+		this.stampsAre(stage);
 		this.device.queue.submit([encoder.finish()]);
 		clock.submitted(stage, this.device.queue.onSubmittedWorkDone());
 		return this.device.createCommandEncoder();
@@ -3191,6 +3246,7 @@ export class WebGpuView implements ViewRenderer {
 	 */
 	private drawFar(encoder: GPUCommandEncoder): boolean {
 		const pass = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
 			colorAttachments: [
 				{
 					view: this.msaa!.createView(),
@@ -3231,6 +3287,7 @@ export class WebGpuView implements ViewRenderer {
 			});
 		}
 		const pass = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
 			colorAttachments: [],
 			depthStencilAttachment: {
 				view: this.farSmall.createView(),
@@ -3313,6 +3370,7 @@ export class WebGpuView implements ViewRenderer {
 			],
 		});
 		const reduce = encoder.beginRenderPass({
+			timestampWrites: this.stamp(null),
 			colorAttachments: [
 				{
 					view: this.farTex!.createView(),
@@ -3792,6 +3850,7 @@ export class WebGpuView implements ViewRenderer {
 		): boolean => {
 			if (!pipe) return false;
 			const p = encoder.beginRenderPass({
+				timestampWrites: this.stamp(null),
 				colorAttachments: [
 					{
 						view: into,
@@ -4002,6 +4061,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		this.reflGroups.forEach(({ buffer, group }, k) => {
 			q.writeBuffer(buffer, 0, faces[k]);
 			const pass = encoder.beginRenderPass({
+				timestampWrites: this.stamp(null),
 				colorAttachments: [
 					{
 						view: this.reflCube.createView({
@@ -4032,6 +4092,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		if (!this.reflHalve) return;
 		for (const { target, group } of this.reflLevels) {
 			const pass = encoder.beginRenderPass({
+				timestampWrites: this.stamp(null),
 				colorAttachments: [{ view: target, loadOp: "clear", storeOp: "store" }],
 			});
 			pass.setPipeline(this.reflHalve);
@@ -4057,6 +4118,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const target = this.cells[1 - this.cellsRead];
 		for (let y = 0; y < SKY_CELLS[1]; y++) {
 			const pass = encoder.beginRenderPass({
+				timestampWrites: this.stamp(null),
 				colorAttachments: [
 					{
 						view: target.createView({ dimension: "3d" }),
@@ -4348,7 +4410,7 @@ fn along(pos: vec4f) -> f32 {
 				],
 			];
 			for (const [desc, pipeline, bound] of steps) {
-				const pass = encoder.beginRenderPass(desc);
+				const pass = encoder.beginRenderPass({ ...desc, timestampWrites: this.stamp(null) });
 				pass.setPipeline(pipeline);
 				pass.setBindGroup(0, bound);
 				pass.draw(3);

@@ -442,7 +442,7 @@ export function placeEditorPerformancePage(): DocPage {
 					["One frame", "One frame drawn and waited for until the GPU has finished it"],
 					[
 						"Stages",
-						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under",
+						"Each stage of the frame, the GPU waited for at the end of each: shadows, glow, the parts, post effects and the rest. Their median, and the time 95 frames in 100 come in under. Where the GPU has timers, the same stages by its own clock, which leaves out the waits; the sun's maps are drawn every frame here, as when the camera moves",
 					],
 					[
 						"Base",
@@ -454,7 +454,7 @@ export function placeEditorPerformancePage(): DocPage {
 					],
 					[
 						"Steps",
-						"The frame with the Rendering panel's steps added one at a time; each step's cost is how much slower it got",
+						"The frame with the Rendering panel's steps added one at a time, of the switches the view has on; each step's cost is how much slower it got",
 					],
 					[
 						"Resolution",
@@ -474,9 +474,12 @@ export function placeEditorPerformancePage(): DocPage {
 					],
 					[
 						"Quality levels",
-						"One frame at each level, 1 to 21, with the level's own render scale and antialiasing; the view goes back to its own level after",
+						"Each level, 1 to 21, with its own render scale and antialiasing: its frame, its stages (by the GPU's timers where it has them), and what it drew at: the canvas, antialiasing, the sun's map and reach, the glow's size, draw calls, and the switches it adds. The view goes back to its own level after",
 					],
-					["Device", "The renderer, the GPU's name, the canvas size and antialiasing"],
+					[
+						"Device",
+						"The renderer, the GPU's name, the canvas size, the level and antialiasing the view was at, and the camera, to take the next profile from the same spot",
+					],
 				],
 			},
 			{

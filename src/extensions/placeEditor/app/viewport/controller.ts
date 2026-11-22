@@ -48,6 +48,7 @@ import {
 } from "./marquee.js";
 import { loadMeshes } from "./meshes.js";
 import {
+	type LevelRow,
 	type ProfileResult,
 	type StageFrame,
 	spread,
@@ -66,7 +67,15 @@ import {
 	viewQuality,
 } from "./quality.js";
 import { startingText } from "./readout.js";
-import { changedFrom, FEATURE_GROUPS, litFor, RENDER_STEPS, upToStep } from "./renderFeatures.js";
+import {
+	changedFrom,
+	FEATURE_GROUPS,
+	FEATURES,
+	litFor,
+	RENDER_STEPS,
+	type RenderFeatures,
+	upToStep,
+} from "./renderFeatures.js";
 import { clampSpeed, SPEED_NOTCH } from "./speed.js";
 import { layersUsed, loadLayer } from "./textures.js";
 import {
@@ -1934,6 +1943,49 @@ export class ViewportController {
 	 * Draws at `level`; `reset`, with its switches in the Rendering panel.
 	 * Done once the view is drawing at it, made again where it had to be.
 	 */
+	/**
+	 * One level of the profile's quality sweep, as toLevel left the view: its
+	 * frame, its stages waited for one at a time, and what it set.
+	 */
+	private async timeLevel(n: number): Promise<LevelRow> {
+		const timed = await this.timeWaited(`Level ${n}`, 20);
+		const view = this.view!;
+		const frames: StageFrame[] = [];
+		const gpuFrames: StageFrame[] = [];
+		view.setProfiling(
+			(each) => frames.push(each),
+			(each) => gpuFrames.push(each),
+		);
+		await this.waitedFrames(20, PROFILE_BUDGET);
+		view.setProfiling(null);
+		await view.settled();
+		await new Promise((r) => setTimeout(r, 50));
+		const q = qualityLevel(n);
+		const features = this.state.render.features;
+		const below = n > 1 ? qualityLevel(n - 1).features : null;
+		const facts = view.deviceFacts();
+		const stats = view.stats();
+		return {
+			...timed,
+			level: n,
+			canvas: { width: this.canvas?.width ?? 0, height: this.canvas?.height ?? 0 },
+			antialias: antialiasInfo(view.antialias).label,
+			shadowMap: view.shadowMap,
+			reach: q.reach,
+			blobs: q.blobWidth !== null,
+			distance: q.distance,
+			glow: !features.neonGlow && !features.lavaGlow ? "off" : facts.glowHalf ? "half" : "full",
+			adds: FEATURES.filter((i) => q.features[i.key] && below && !below[i.key]).map((i) => i.label),
+			stages: stageRows(frames),
+			stageTotal: stagesTotal(frames),
+			gpu: stageRows(gpuFrames),
+			gpuTotal: stagesTotal(gpuFrames),
+			draws: stats.draws,
+			instances: stats.instances,
+			triangles: stats.triangles,
+		};
+	}
+
 	private async toLevel(level: number, reset: boolean): Promise<void> {
 		const q = qualityLevel(level);
 		this.set({ quality: { level: q.level, auto: this.auto !== null } });
@@ -2186,6 +2238,16 @@ export class ViewportController {
 		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
 		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)`;
 		const steps = RENDER_STEPS.length;
+		// The level and the camera the profile began from, for its head.
+		const startQ = this.state.quality;
+		const startedAt = `${startQ.auto ? "Automatic, " : ""}Level ${startQ.level}${
+			changedFrom(render.features, qualityLevel(startQ.level).features).length > 0
+				? ", switches changed by hand"
+				: ""
+		}`;
+		const round = (v: number) => (Math.round(v * 10) / 10).toString();
+		const eye = this.eye();
+		const camera = `eye (${eye.map(round).join(", ")}) · looking at (${this.cam.target.map(round).join(", ")}) · ${round(this.cam.dist)} studs out`;
 		// The switches turned off one at a time: those of these groups that are on.
 		const alone = WITHOUT_GROUPS.map((title) => ({
 			title,
@@ -2238,7 +2300,11 @@ export class ViewportController {
 			this.setRender(render);
 			phase("Stages");
 			const frames: StageFrame[] = [];
-			view.setProfiling((each) => frames.push(each));
+			const gpuFrames: StageFrame[] = [];
+			view.setProfiling(
+				(each) => frames.push(each),
+				(each) => gpuFrames.push(each),
+			);
 			await this.waitedFrames(60, PROFILE_BUDGET * 2);
 			view.setProfiling(null);
 			// WebGPU's last stages are timed when its queue says they are done.
@@ -2248,7 +2314,13 @@ export class ViewportController {
 			for (let n = 0; n <= steps; n++) {
 				const label = n === 0 ? "Parts, nothing else" : `+ ${RENDER_STEPS[n - 1][0]}`;
 				phase(`Step ${n} of ${steps}`);
-				this.setRender({ ...render, mode: "lit", features: upToStep(n) });
+				// Only the switches the view has on: the last step is the view as
+				// set, not every switch there is (Level 21's).
+				const upTo = upToStep(n);
+				const features = Object.fromEntries(
+					FEATURES.map((i) => [i.key, upTo[i.key] && render.features[i.key]]),
+				) as unknown as RenderFeatures;
+				this.setRender({ ...render, mode: "lit", features });
 				timedSteps.push(await this.timeWaited(label, 30));
 			}
 			this.setRender(render);
@@ -2337,7 +2409,7 @@ export class ViewportController {
 			// Quality: each level as Settings would set it, its own scale and
 			// antialiasing too, from Level 1 up, so the view is made again only
 			// where a level's samples or shadow maps change. Then back.
-			const quality: Timed[] = [];
+			const quality: LevelRow[] = [];
 			this.auto = null;
 			this.options = { ...options, antialias: undefined, renderScale: "auto" };
 			for (let n = 1; n <= TOP_LEVEL; n++) {
@@ -2345,7 +2417,7 @@ export class ViewportController {
 				const made = this.view;
 				await this.toLevel(n, true);
 				if (this.view !== made) await this.viewSettled();
-				quality.push(await this.timeWaited(`Level ${n}`, 20));
+				quality.push(await this.timeLevel(n));
 			}
 			this.options = options;
 			this.auto = auto;
@@ -2364,6 +2436,9 @@ export class ViewportController {
 					frameRate: String(options.frameRate),
 					renderScale,
 					depthPath: view.leanDepth ? (view.leanDepth() ? "lean" : "full") : "",
+					quality: startedAt,
+					antialias: antialiasInfo(view.antialias).label,
+					camera,
 					draws: stats.draws,
 					instances: stats.instances,
 					triangles: stats.triangles,
@@ -2376,6 +2451,8 @@ export class ViewportController {
 				frame,
 				stages: stageRows(frames),
 				stageTotal: stagesTotal(frames),
+				gpuStages: stageRows(gpuFrames),
+				gpuStageTotal: stagesTotal(gpuFrames),
 				stageFrames: frames.length,
 				steps: timedSteps,
 				base: baseRows,

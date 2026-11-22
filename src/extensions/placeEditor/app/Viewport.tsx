@@ -58,6 +58,8 @@ import { type HeavyMesh, shortCount } from "./viewport/heaviest.js";
 import { prepareScene } from "./viewport/prepare.js";
 import {
 	fpsText,
+	type LevelRow,
+	levelSettings,
 	msText,
 	type ProfileResult,
 	profileReport,
@@ -1082,6 +1084,39 @@ function RenderToolSwitch({
 }
 
 /** A row with a bar: a name, a time and its share of the longest. */
+/**
+ * A quality level in the profile: its frame, a bar split by its stages, and
+ * what it drew at under it. Each stage's time is on its part's hover.
+ */
+function LevelBar({ row, most }: { row: LevelRow; most: number }) {
+	const scale = Number.isFinite(row.median) && most > 0 ? Math.min(1, row.median / most) : 0;
+	// The GPU's own times where it has them: the waited ones charge a stage for waiting on the screen.
+	const stages = row.gpu.length > 0 ? row.gpu : row.stages;
+	const total = stages.reduce((n, s) => n + s.median, 0);
+	return (
+		<div className="place-prop profile-row profile-level" title={levelSettings(row)}>
+			<span className="place-prop-name">{row.label}</span>
+			<span className="profile-bar profile-stacked" aria-hidden="true">
+				{total > 0 ? (
+					stages.map((s) => (
+						<span
+							key={s.stage}
+							className={`profile-stage profile-stage-${s.stage}`}
+							style={{ width: `${(s.median / total) * scale * 100}%` }}
+							title={`${STAGE_LABELS[s.stage]}: ${msText(s.median)}`}
+						/>
+					))
+				) : (
+					<span style={{ width: `${scale * 100}%` }} />
+				)}
+			</span>
+			<span className="place-prop-value profile-time">{msText(row.median)}</span>
+			<span className="profile-second">{fpsText(row.median)}</span>
+			<span className="profile-level-facts">{levelSettings(row)}</span>
+		</div>
+	);
+}
+
 function TimeBar({
 	name,
 	hint,
@@ -1330,11 +1365,9 @@ function ProfileSection({
 										Quality levels <span>frame · rate</span>
 									</h4>
 									{profile.quality.map((r) => (
-										<TimeBar
+										<LevelBar
 											key={r.label}
-											name={r.label}
-											value={r.median}
-											second={fpsText(r.median)}
+											row={r}
 											most={Math.max(...profile.quality.map((x) => x.median))}
 										/>
 									))}
@@ -1350,7 +1383,9 @@ function ProfileSection({
 										"Canvas",
 										`${profile.facts.canvas.width}×${profile.facts.canvas.height} at ${Number(profile.facts.pixelRatio.toFixed(2))}×`,
 									],
-									["Antialiasing", `${profile.facts.samples}×`],
+									["Quality", profile.facts.quality],
+									["Antialiasing", profile.facts.antialias || `${profile.facts.samples}×`],
+									["Camera", profile.facts.camera],
 									["Clock step", msText(profile.clock)],
 								]}
 							/>

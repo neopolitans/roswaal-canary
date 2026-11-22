@@ -114,7 +114,12 @@ export interface ViewRenderer {
 	 * the GPU at the end of each stage and hands the sink its times (see
 	 * `profile.ts`). Null stops it.
 	 */
-	setProfiling(sink: StageSink | null): void;
+	/**
+	 * Each frame's stages to `sink`, each waited for; and, where the GPU has
+	 * timers, its own time for each stage to `gpu`, which the waits do not
+	 * see: a stage that waits for the screen is charged that wait.
+	 */
+	setProfiling(sink: StageSink | null, gpu?: StageSink | null): void;
 	/**
 	 * Resolves once the GPU has finished everything drawn so far: a frame's
 	 * whole cost, for a profile. WebGL2 waits there and then.
@@ -135,7 +140,14 @@ export interface ViewRenderer {
 	onRedraw?: () => void;
 	/** The GPU's name, as the browser gives it, and whether its timers are offered. */
 	/** `half`: WebGPU's shader built in half precision (see webgpu.ts's HALF); unset elsewhere. */
-	deviceFacts(): { gpu: string; timers: boolean; samples: number; half?: boolean };
+	deviceFacts(): {
+		gpu: string;
+		timers: boolean;
+		samples: number;
+		half?: boolean;
+		/** Neon's glow found at half the view's size: see ViewQuality.glowHalf. */
+		glowHalf?: boolean;
+	};
 	/**
 	 * Whether the next frame would look different though nothing else moved:
 	 * particles alive or coming, or a beam's texture scrolling, in the last frame drawn.

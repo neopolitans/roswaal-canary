@@ -465,6 +465,14 @@ export function placeEditorPerformancePage(): DocPage {
 						"One frame in each antialiasing this device draws, the view built again for each, so they compare",
 					],
 					[
+						"Shader precision",
+						"With WebGPU where the device has half precision: one frame with the colour arithmetic in half, and in full, the view built again for each",
+					],
+					[
+						"Depth path",
+						"With WebGPU: one frame with the parts' depth drawn first, and with them shaded and depth-tested in one draw, as a tile-based GPU (Apple's) wants",
+					],
+					[
 						"Quality levels",
 						"One frame at each level, 1 to 21, with the level's own render scale and antialiasing; the view goes back to its own level after",
 					],

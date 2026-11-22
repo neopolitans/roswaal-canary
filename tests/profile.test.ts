@@ -108,6 +108,7 @@ const RESULT: ProfileResult = {
 		samples: 4,
 		frameRate: "vsync",
 		renderScale: "Automatic, 75%",
+		depthPath: "lean",
 		draws: 12,
 		instances: 40,
 		triangles: 2400,
@@ -147,6 +148,14 @@ const RESULT: ProfileResult = {
 		{ label: "Off", median: 50, p95: 55 },
 		{ label: "4×", median: 80, p95: 85 },
 	],
+	precision: [
+		{ label: "Half precision", median: 18, p95: 19 },
+		{ label: "Full precision", median: 20, p95: 21 },
+	],
+	depthPath: [
+		{ label: "Full depth pre-pass", median: 30, p95: 32 },
+		{ label: "Lean, for tile GPUs", median: 20, p95: 22 },
+	],
 	quality: [
 		{ label: "Level 1", median: 8, p95: 9 },
 		{ label: "Level 21", median: 40, p95: 45 },
@@ -184,6 +193,12 @@ describe("what the profile says", () => {
 		);
 		expect(text).toMatch(
 			/Quality levels, each with its own scale and antialiasing:\n\s+Level 1\s+8\.00 ms\s+125 fps\n\s+Level 21\s+40\.0 ms\s+25 fps/,
+		);
+		expect(text).toMatch(
+			/Depth path:\n\s+Full depth pre-pass\s+30\.0 ms[^\n]*\n\s+Lean, for tile GPUs\s+20\.0 ms/,
+		);
+		expect(text).toMatch(
+			/Shader precision, the view built again for each:\n\s+Half precision\s+18\.0 ms/,
 		);
 		expect(text).toMatch(/Parts' depth only\s+not here/);
 		expect(text).toMatch(/Without Sky shadows\s+30\.0 ms\s+50\.0 ms/);

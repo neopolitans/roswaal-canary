@@ -126,6 +126,8 @@ export interface ViewportOptions {
 	renderScale?: number | "native" | "auto";
 	/** Antialiasing: see antialias.ts; unset, the quality level's. Changing it builds the view again. */
 	antialias?: AntialiasMode;
+	/** WebGPU's shader in half precision where the device can: see webgpu.ts's HALF. Unset, yes. */
+	half?: boolean;
 	/** Settings' Quality: a level, 1 to 21, or Automatic. Unset, Level 21. */
 	quality?: number | "auto";
 }
@@ -1802,7 +1804,13 @@ export class ViewportController {
 		}
 		const samples = this.antialiasMode();
 		const map = this.level().shadowMap;
-		let view: ViewRenderer = gl2 ? new WebGl2View(samples, map) : new WebGpuView(samples, map);
+		let view: ViewRenderer;
+		if (gl2) view = new WebGl2View(samples, map);
+		else {
+			const gpu = new WebGpuView(samples, map);
+			gpu.half = this.options.half ?? true;
+			view = gpu;
+		}
 		let fellBack = false;
 		try {
 			try {
@@ -2195,7 +2203,9 @@ export class ViewportController {
 			3 +
 			view.antialiasModes().length +
 			TOP_LEVEL +
-			alone.reduce((n, g) => n + g.features.length, 0);
+			alone.reduce((n, g) => n + g.features.length, 0) +
+			(view.setDepthPath ? 2 : 0) +
+			(view.deviceFacts().half ? 2 : 0);
 		// The level drawn at, and Automatic's steps, put back after the quality sweep.
 		const level = this.state.quality.level;
 		const auto = this.auto;
@@ -2264,6 +2274,20 @@ export class ViewportController {
 				if (rows.length > 0) without.push({ title: group.title, rows });
 			}
 			this.setRender(render);
+			// The depth path: the parts' depth first, then shaded once; or shaded
+			// and depth-tested in one draw, as a tile-based GPU wants.
+			const depthPath: Timed[] = [];
+			if (view.setDepthPath) {
+				for (const [path, label] of [
+					["full", "Full depth pre-pass"],
+					["lean", "Lean, for tile GPUs"],
+				] as const) {
+					phase(label);
+					view.setDepthPath(path);
+					depthPath.push(await this.timeWaited(label, 30));
+				}
+				view.setDepthPath("auto");
+			}
 			const resolution: Timed[] = [];
 			for (const scale of [1, 0.5, 0.25]) {
 				phase(`Resolution ${Math.round(scale * 100)}%`);
@@ -2290,6 +2314,23 @@ export class ViewportController {
 			}
 			this.options = options;
 			if (this.view?.antialias !== this.antialiasMode()) {
+				await this.restartView();
+				await this.viewSettled();
+			}
+			// Precision: WebGPU's shader in half, then full, where the device has half.
+			const precision: Timed[] = [];
+			if (view.deviceFacts().half) {
+				for (const [half, label] of [
+					[true, "Half precision"],
+					[false, "Full precision"],
+				] as const) {
+					phase(label);
+					this.options = { ...options, half };
+					await this.restartView();
+					await this.viewSettled();
+					precision.push(await this.timeWaited(label, 30));
+				}
+				this.options = options;
 				await this.restartView();
 				await this.viewSettled();
 			}
@@ -2322,6 +2363,7 @@ export class ViewportController {
 					samples: facts.samples,
 					frameRate: String(options.frameRate),
 					renderScale,
+					depthPath: view.leanDepth ? (view.leanDepth() ? "lean" : "full") : "",
 					draws: stats.draws,
 					instances: stats.instances,
 					triangles: stats.triangles,
@@ -2340,6 +2382,8 @@ export class ViewportController {
 				without,
 				asSet,
 				resolution,
+				depthPath,
+				precision,
 				antialias,
 				quality,
 				clock: clockStep(),

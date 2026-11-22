@@ -218,6 +218,8 @@ export interface ProfileFacts {
 	frameRate: string;
 	/** Settings' render scale, and the share of the screen's pixels across it comes to here. */
 	renderScale: string;
+	/** The depth path drawn: "full" or "lean", or "" where the renderer has one. */
+	depthPath: string;
 	draws: number;
 	instances: number;
 	triangles: number;
@@ -248,6 +250,10 @@ export interface ProfileResult {
 	resolution: Timed[];
 	/** One frame with the view built at one sample a pixel, and at four. */
 	antialias: Timed[];
+	/** One frame with each depth path, where the renderer has two: full, and lean. */
+	depthPath: Timed[];
+	/** One frame with WebGPU's shader in half precision, and in full, where the device has half. */
+	precision: Timed[];
 	/** One frame at each quality level, 1 to 21, with the level's own scale and antialiasing. */
 	quality: Timed[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
@@ -317,7 +323,7 @@ export function profileReport(result: ProfileResult): string {
 		`Renderer: ${facts.renderer} · GPU: ${facts.gpu} · GPU timers: ${facts.gpuTimers ? "yes" : "no"}`,
 	);
 	lines.push(
-		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${Number(facts.pixelRatio.toFixed(2))}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}`,
+		`Canvas: ${facts.canvas.width}×${facts.canvas.height} px (${facts.css.width}×${facts.css.height} at ${Number(facts.pixelRatio.toFixed(2))}×) · Antialiasing: ${facts.samples}× · Frame rate: ${facts.frameRate} · Render scale: ${facts.renderScale}${facts.depthPath ? ` · Depth: ${facts.depthPath}` : ""}`,
 	);
 	lines.push(
 		`Last frame: ${facts.draws.toLocaleString("en")} draw calls, ${facts.instances.toLocaleString("en")} instances, ${Math.round(facts.triangles).toLocaleString("en")} triangles, ${facts.beams} beams, ${facts.particles.toLocaleString("en")} particles`,
@@ -375,6 +381,22 @@ export function profileReport(result: ProfileResult): string {
 		lines.push("");
 		lines.push("Antialiasing, the view built again for each:");
 		for (const r of result.antialias)
+			lines.push(
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+			);
+	}
+	if (result.precision.length > 0) {
+		lines.push("");
+		lines.push("Shader precision, the view built again for each:");
+		for (const r of result.precision)
+			lines.push(
+				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
+			);
+	}
+	if (result.depthPath.length > 0) {
+		lines.push("");
+		lines.push("Depth path:");
+		for (const r of result.depthPath)
 			lines.push(
 				`  ${r.label.padEnd(24)} ${msText(r.median).padStart(9)} ${fpsText(r.median).padStart(8)}`,
 			);

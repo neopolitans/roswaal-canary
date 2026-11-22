@@ -251,9 +251,18 @@ ${OVERDRAW_WGSL}
 const SAMPLES = 4;
 
 /** The pipelines built again for one set of switches: see WebGpuView.litFor. */
-type LitKind = "solid" | "blended" | "glassBlended";
+type LitKind = "solid" | "solidWrite" | "blended" | "glassBlended";
 /** Where the material table starts in the frame's uniforms, in bytes: after `U`'s two matrices and fourteen vec4s. */
 const UNIFORM_MATERIALS = 352;
+/**
+ * Half precision: the shader's colour arithmetic (the tone curve, the
+ * lights' sums) in f16 where the device has shader-f16, which on Apple's
+ * GPUs halves the registers it takes; f32 elsewhere, the same source.
+ */
+const HALF = {
+	on: "enable f16;\nalias hf = f16;\nalias hv3 = vec3<f16>;\n",
+	off: "alias hf = f32;\nalias hv3 = vec3f;\n",
+};
 const SHADER = /* wgsl */ `
 struct U {
 	viewProj: mat4x4f, invViewProj: mat4x4f,
@@ -342,8 +351,9 @@ fn lightCell(p: vec3f) -> u32 {
 struct Lamps { diffuse: vec3f, spec: vec3f };
 fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	let b = lightTable[lightCell(p)];
-	var sum = vec3f(0.0);
-	var shine = vec3f(0.0);
+	// The sums in half precision where the shader is built so: see HALF.
+	var sum = hv3(0.0);
+	var shine = hv3(0.0);
 	for (var j = 0u; j < min(b.y, 64u); j++) {
 		let k = lightIndex[b.x + j] * 5u;
 		let a = lightData[k];
@@ -371,10 +381,11 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 			if (c <= 0.0) { continue; }
 			k2 = k2 * (1.0 - smoothstep(0.0, 1.0, atan2(length(cross(-l, d.xyz)), c) / max(d.w, 1e-3)));
 		}
-		sum = sum + col.rgb * k2;
-		shine = shine + col.rgb * k2 * pow(max(dot(n, normalize(l + v)), 0.0), gloss);
+		let lit = hv3(col.rgb * k2);
+		sum = sum + lit;
+		shine = shine + lit * hf(pow(max(dot(n, normalize(l + v)), 0.0), gloss));
 	}
-	return Lamps(sum * 1.25, shine * 1.25);
+	return Lamps(vec3f(sum) * 1.25, vec3f(shine) * 1.25);
 }
 // The Rendering panel's heatmaps: the lights p is tested against, as
 // partLights walks them; those that reach it; and those weighed by how
@@ -682,12 +693,13 @@ fn sunLight(dir: vec3f) -> vec3f {
 }
 // Stephen Hill's fit of the ACES curve, as BakingLab (MIT) has it.
 fn aces(colour: vec3f) -> vec3f {
-	let i = mat3x3f(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
-	let o = mat3x3f(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
-	let v = i * colour;
+	// In half precision where the shader is built so (hf, hv3: see HALF).
+	let i = mat3x3<hf>(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
+	let o = mat3x3<hf>(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
+	let v = i * hv3(min(colour, vec3f(60000.0)));
 	let a = v * (v + 0.0245786) - 0.000090537;
 	let b = v * (0.983729 * v + 0.4329510) + 0.238081;
-	return clamp(o * (a / b), vec3f(0.0), vec3f(1.0));
+	return vec3f(clamp(o * (a / b), hv3(0.0), hv3(1.0)));
 }
 // No lift: in Studio's captures of a dark room its blacks reach 0.
 fn display(c: vec3f) -> vec3f {
@@ -751,7 +763,7 @@ fn edgeOf(v: f32) -> f32 { return min(fract(v), 1.0 - fract(v)); }
 // runs past full, which is what glows. Transparency dims it a little.
 fn neonLevel(colour: vec3f, alpha: f32) -> vec3f {
 	let t = 1.0 - alpha;
-	return 2.74 * pow(colour, vec3f(1.0 / 2.2)) * (1.0 - 0.2 * pow(t, 1.5)) - 0.545;
+	return 2.74 * pow(colour, vec3f(1.0 / 2.2)) * (1.0 - 0.2 * t * sqrt(t)) - 0.545;
 }
 // A see-through Neon part is more opaque than its Transparency says: at 0.5
 // it draws at an opacity of 0.81, at 0.8 at 0.47, blended as the frame is.
@@ -908,7 +920,8 @@ fn surface(i: VOut) -> vec4f {
 		c = pow(clamp(neonLevel(albedo, i.alpha), vec3f(0.0), vec3f(1.0)), vec3f(2.2));
 		alpha = neonAlpha(i.alpha);
 	} else if (b.y > 2.5) {
-		let rim = pow(1.0 - abs(dot(n, v)), 2.0);
+		let edge = 1.0 - abs(dot(n, v));
+		let rim = edge * edge;
 		c = albedo * (0.6 + rim * 2.5);
 		alpha = alpha * clamp(0.15 + rim * 0.85, 0.0, 1.0);
 	} else if (has(${FEATURE_BIT.unlit}u)) {
@@ -938,7 +951,7 @@ fn surface(i: VOut) -> vec4f {
 			if (a.z > 0.5) { c = c + envSees(i.world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)}; }
 			// Reflectance, and glass's own, stronger at a glancing angle.
 			var mirror = shine;
-			if (b.y > 1.5) { mirror = max(mirror, 0.2 + 0.5 * pow(1.0 - abs(dot(n, v)), 3.0)); }
+			if (b.y > 1.5) { let edge = 1.0 - abs(dot(n, v)); mirror = max(mirror, 0.2 + 0.5 * edge * edge * edge); }
 			c = mix(c, seen, mirror);
 		}
 		if (has(${FEATURE_BIT.lava}u)) { c = c + lavaLight(pat.z) * 2.2; }
@@ -1129,14 +1142,15 @@ struct IOut {
 	o.clip = u.viewProj * vec4f(pos, 1.0);
 	o.normal = nrm;
 	o.uv = uv;
-	o.tint = tint;
+	// Its colour in linear light once a corner, not once a pixel; alpha as it is.
+	o.tint = vec4f(pow(tint.rgb, vec3f(2.2)), tint.a);
 	return o;
 }
 @fragment fn fsImage(i: IOut) -> @location(0) vec4f {
 	let t = textureSample(image, imageSampler, i.uv);
 	let edge = nearEdge(i.world);
 	let wide = fwidth(edge);
-	let albedo = pow(t.rgb, vec3f(2.2)) * pow(i.tint.rgb, vec3f(2.2));
+	let albedo = pow(t.rgb, vec3f(2.2)) * i.tint.rgb;
 	let n = normalize(i.normal);
 	let ndl = max(dot(n, u.sun.xyz), 0.0);
 	let vis = skyVisibility(i.world, n);
@@ -1233,6 +1247,23 @@ export class WebGpuView implements ViewRenderer {
 	/** The antialiasing drawn. */
 	private aaMode: AntialiasMode;
 
+	/** Whether to build the shader in half precision where it can be: see HALF. */
+	half = true;
+	/** Whether it was. */
+	private halfOn = false;
+
+	/** The place's shader, in half precision where asked and it compiles; else in full. */
+	private async shaderModule(): Promise<GPUShaderModule> {
+		const d = this.device;
+		if (this.halfOn) {
+			const module = d.createShaderModule({ code: HALF.on + SHADER });
+			const info = await module.getCompilationInfo();
+			if (!info.messages.some((m) => m.type === "error")) return module;
+			this.halfOn = false;
+		}
+		return d.createShaderModule({ code: HALF.off + SHADER });
+	}
+
 	/** The modes this renderer draws: see antialias.ts. */
 	antialiasModes(): AntialiasMode[] {
 		return antialiasModes("WebGPU", SAMPLES);
@@ -1255,6 +1286,27 @@ export class WebGpuView implements ViewRenderer {
 	private context!: GPUCanvasContext;
 	private format!: GPUTextureFormat;
 	private solid!: GPURenderPipeline;
+	private solidWrite!: GPURenderPipeline;
+	private farDepthPipe: GPURenderPipeline | null = null;
+	/** The lean path's occlusion depth, about DEPTH_COLS * 4 texels across. */
+	private farSmall: GPUTexture | null = null;
+
+	/**
+	 * The depth path. Full: the parts' depth drawn first, then each pixel
+	 * shaded once against it, which saves an immediate-mode GPU (NVIDIA,
+	 * AMD, Intel) shading what is hidden. Lean: occlusion's depth drawn
+	 * small, and the parts shaded and depth-tested in one draw, for a
+	 * tile-based GPU (Apple's), which hides what is behind on its own
+	 * before it shades, so the full pass would draw the place twice.
+	 * Automatic by the GPU's name; a profile times both.
+	 */
+	private depthPath: "auto" | "full" | "lean" = "auto";
+	setDepthPath(path: "auto" | "full" | "lean"): void {
+		this.depthPath = path;
+	}
+	leanDepth(): boolean {
+		return this.depthPath === "auto" ? /apple/i.test(this.gpuName) : this.depthPath === "lean";
+	}
 	private solidDepth!: GPURenderPipeline;
 	private lines!: GPURenderPipeline;
 	private ids!: GPURenderPipeline;
@@ -1314,7 +1366,58 @@ export class WebGpuView implements ViewRenderer {
 	/** The quality level's render distance and sun shadows. */
 	private quality: ViewQuality = FULL_QUALITY;
 	setQuality(quality: ViewQuality): void {
+		const was = this.glowHalf();
 		this.quality = quality;
+		if (this.device && this.glowHalf() !== was) this.makeGlowSource();
+	}
+
+	/** Whether the glow's source is drawn at half the view's size: see ViewQuality.glowHalf. */
+	private glowHalf(): boolean {
+		return this.quality.glowHalf && this.samples === 1;
+	}
+
+	/** The half size glow source's own depth. */
+	private glowDepth: GPUTexture | null = null;
+
+	/** The glow's source, the view's size or half it, and the blur's targets that read it. */
+	private makeGlowSource(): void {
+		const d = this.device;
+		this.glowFull?.destroy();
+		this.glowDepth?.destroy();
+		this.glowDepth = null;
+		const half = this.glowHalf();
+		const size = half
+			? [Math.max(1, Math.round(this.width / 2)), Math.max(1, Math.round(this.height / 2))]
+			: [this.width, this.height];
+		this.glowFull = d.createTexture({
+			size,
+			format: this.format,
+			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+		});
+		if (half)
+			this.glowDepth = d.createTexture({
+				size,
+				format: "depth32float",
+				usage: TEXTURE.RENDER_ATTACHMENT,
+			});
+		// The blur's groups name the source, and the composite the blur's
+		// targets: made again with it.
+		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c]) t?.destroy();
+		this.glow = undefined;
+		this.sizeGlow();
+		if (!this.frame || !this.glow) return;
+		const glow = this.glow as { a: GPUTexture; c: GPUTexture };
+		this.compositeGroup = d.createBindGroup({
+			layout: this.compositeLayout,
+			entries: [
+				{ binding: 0, resource: glow.a.createView() },
+				{ binding: 1, resource: this.sampler },
+				{ binding: 2, resource: { buffer: this.postParams[2] } },
+				{ binding: 3, resource: this.frame.createView() },
+				{ binding: 4, resource: { buffer: this.gradeBuffer } },
+				{ binding: 5, resource: glow.c.createView() },
+			],
+		});
 	}
 
 	/** The Rendering panel's mode and switches: see `RenderSettings`. */
@@ -1600,7 +1703,12 @@ export class WebGpuView implements ViewRenderer {
 	 * switch back is no wait.
 	 */
 	private litFor(bits: number): Record<LitKind, GPURenderPipeline> {
-		const generic = { solid: this.solid, blended: this.blended, glassBlended: this.glassBlended };
+		const generic = {
+			solid: this.solid,
+			solidWrite: this.solidWrite,
+			blended: this.blended,
+			glassBlended: this.glassBlended,
+		};
 		const built = this.litBuilt.get(bits);
 		if (built) return built;
 		if (built === undefined) {
@@ -1677,8 +1785,12 @@ export class WebGpuView implements ViewRenderer {
 			) || "Not given";
 		// Timestamps where the adapter has them, for the Rendering panel's GPU times.
 		const timed = adapter.features.has("timestamp-query");
+		this.halfOn = this.half && adapter.features.has("shader-f16");
+		const features: GPUFeatureName[] = [];
+		if (timed) features.push("timestamp-query");
+		if (this.halfOn) features.push("shader-f16");
 		this.device = await adapter.requestDevice(
-			timed ? { requiredFeatures: ["timestamp-query"] } : undefined,
+			features.length > 0 ? { requiredFeatures: features } : undefined,
 		);
 		if (timed) {
 			const n = WebGpuView.STAMPS;
@@ -1698,7 +1810,7 @@ export class WebGpuView implements ViewRenderer {
 		this.context.configure({ device: this.device, format: this.format, alphaMode: "opaque" });
 
 		const d = this.device;
-		const module = d.createShaderModule({ code: SHADER });
+		const module = await this.shaderModule();
 		const buffers: GPUVertexBufferLayout[] = [
 			{
 				arrayStride: 24,
@@ -1802,6 +1914,26 @@ export class WebGpuView implements ViewRenderer {
 				multisample: { count: this.samples },
 			}),
 		);
+		// The lean path's (see leanDepth): shaded and depth-tested in one draw,
+		// for a tile-based GPU that hides what is behind before it shades.
+		this.pipeline(
+			(p) => (this.solidWrite = p),
+			this.lit("solidWrite", {
+				layout: pipelineLayout,
+				vertex: { module, entryPoint: "vs", buffers },
+				fragment: { module, entryPoint: "fs", targets: [{ format: this.format }] },
+				primitive: { topology: "triangle-list", cullMode: "back" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
+				multisample: { count: this.samples },
+			}),
+		);
+		// The lean path's occlusion depth: small, one sample, no colour.
+		this.pipeline((p) => (this.farDepthPipe = p), {
+			layout: pipelineLayout,
+			vertex: { module, entryPoint: "vs", buffers },
+			primitive: { topology: "triangle-list", cullMode: "back" },
+			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
+		});
 		// The see-through parts: blended over what is behind them, hidden by
 		// what is in front, and hiding nothing themselves.
 		this.pipeline(
@@ -2436,11 +2568,6 @@ export class WebGpuView implements ViewRenderer {
 			format: this.format,
 			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
 		});
-		this.glowFull = d.createTexture({
-			size,
-			format: this.format,
-			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
-		});
 		this.frameAcross = d.createTexture({
 			size,
 			format: this.format,
@@ -2472,18 +2599,7 @@ export class WebGpuView implements ViewRenderer {
 			format: "depth32float",
 			usage: TEXTURE.RENDER_ATTACHMENT,
 		});
-		this.sizeGlow();
-		this.compositeGroup = d.createBindGroup({
-			layout: this.compositeLayout,
-			entries: [
-				{ binding: 0, resource: this.glow!.a.createView() },
-				{ binding: 1, resource: this.sampler },
-				{ binding: 2, resource: { buffer: this.postParams[2] } },
-				{ binding: 3, resource: this.frame.createView() },
-				{ binding: 4, resource: { buffer: this.gradeBuffer } },
-				{ binding: 5, resource: this.glow!.c.createView() },
-			],
-		});
+		this.makeGlowSource();
 	}
 
 	/** The glow's targets, half the view's size, and what reads them. */
@@ -2556,7 +2672,7 @@ export class WebGpuView implements ViewRenderer {
 				},
 			],
 			depthStencilAttachment: {
-				view: this.depth!.createView(),
+				view: (this.glowDepth ?? this.depth!).createView(),
 				depthClearValue: 0,
 				depthLoadOp: "clear",
 				depthStoreOp: "discard",
@@ -2756,7 +2872,8 @@ export class WebGpuView implements ViewRenderer {
 		const passes = passesOf(this.render.features);
 		// Made in every view, so occlusion works in each; only the picture's
 		// and the wireframe's passes go on from its depth.
-		const early = passes.occlusion;
+		const lean = this.leanDepth();
+		const early = passes.occlusion && !lean;
 		const load = early && mode !== "overdraw" && mode !== "density";
 		const canvasView = this.context.getCurrentTexture().createView();
 		// Antialiasing by a pass over the frame: everything is drawn into its
@@ -2796,8 +2913,9 @@ export class WebGpuView implements ViewRenderer {
 			encoder = this.cut(encoder, "glowSources");
 		}
 		// After the glow, which clears the same depth for its own pass.
-		const readBack = early && this.drawFar(encoder);
-		if (early) encoder = this.cut(encoder, "occlusion");
+		const readBack =
+			passes.occlusion && (lean ? this.drawFarSmall(encoder) : this.drawFar(encoder));
+		if (passes.occlusion) encoder = this.cut(encoder, "occlusion");
 		let pass = encoder.beginRenderPass({
 			timestampWrites: this.stamp("scene"),
 			colorAttachments: [
@@ -2845,12 +2963,13 @@ export class WebGpuView implements ViewRenderer {
 			pass.setPipeline(this.solidDepth);
 			this.solids(pass);
 		} else {
-			// The solid parts' depth, unless occlusion's pass has drawn it.
-			if (!load) {
+			// The solid parts' depth, unless occlusion's pass has drawn it, or
+			// the lean path shades and tests depth in one draw.
+			if (!load && !lean) {
 				pass.setPipeline(this.solidDepth);
 				this.solids(pass);
 			}
-			pass.setPipeline(lit.solid);
+			pass.setPipeline(lean ? lit.solidWrite : lit.solid);
 			this.solids(pass);
 			this.count(this.draws);
 			if (images) this.drawImages(pass, "solid", camera.eye);
@@ -3008,8 +3127,8 @@ export class WebGpuView implements ViewRenderer {
 		this.cpuMs = performance.now() - started;
 	}
 
-	deviceFacts(): { gpu: string; timers: boolean; samples: number } {
-		return { gpu: this.gpuName, timers: !!this.timing, samples: this.samples };
+	deviceFacts(): { gpu: string; timers: boolean; samples: number; half?: boolean } {
+		return { gpu: this.gpuName, timers: !!this.timing, samples: this.samples, half: this.halfOn };
 	}
 
 	/** While profiling, ends a stage: what it encoded is submitted, and drawing goes on in a new encoder. */
@@ -3055,8 +3174,6 @@ export class WebGpuView implements ViewRenderer {
 
 	// -- occlusion: the solid parts' depth, small, read back a frame late ----------
 
-	private farPipe?: GPURenderPipeline;
-	private farLayout?: GPUBindGroupLayout;
 	private farTex?: GPUTexture;
 	private farUniform?: GPUBuffer;
 	private farRead?: GPUBuffer;
@@ -3072,7 +3189,6 @@ export class WebGpuView implements ViewRenderer {
 	 * goes on from this depth. Returns whether the image is to be read back.
 	 */
 	private drawFar(encoder: GPUCommandEncoder): boolean {
-		const d = this.device;
 		const pass = encoder.beginRenderPass({
 			colorAttachments: [
 				{
@@ -3093,28 +3209,79 @@ export class WebGpuView implements ViewRenderer {
 		pass.setPipeline(this.solidDepth);
 		this.solids(pass);
 		pass.end();
+		return this.reduceFar(encoder, this.depth!, this.width, this.height, this.samples);
+	}
+
+	/**
+	 * The lean path's occlusion depth: the solid parts into a small target of
+	 * their own, one sample, no colour, then reduced as the full one is.
+	 */
+	private drawFarSmall(encoder: GPUCommandEncoder): boolean {
+		if (!this.farDepthPipe) return false;
+		const { cols } = depthCells(this.width, this.height);
+		const w = Math.min(this.width, cols * 4);
+		const h = Math.max(1, Math.round((w * this.height) / this.width));
+		if (!this.farSmall || this.farSmall.width !== w || this.farSmall.height !== h) {
+			this.farSmall?.destroy();
+			this.farSmall = this.device.createTexture({
+				size: [w, h],
+				format: "depth32float",
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
+		}
+		const pass = encoder.beginRenderPass({
+			colorAttachments: [],
+			depthStencilAttachment: {
+				view: this.farSmall.createView(),
+				depthClearValue: 0,
+				depthLoadOp: "clear",
+				depthStoreOp: "store",
+			},
+		});
+		pass.setBindGroup(0, this.bind);
+		pass.setPipeline(this.farDepthPipe);
+		this.solids(pass);
+		pass.end();
+		return this.reduceFar(encoder, this.farSmall, w, h, 1);
+	}
+
+	/** The far reduction's pipelines, by samples a pixel of the depth it reads. */
+	private farPipes = new Map<number, { pipe: GPURenderPipeline; layout: GPUBindGroupLayout }>();
+
+	/** A depth texture reduced into occlusion's image, and copied out to read back. */
+	private reduceFar(
+		encoder: GPUCommandEncoder,
+		depth: GPUTexture,
+		width: number,
+		height: number,
+		samples: number,
+	): boolean {
+		const d = this.device;
 		if (!this.cullView) return false;
 		const { cols, rows } = depthCells(this.width, this.height);
-		if (!this.farPipe || !this.farLayout) {
-			const module = d.createShaderModule({ code: farShader(this.samples) });
-			this.farLayout = d.createBindGroupLayout({
+		let far = this.farPipes.get(samples);
+		if (!far) {
+			const module = d.createShaderModule({ code: farShader(samples) });
+			const layout = d.createBindGroupLayout({
 				entries: [
 					{
 						binding: 0,
 						visibility: STAGE.FRAGMENT,
-						texture: { sampleType: "depth", multisampled: this.samples > 1 },
+						texture: { sampleType: "depth", multisampled: samples > 1 },
 					},
 					{ binding: 1, visibility: STAGE.FRAGMENT, buffer: {} },
 				],
 			});
-			this.farPipe = d.createRenderPipeline({
-				layout: d.createPipelineLayout({ bindGroupLayouts: [this.farLayout] }),
+			const pipe = d.createRenderPipeline({
+				layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
 				vertex: { module, entryPoint: "vsFar" },
 				fragment: { module, entryPoint: "fsFar", targets: [{ format: "r32float" }] },
 				primitive: { topology: "triangle-list" },
 			});
-			this.farUniform = d.createBuffer({ size: 96, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+			far = { pipe, layout };
+			this.farPipes.set(samples, far);
 		}
+		this.farUniform ??= d.createBuffer({ size: 96, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
 		if (this.farCells.cols !== cols || this.farCells.rows !== rows) {
 			this.farTex?.destroy();
 			if (!this.farBusy) this.farRead?.destroy();
@@ -3135,12 +3302,12 @@ export class WebGpuView implements ViewRenderer {
 		const u = new Float32Array(24);
 		u.set(invert(vp), 0);
 		u.set([eye[0], eye[1], eye[2], 0], 16);
-		u.set([this.width, this.height, cols, rows], 20);
+		u.set([width, height, cols, rows], 20);
 		d.queue.writeBuffer(this.farUniform!, 0, u);
 		const group = d.createBindGroup({
-			layout: this.farLayout,
+			layout: far.layout,
 			entries: [
-				{ binding: 0, resource: this.depth!.createView() },
+				{ binding: 0, resource: depth.createView() },
 				{ binding: 1, resource: { buffer: this.farUniform! } },
 			],
 		});
@@ -3154,7 +3321,7 @@ export class WebGpuView implements ViewRenderer {
 				},
 			],
 		});
-		reduce.setPipeline(this.farPipe);
+		reduce.setPipeline(far.pipe);
 		reduce.setBindGroup(0, group);
 		reduce.draw(3);
 		reduce.end();

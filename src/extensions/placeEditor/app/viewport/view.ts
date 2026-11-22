@@ -98,6 +98,13 @@ export interface ViewRenderer {
 	setPostEffects(on: boolean): void;
 	/** The quality level's render distance and sun shadows: see quality.ts. */
 	setQuality(quality: ViewQuality): void;
+	/**
+	 * The depth path, where the renderer has two: the parts' depth drawn
+	 * first, or (lean) shaded and depth-tested in one draw, for a tile-based
+	 * GPU. Automatic by the GPU; see WebGpuView.depthPath.
+	 */
+	setDepthPath?(path: "auto" | "full" | "lean"): void;
+	leanDepth?(): boolean;
 	/** How the place is drawn, from the Rendering panel: the renderer's alone, never the place's. */
 	setRender(render: RenderSettings): void;
 	/** What the last frame cost, for the Rendering panel. */
@@ -127,7 +134,8 @@ export interface ViewRenderer {
 	/** Set by the view's owner: asked when something the renderer waited for is ready to draw. */
 	onRedraw?: () => void;
 	/** The GPU's name, as the browser gives it, and whether its timers are offered. */
-	deviceFacts(): { gpu: string; timers: boolean; samples: number };
+	/** `half`: WebGPU's shader built in half precision (see webgpu.ts's HALF); unset elsewhere. */
+	deviceFacts(): { gpu: string; timers: boolean; samples: number; half?: boolean };
 	/**
 	 * Whether the next frame would look different though nothing else moved:
 	 * particles alive or coming, or a beam's texture scrolling, in the last frame drawn.
@@ -680,8 +688,19 @@ export interface ViewQuality {
 	distance: number | null;
 	reach: number;
 	blobWidth: number | null;
+	/**
+	 * Neon's glow found at half the view's size, where it is drawn at one
+	 * sample a pixel: its blur is half size already, and only a sliver of
+	 * Neon through a seam glows less.
+	 */
+	glowHalf: boolean;
 }
-export const FULL_QUALITY: ViewQuality = { distance: null, reach: 1024, blobWidth: null };
+export const FULL_QUALITY: ViewQuality = {
+	distance: null,
+	reach: 1024,
+	blobWidth: null,
+	glowHalf: false,
+};
 
 /**
  * Scene reflections: the place round the camera in a cube, PROBE_SIZE texels

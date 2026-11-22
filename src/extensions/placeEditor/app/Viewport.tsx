@@ -1292,6 +1292,38 @@ function ProfileSection({
 									))}
 								</>
 							)}
+							{profile.precision.length > 0 && (
+								<>
+									<h4 className="profile-head">
+										Shader precision <span>frame · rate</span>
+									</h4>
+									{profile.precision.map((r) => (
+										<TimeBar
+											key={r.label}
+											name={r.label}
+											value={r.median}
+											second={fpsText(r.median)}
+											most={Math.max(...profile.precision.map((x) => x.median))}
+										/>
+									))}
+								</>
+							)}
+							{profile.depthPath.length > 0 && (
+								<>
+									<h4 className="profile-head">
+										Depth path <span>frame · rate</span>
+									</h4>
+									{profile.depthPath.map((r) => (
+										<TimeBar
+											key={r.label}
+											name={r.label}
+											value={r.median}
+											second={fpsText(r.median)}
+											most={Math.max(...profile.depthPath.map((x) => x.median))}
+										/>
+									))}
+								</>
+							)}
 							{profile.quality.length > 0 && (
 								<>
 									<h4 className="profile-head">

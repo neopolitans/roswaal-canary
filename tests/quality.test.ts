@@ -190,6 +190,7 @@ describe("a level's sun shadows", () => {
 			distance: 1550,
 			reach: 128,
 			blobWidth: 3,
+			glowHalf: true,
 		});
 		expect(block).toHaveLength(CASCADE_BLOCK);
 		expect([...block.subarray(n * 16, n * 16 + n)]).toEqual([8, 32, 128]);

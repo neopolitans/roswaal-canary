@@ -9,6 +9,24 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.12",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.9.0: lighter work for Apple's GPUs, a half size glow at the lower levels, and half precision where the device has it.",
+		added: [
+			"**The profile's Depth path rows**: one frame with the parts' depth drawn first, and one with them shaded and depth-tested in one draw.",
+			"**The profile's Shader precision rows**, where the device has half precision.",
+		],
+		changed: [
+			"**On Apple's GPUs the parts are shaded and depth-tested in one draw**, and occlusion's depth is drawn small: a tile-based GPU hides what is behind before it shades. Other GPUs draw the parts' depth first, as before.",
+			"**Neon's glow is found at half the view's size at Quality Levels 6 to 12**, where it is drawn at one sample a pixel.",
+			"**The colour arithmetic runs in half precision with WebGPU where the device has it**: the tone curve and the lights' sums. The picture is the same.",
+			"**A few powers in the shaders are multiplications**, and an image's tint is worked out once a corner rather than once a pixel.",
+			"**The Place Editor is 0.9.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.11",
 		date: "2026-11-22",
 		headline:

@@ -159,7 +159,7 @@ const PATTERNS = `
 // Neon as measured from Studio's captures, as WebGpuView's neonLevel and neonAlpha.
 vec3 neonLevel(vec3 colour, float alpha) {
 	float t = 1.0 - alpha;
-	return 2.74 * pow(colour, vec3(1.0 / 2.2)) * (1.0 - 0.2 * pow(t, 1.5)) - 0.545;
+	return 2.74 * pow(colour, vec3(1.0 / 2.2)) * (1.0 - 0.2 * t * sqrt(t)) - 0.545;
 }
 float neonAlpha(float alpha) {
 	float t = 1.0 - alpha;
@@ -589,7 +589,8 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		c = pow(clamp(neonLevel(albedo, alpha), 0.0, 1.0), vec3(2.2));
 		alpha = neonAlpha(alpha);
 	} else if (b.y > 2.5) {
-		float rim = pow(1.0 - abs(dot(n, v)), 2.0);
+		float edge = 1.0 - abs(dot(n, v));
+		float rim = edge * edge;
 		c = albedo * (0.6 + rim * 2.5);
 		alpha *= clamp(0.15 + rim * 0.85, 0.0, 1.0);
 	} else if (has(${FEATURE_BIT.unlit})) {
@@ -618,7 +619,10 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 			// A metal shows what is round it, blurred, in its own colour.
 			if (a.z > 0.5) c += envSees(world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)};
 			float mirror = shine;
-			if (b.y > 1.5) mirror = max(mirror, 0.2 + 0.5 * pow(1.0 - abs(dot(n, v)), 3.0));
+			if (b.y > 1.5) {
+				float edge = 1.0 - abs(dot(n, v));
+				mirror = max(mirror, 0.2 + 0.5 * edge * edge * edge);
+			}
 			c = mix(c, seen, mirror);
 		}
 		if (has(${FEATURE_BIT.lava})) c += lavaLight(pat.z) * 2.2;

@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.8.0",
+	version: "0.9.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.9.0",
+			roswaal: "1.1.0-canary.12",
+			date: "2026-11-22",
+			text: "Lighter work for Apple's GPUs: the parts shaded and depth-tested in one draw. Neon's glow at half size at Levels 6 to 12, half precision colour arithmetic where the device has it, and the profile's Depth path and Shader precision rows.",
+		},
 		{
 			version: "0.8.0",
 			roswaal: "1.1.0-canary.11",

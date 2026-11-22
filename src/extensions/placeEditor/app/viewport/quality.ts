@@ -110,7 +110,12 @@ export function qualityLevel(level: number): QualityLevel {
 
 /** What the view itself is told of a level: see ViewRenderer.setQuality. */
 export function viewQuality(q: QualityLevel): ViewQuality {
-	return { distance: q.distance, reach: q.reach, blobWidth: q.blobWidth };
+	return {
+		distance: q.distance,
+		reach: q.reach,
+		blobWidth: q.blobWidth,
+		glowHalf: q.level <= 12,
+	};
 }
 
 /** The Rendering panel's preset id for a level, and back. */

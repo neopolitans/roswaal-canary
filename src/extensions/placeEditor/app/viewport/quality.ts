@@ -88,7 +88,10 @@ function makeLevel(level: number): QualityLevel {
 		level,
 		distance: stepped(DISTANCE, level),
 		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : level <= 17 ? 1 : "native",
-		antialias: level >= 18 ? "msaa4" : level >= 13 ? "smaa" : level >= 10 ? "fxaa" : "off",
+		// No level multisamples: at the screen's own pixels MSAA 4× took an iPad
+		// Mini from 15 ms of GPU a frame to 62, one draw or two (canary.16), for
+		// little to see over SMAA. It is the Antialiasing setting's to choose.
+		antialias: level >= 13 ? "smaa" : level >= 10 ? "fxaa" : "off",
 		reach: stepped(REACH, level),
 		shadowMap: level <= 9 ? 512 : level <= 12 ? 1024 : 2048,
 		blobWidth: level <= 9 ? 3 : null,

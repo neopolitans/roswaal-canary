@@ -137,11 +137,12 @@ const BUFFER = {
 	STORAGE: 0x80,
 	QUERY_RESOLVE: 0x200,
 } as const;
-const STAGE = { VERTEX: 0x1, FRAGMENT: 0x2 } as const;
+const STAGE = { VERTEX: 0x1, FRAGMENT: 0x2, COMPUTE: 0x4 } as const;
 const TEXTURE = {
 	COPY_SRC: 0x1,
 	COPY_DST: 0x2,
 	TEXTURE_BINDING: 0x4,
+	STORAGE_BINDING: 0x8,
 	RENDER_ATTACHMENT: 0x10,
 } as const;
 const MAP_READ = 0x1;
@@ -4489,6 +4490,8 @@ struct VIn { @location(0) pos: vec3f, @location(2) c0: vec3f, @location(3) c1: v
 		first: GPUBindGroup[];
 		/** Passes 2, 3 and 4: scratch 0 into 1, 1 into 0, 0 into the layer. */
 		rest: [GPUBindGroup, GPUBindGroup, GPUBindGroup];
+		/** Scratch 1 into the layer as it is: the compute version's last step. */
+		copy: GPUBindGroup;
 	};
 
 	/**
@@ -4564,7 +4567,7 @@ fn along(pos: vec4f) -> f32 {
 			d.createTexture({
 				size: [SKY_MAP, SKY_MAP],
 				format: "r32float",
-				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING | TEXTURE.STORAGE_BINDING,
 			}),
 		) as [GPUTexture, GPUTexture];
 		// SKY_OPEN studs across, as near maps' texels: see nearSkyInto.
@@ -4609,13 +4612,175 @@ fn along(pos: vec4f) -> f32 {
 				group(idle, scratch[1], passes[1]),
 				group(idle, scratch[0], passes[2]),
 			],
+			copy: group(idle, scratch[1], uniform([0, 1, 0, 1])),
 		};
+		// The four passes until it is built, and where it cannot be.
+		this.makeSkyOpenCompute(r).catch(() => {
+			this.skyOpenCompute = null;
+		});
+	}
+
+	/**
+	 * The near maps opened in compute, where the device can: the farthest
+	 * depth over a square of texels, then the nearest over a square of that,
+	 * each square a tile in workgroup memory, then copied into the map. The
+	 * same as the four passes (a square is its two strokes, the map's edge
+	 * clamped along each), in one compute pass and one render pass a map
+	 * rather than four render passes, each a full map in and out of memory:
+	 * on an iPad, 12-14 ms of a near map redraw's 20 (canary.16).
+	 */
+	private skyOpenCompute: {
+		dilate: GPUComputePipeline;
+		erode: GPUComputePipeline;
+		dilateGroups: GPUBindGroup[];
+		erodeGroup: GPUBindGroup;
+		copyGroup: GPUBindGroup;
+	} | null = null;
+
+	private async makeSkyOpenCompute(r: number): Promise<void> {
+		const o = this.skyOpen;
+		if (!o) return;
+		const d = this.device;
+		const tile = 16;
+		const wide = tile + 2 * r;
+		const entry = (name: string, load: string, op: string) => /* wgsl */ `
+@compute @workgroup_size(${tile}, ${tile}) fn ${name}(
+	@builtin(workgroup_id) wg: vec3u,
+	@builtin(local_invocation_id) lid: vec3u,
+	@builtin(local_invocation_index) li: u32,
+) {
+	let origin = vec2i(wg.xy) * ${tile};
+	for (var i = li; i < ${wide * wide}u; i += ${tile * tile}u) {
+		let c = clamp(origin - ${r} + vec2i(i32(i % ${wide}u), i32(i / ${wide}u)), vec2i(0), vec2i(${SKY_MAP - 1}));
+		square[i] = ${load};
+	}
+	workgroupBarrier();
+	for (var i = li; i < ${tile * wide}u; i += ${tile * tile}u) {
+		let x = i % ${tile}u;
+		let y = i / ${tile}u;
+		var m = square[y * ${wide}u + x];
+		for (var j = 1u; j <= ${2 * r}u; j++) { m = ${op}(m, square[y * ${wide}u + x + j]); }
+		rows[y * ${tile}u + x] = m;
+	}
+	workgroupBarrier();
+	var m = rows[lid.y * ${tile}u + lid.x];
+	for (var j = 1u; j <= ${2 * r}u; j++) { m = ${op}(m, rows[(lid.y + j) * ${tile}u + lid.x]); }
+	textureStore(dst, origin + vec2i(lid.xy), vec4f(m, 0.0, 0.0, 1.0));
+}`;
+		const module = d.createShaderModule({
+			code: /* wgsl */ `
+@group(0) @binding(0) var srcDepth: texture_depth_2d_array;
+@group(0) @binding(1) var srcFloat: texture_2d<f32>;
+@group(0) @binding(2) var dst: texture_storage_2d<r32float, write>;
+var<workgroup> square: array<f32, ${wide * wide}>;
+var<workgroup> rows: array<f32, ${tile * wide}>;
+${entry("csDilate", "textureLoad(srcDepth, c, 0, 0)", "max")}
+${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
+`,
+		});
+		const store = {
+			binding: 2,
+			visibility: STAGE.COMPUTE,
+			storageTexture: { access: "write-only" as const, format: "r32float" as const },
+		};
+		const dilateLayout = d.createBindGroupLayout({
+			entries: [
+				{
+					binding: 0,
+					visibility: STAGE.COMPUTE,
+					texture: { sampleType: "depth", viewDimension: "2d-array" },
+				},
+				store,
+			],
+		});
+		const erodeLayout = d.createBindGroupLayout({
+			entries: [
+				{ binding: 1, visibility: STAGE.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+				store,
+			],
+		});
+		const [dilate, erode] = await Promise.all([
+			d.createComputePipelineAsync({
+				layout: d.createPipelineLayout({ bindGroupLayouts: [dilateLayout] }),
+				compute: { module, entryPoint: "csDilate" },
+			}),
+			d.createComputePipelineAsync({
+				layout: d.createPipelineLayout({ bindGroupLayouts: [erodeLayout] }),
+				compute: { module, entryPoint: "csErode" },
+			}),
+		]);
+		const [s0, s1] = o.scratch;
+		this.skyOpenCompute = {
+			dilate,
+			erode,
+			dilateGroups: Array.from({ length: SKY_VIEWS }, (_, k) =>
+				d.createBindGroup({
+					layout: dilateLayout,
+					entries: [
+						{
+							binding: 0,
+							resource: this.skyMaps.createView({
+								dimension: "2d-array",
+								baseArrayLayer: SKY_NEAR_LAYER + k,
+								arrayLayerCount: 1,
+							}),
+						},
+						{ binding: 2, resource: s0.createView() },
+					],
+				}),
+			),
+			erodeGroup: d.createBindGroup({
+				layout: erodeLayout,
+				entries: [
+					{ binding: 1, resource: s0.createView() },
+					{ binding: 2, resource: s1.createView() },
+				],
+			}),
+			copyGroup: o.copy,
+		};
+		// The near maps opened before it was ready: opened again with it.
+		this.skyDirty = true;
+		this.onRedraw?.();
 	}
 
 	/** Opens the near maps just drawn: see makeSkyOpen. */
 	private openNearMaps(encoder: GPUCommandEncoder): void {
 		const o = this.skyOpen;
 		if (!o) return;
+		const cs = this.skyOpenCompute;
+		if (cs) {
+			const groups = SKY_MAP / 16;
+			for (let k = 0; k < SKY_VIEWS; k++) {
+				const pass = encoder.beginComputePass({
+					timestampWrites: this.stamp(null) as GPUComputePassTimestampWrites | undefined,
+				});
+				pass.setPipeline(cs.dilate);
+				pass.setBindGroup(0, cs.dilateGroups[k]);
+				pass.dispatchWorkgroups(groups, groups);
+				pass.setPipeline(cs.erode);
+				pass.setBindGroup(0, cs.erodeGroup);
+				pass.dispatchWorkgroups(groups, groups);
+				pass.end();
+				const copy = encoder.beginRenderPass({
+					timestampWrites: this.stamp(null),
+					colorAttachments: [],
+					depthStencilAttachment: {
+						view: this.skyMaps.createView({
+							dimension: "2d",
+							baseArrayLayer: SKY_NEAR_LAYER + k,
+							arrayLayerCount: 1,
+						}),
+						depthLoadOp: "load",
+						depthStoreOp: "store",
+					},
+				});
+				copy.setPipeline(o.toDepth);
+				copy.setBindGroup(0, cs.copyGroup);
+				copy.draw(3);
+				copy.end();
+			}
+			return;
+		}
 		const toScratch = (k: 0 | 1) => ({
 			colorAttachments: [
 				{ view: o.scratch[k].createView(), loadOp: "clear" as const, storeOp: "store" as const },

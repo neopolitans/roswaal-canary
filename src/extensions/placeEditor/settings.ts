@@ -151,7 +151,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "antialiasing",
 				title: "Antialiasing",
-				help: "Smooths parts' edges. FXAA and SMAA are a pass over the finished frame, cheap on a tablet; MSAA draws 2, 4 or 8 samples a pixel, as the renderer allows; Still-frame TAA averages 16 frames a fraction of a pixel apart once the view is still. Automatic is the quality level's: off below Level 10, FXAA to 12, SMAA to 17, MSAA 4× from 18. The view is made again when it changes.",
+				help: "Smooths parts' edges. FXAA and SMAA are a pass over the finished frame, cheap on a tablet; MSAA draws 2, 4 or 8 samples a pixel, as the renderer allows; Still-frame TAA averages 16 frames a fraction of a pixel apart once the view is still. Automatic is the quality level's: off below Level 10, FXAA to 12, then SMAA; no level multisamples, so MSAA is chosen here. The view is made again when it changes.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_ANTIALIAS,

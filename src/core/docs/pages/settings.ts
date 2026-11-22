@@ -273,7 +273,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Antialiasing",
-						"Smooths parts' edges. **Automatic**, the default, is the quality level's: off below Level 10, FXAA to 12, SMAA to 17, MSAA 4× from 18. Or **Off**; **FXAA** or **SMAA**, a pass over the finished frame, cheap on a tablet; **MSAA 2×**, **4×** or **8×**, samples a pixel, as far as the renderer goes (WebGPU has 4× only); or **Still-frame TAA**, which averages 16 frames a fraction of a pixel apart once the view is still. The Rendering panel has it too. The view is made again when it changes.",
+						"Smooths parts' edges. **Automatic**, the default, is the quality level's: off below Level 10, FXAA to 12, then SMAA; no level multisamples, so MSAA is chosen here. Or **Off**; **FXAA** or **SMAA**, a pass over the finished frame, cheap on a tablet; **MSAA 2×**, **4×** or **8×**, samples a pixel, as far as the renderer goes (WebGPU has 4× only); or **Still-frame TAA**, which averages 16 frames a fraction of a pixel apart once the view is still. The Rendering panel has it too. The view is made again when it changes.",
 					],
 					[
 						"Selection outline",

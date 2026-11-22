@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.17",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.13.0: no quality level multisamples, and the near sky maps' thin parts are taken out in compute.",
+		changed: [
+			"**No quality level turns on MSAA**: SMAA from Level 13 to 21. MSAA is chosen in Settings' Antialiasing.",
+			"**The near sky maps' thin parts are taken out in one compute pass a map**, rather than four render passes. The picture is the same.",
+			"**The Place Editor is 0.13.0.**",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.16",
 		date: "2026-11-22",
 		headline:

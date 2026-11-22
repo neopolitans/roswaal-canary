@@ -284,7 +284,7 @@ export function placeEditorRenderingPage(): DocPage {
 					["13–16", "Parts to 2,200–6,000 studs, SMAA, shadows reaching further"],
 					[
 						"17–21",
-						"Every part, far shadows, soft edges, sky and scene reflections, blur, and from 18 MSAA 4× at the screen's native resolution; 21 is As Studio",
+						"Every part, far shadows, soft edges, sky and scene reflections, blur; from 18 the screen's native resolution; 21 is As Studio. No level turns on MSAA: Settings' Antialiasing does",
 					],
 				],
 			},

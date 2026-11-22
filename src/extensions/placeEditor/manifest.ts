@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.12.0",
+	version: "0.13.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -48,6 +48,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.13.0",
+			roswaal: "1.1.0-canary.17",
+			date: "2026-11-22",
+			text: "No quality level multisamples: SMAA from Level 13 to 21, MSAA in Settings. The near sky maps' thin parts are taken out in compute.",
+		},
 		{
 			version: "0.12.0",
 			roswaal: "1.1.0-canary.16",

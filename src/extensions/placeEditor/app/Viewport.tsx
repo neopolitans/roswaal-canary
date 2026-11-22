@@ -22,6 +22,7 @@ import { Icon, type IconName } from "../../../app/icons.jsx";
 import { Ident, SectionHead, useFold } from "../../../app/PanelParts.jsx";
 import { useWorkspaceControls } from "../../../app/Workspace.jsx";
 import { errorMessage } from "../../../core/errorMessage.js";
+import { startBenchmark } from "../benchmarkEvent.js";
 import {
 	antialiasSetting,
 	VIEWPORT_ANTIALIAS,
@@ -1202,6 +1203,27 @@ function ProfileSection({
 							{profiling
 								? `${profiling.phase} · ${Math.round((profiling.done / profiling.of) * 100)}%`
 								: "About a minute. Keep the view still."}
+						</span>
+					</div>
+					<div className="profile-run">
+						<button
+							type="button"
+							className="tb"
+							disabled={profiling !== null}
+							onClick={() => startBenchmark("current")}
+						>
+							Benchmark
+						</button>
+						<button
+							type="button"
+							className="tb"
+							disabled={profiling !== null}
+							onClick={() => startBenchmark("sweep")}
+						>
+							Full sweep
+						</button>
+						<span className="profile-progress">
+							Roswaal's own test scenes, the editor hidden. Esc stops.
 						</span>
 					</div>
 					{profiling && (

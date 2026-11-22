@@ -263,6 +263,10 @@ export interface Timed {
 	 * waited time can run to the next screen refresh (Safari's often does).
 	 */
 	gpuMs?: number;
+	/** The page's own work for the frame, where the renderer times it: the draw call's time. */
+	cpuMs?: number;
+	/** Of that, effects simulated and sent, and parts culled: see RenderStats.cpuSteps. */
+	cpuSteps?: { effects: number; culling: number };
 }
 
 /** A row's GPU time as a column, or nothing where the GPU has no timers. */
@@ -486,6 +490,12 @@ export function profileReport(result: ProfileResult): string {
 		`One frame, waited for: ${msText(result.frame.median)}, slow frames ${msText(result.frame.p95)}`,
 	);
 	for (const line of profileVerdict(result)) lines.push(line);
+	if (result.frame.cpuMs !== undefined) {
+		const steps = result.frame.cpuSteps;
+		lines.push(
+			`The page's own work a frame: ${msText(result.frame.cpuMs)}${steps ? ` (effects ${msText(steps.effects)}, culling ${msText(steps.culling)}, the rest ${msText(Math.max(0, result.frame.cpuMs - steps.effects - steps.culling))})` : ""}`,
+		);
+	}
 	if (result.frame.gpuMs !== undefined)
 		lines.push(
 			"Rows give the frame waited for, then the GPU's own time: a wait can run to the next screen refresh.",

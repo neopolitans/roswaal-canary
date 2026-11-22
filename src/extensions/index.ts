@@ -19,6 +19,11 @@ export type {
 	SettingDecl,
 	SettingGroup,
 } from "./manifest.js";
+export {
+	BENCHMARK_EVENT,
+	type BenchmarkKind,
+	startBenchmark,
+} from "./placeEditor/benchmarkEvent.js";
 export { PLACE_EDITOR, type PlaceEditorModule } from "./placeEditor/manifest.js";
 export {
 	antialiasSetting,

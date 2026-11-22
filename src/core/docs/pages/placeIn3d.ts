@@ -441,7 +441,7 @@ export function placeEditorPerformancePage(): DocPage {
 					["On screen", "The frame rate the view gets, at the display's pace"],
 					[
 						"One frame",
-						"One frame drawn and waited for until the GPU has finished it. Where the GPU has timers, every row also gives its own time, which leaves out waiting for the screen",
+						"One frame drawn and waited for until the GPU has finished it, and the page's own work for it: effects, culling and the rest. Where the GPU has timers, every row also gives its own time, which leaves out waiting for the screen",
 					],
 					[
 						"Stages",
@@ -499,6 +499,42 @@ export function placeEditorPerformancePage(): DocPage {
 			{
 				t: "p",
 				text: "**Copy report** copies the whole profile as text, to paste into an issue or a message.",
+			},
+			{ t: "h", level: 2, text: "Benchmark" },
+			{
+				t: "p",
+				text:
+					"**Roswaal Benchmark 1** draws thirteen test scenes that Roswaal makes for itself, the same on " +
+					"every device, and times each on the GPU and the CPU. Start it from Settings › Scene view or " +
+					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
+					"**Full sweep** runs every quality level, about 40 minutes. The editor is hidden while it runs. " +
+					"The Roswaal logo, or Esc, stops it and brings the editor back as it was.",
+			},
+			{
+				t: "table",
+				head: ["Station", "What it measures"],
+				rows: [
+					["Empty", "What every frame costs"],
+					["Materials", "Every material in three colours, at three Reflectances"],
+					["Shapes", "1,200 parts of every shape"],
+					["Sky light", "Closed rooms with walls 1 to 8 studs thick, high roofs, struts and rails"],
+					["Sun shadows", "Towers to 400 studs and a field of thin poles"],
+					["Lights", "10, 20, 50 and 100 lights in one area"],
+					["See-through", "Glass stacks, Transparency in steps, ForceField"],
+					["Glow", "Neon in colours and sizes, behind glass and through a seam; CrackedLava"],
+					["Effects", "100 Beams; 1,000, 10,000 and 20,000 particles"],
+					["Highlights", "Both depth modes, a Model, an Adornee, a transparent part"],
+					["Air and post", "Atmosphere, fog, Bloom, ColorCorrection and Blur"],
+					["Dense", "19,600 parts in a city grid"],
+					["Moving", "The Dense grid with each control's motion"],
+				],
+			},
+			{
+				t: "p",
+				text:
+					"Each station's score is the frames a second its GPU time allows, beside the rate its waited " +
+					"frame allows; the run's is their geometric mean. Scores compare within one benchmark version. " +
+					"**Copy report** gives the text; **Download results** saves the whole run as JSON.",
 			},
 			{ t: "h", level: 2, text: "Finding a spike" },
 			{

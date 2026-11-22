@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.20",
+		date: "2026-11-22",
+		headline:
+			"The Place Editor is 0.16.0: Roswaal Benchmark 1, and the CPU's part of a frame in the profile.",
+		added: [
+			"**Roswaal Benchmark 1**: thirteen test scenes Roswaal makes for itself, the same on every device, each timed on the GPU and the CPU, still and while the camera orbits. Current settings or a full sweep of every quality level. From Settings › Scene view, or the Rendering panel's Profile.",
+			"**The editor hidden while it runs**: the Roswaal logo or Esc stops it; at the end, its score, Copy report and Download results.",
+			"**The page's own work a frame in the profile**: effects, culling and the rest.",
+		],
+		changed: ["**The Place Editor is 0.16.0.**"],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.19",
 		date: "2026-11-22",
 		headline: "The Place Editor is 0.15.0: Highlight instances are drawn, as Studio draws them.",

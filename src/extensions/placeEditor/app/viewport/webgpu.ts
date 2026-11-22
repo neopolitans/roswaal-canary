@@ -1548,6 +1548,10 @@ export class WebGpuView implements ViewRenderer {
 	private tally = { draws: 0, instances: 0, triangles: 0 };
 	private lastTally = { draws: 0, instances: 0, triangles: 0 };
 	private cpuMs = 0;
+	/** This frame's CPU time on effects and on culling: see RenderStats.cpuSteps. */
+	private cpuEffects = 0;
+	private cpuCulling = 0;
+	private cpuSteps = { effects: 0, culling: 0 };
 
 	stats(): RenderStats {
 		const fx = this.effects?.last;
@@ -1557,6 +1561,7 @@ export class WebGpuView implements ViewRenderer {
 			beams: fx?.beams ?? 0,
 			particles: fx?.particles ?? 0,
 			cpu: this.cpuMs,
+			cpuSteps: { ...this.cpuSteps },
 			gpu: this.gpuTimes,
 		};
 	}
@@ -3258,6 +3263,8 @@ fn at(c: vec2i) -> u32 {
 
 	draw(camera: Camera, still = false): void {
 		const started = performance.now();
+		this.cpuEffects = 0;
+		this.cpuCulling = 0;
 		// Still-frame TAA: a frame aside by a fraction of a pixel, while the
 		// camera and the place are as they were; otherwise a fresh one.
 		const aaPass = antialiasInfo(this.aaMode).pass;
@@ -3324,7 +3331,9 @@ fn at(c: vec2i) -> u32 {
 		this.drawReflections(encoder, camera);
 		encoder = this.cut(encoder, "shadows");
 		// The camera's passes from here draw only the chunks in view.
+		const culling = performance.now();
 		this.cull(camera, [...this.draws, ...this.glass]);
+		this.cpuCulling += performance.now() - culling;
 		// Occlusion: the solid parts' depth first, in a pass of its own.
 		const passes = passesOf(this.render.features);
 		// Made in every view, so occlusion works in each; only the picture's
@@ -3530,6 +3539,7 @@ fn at(c: vec2i) -> u32 {
 		this.lastTally = this.tally;
 		this.runs.clear();
 		this.cpuMs = performance.now() - started;
+		this.cpuSteps = { effects: this.cpuEffects, culling: this.cpuCulling };
 	}
 
 	settled(): Promise<void> {
@@ -3588,6 +3598,7 @@ fn at(c: vec2i) -> u32 {
 		}
 		this.lastTally = this.tally;
 		this.cpuMs = performance.now() - started;
+		this.cpuSteps = { effects: this.cpuEffects, culling: this.cpuCulling };
 	}
 
 	deviceFacts(): {
@@ -3624,6 +3635,7 @@ fn at(c: vec2i) -> u32 {
 		if (!fx) return;
 		const show = passesOf(this.render.features);
 		const on = { beams: show.beams, particles: show.particles };
+		const simulating = performance.now();
 		fx.draw(
 			pass,
 			camera,
@@ -3634,6 +3646,7 @@ fn at(c: vec2i) -> u32 {
 			on,
 			performance.now() / 1000,
 		);
+		this.cpuEffects += performance.now() - simulating;
 		if (fx.last.draws === 0) return;
 		pass.setBindGroup(0, this.bind);
 		this.tally.draws += fx.last.draws;

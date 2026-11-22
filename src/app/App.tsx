@@ -33,6 +33,8 @@ import { indentUnit, type NodeDef, type RoswaalConfig } from "../core/schema.js"
 import { unformattedGroups, unformattedMessage, unformattedWhat } from "../core/unformatted.js";
 import {
 	antialiasSetting,
+	BENCHMARK_EVENT,
+	type BenchmarkKind,
 	EXTENSIONS,
 	OUTLINE_WIDTHS,
 	PLACE_EDITOR,
@@ -139,7 +141,7 @@ import {
 import { placeClassAt, readInstances, readOutline, rememberOutline } from "./placeOutline.js";
 import { placeSaveState, saveKey, usePlaceSave } from "./placeSave.js";
 import { readPreferences, wheelAction } from "./preferences.js";
-import { SiteBanner } from "./previewBuild.jsx";
+import { MarkedLogo, SiteBanner } from "./previewBuild.jsx";
 import { setProjectAliases } from "./projectAliases.js";
 import { setProjectFunctions, setProjectTypes } from "./projectTypes.js";
 import { RefactorPanel } from "./RefactorPanel.jsx";
@@ -462,10 +464,10 @@ export function App() {
 		(indices: readonly number[]) => viewport?.select(indices),
 		[viewport],
 	);
-	// Settings' say in how the place is drawn.
-	useEffect(
+	// Settings' say in how the place is drawn: the editor's view's, and a benchmark's.
+	const viewOptions = useMemo(
 		() =>
-			viewport?.setOptions({
+			({
 				renderer: sceneView.renderer,
 				outlineWidth: OUTLINE_WIDTHS[sceneView.outlineWidth],
 				hideBehind: !sceneView.outlineThrough,
@@ -488,9 +490,8 @@ export function App() {
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
 						: Number(sceneView.quality),
-			}),
+			}) as const,
 		[
-			viewport,
 			sceneView.renderer,
 			sceneView.outlineWidth,
 			sceneView.outlineThrough,
@@ -504,6 +505,52 @@ export function App() {
 			sceneView.quality,
 		],
 	);
+	useEffect(() => viewport?.setOptions(viewOptions), [viewport, viewOptions]);
+	// Roswaal Benchmark: asked for from Settings or the Rendering panel. The
+	// editor stays as it is underneath, its own view paused; Esc or the logo
+	// stops the run and brings it back.
+	const [benchmark, setBenchmark] = useState<BenchmarkKind | null>(null);
+	useEffect(() => {
+		const start = (e: Event) => {
+			const kind = (e as CustomEvent<BenchmarkKind>).detail;
+			if (kind !== "current" && kind !== "sweep") return;
+			setSettingsOpen(false);
+			setBenchmark(kind);
+		};
+		window.addEventListener(BENCHMARK_EVENT, start);
+		return () => window.removeEventListener(BENCHMARK_EVENT, start);
+	}, []);
+	useEffect(() => {
+		if (!benchmark || viewer) return;
+		let live = true;
+		void PLACE_EDITOR.load().then(
+			(loaded) => {
+				if (live) setViewer(loaded);
+			},
+			(err: unknown) => {
+				if (!live) return;
+				setBenchmark(null);
+				notify("The benchmark did not load", errorMessage(err));
+			},
+		);
+		return () => {
+			live = false;
+		};
+	}, [benchmark, viewer]);
+	useEffect(() => {
+		viewport?.setSuspended(benchmark !== null);
+	}, [viewport, benchmark]);
+	useEffect(() => {
+		if (!benchmark) return;
+		const key = (e: KeyboardEvent) => {
+			if (e.key !== "Escape") return;
+			e.preventDefault();
+			e.stopPropagation();
+			setBenchmark(null);
+		};
+		window.addEventListener("keydown", key, true);
+		return () => window.removeEventListener("keydown", key, true);
+	}, [benchmark]);
 	// The folder from a previous session, when one is waiting on a click.
 	const rememberedFolders = useRememberedFolders();
 	// What this host can do, for the project actions in the panel's footer.
@@ -3129,6 +3176,20 @@ export function App() {
 				onSettingsClose={() => setSettingsOpen(false)}
 				dialog={dialog}
 			/>
+			{benchmark && (
+				<div className="benchmark-layer">
+					{viewer && <viewer.Benchmark kind={benchmark} options={viewOptions} />}
+					<button
+						type="button"
+						className="benchmark-mark"
+						title="Stop the benchmark and go back to Roswaal (Esc)"
+						aria-label="Stop the benchmark and go back to Roswaal"
+						onClick={() => setBenchmark(null)}
+					>
+						<MarkedLogo height={22} />
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }

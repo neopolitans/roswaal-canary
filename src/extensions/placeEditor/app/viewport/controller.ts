@@ -15,6 +15,12 @@ import { type LightingParams, SKY_FACES } from "../../core/lighting.js";
 import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
+import type {
+	BenchmarkKind,
+	BenchmarkResult,
+	BenchmarkStationResult,
+} from "../benchmark/result.js";
+import type { Station } from "../benchmark/stations.js";
 import { type AntialiasMode, antialiasInfo } from "./antialias.js";
 import { type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import { boxAround } from "./box.js";
@@ -222,6 +228,18 @@ export interface Snap {
 }
 
 export type Stick = "move" | "look";
+
+/** Where a benchmark run is, for its overlay. */
+export interface BenchmarkProgress {
+	level: string;
+	/** "6 Lights · 50 lights". */
+	station: string;
+	phase: string;
+	done: number;
+	of: number;
+	/** The last station's still frame, waited for. */
+	frameMs: number;
+}
 
 /** `stamp` is the version of the place it was read from, which a drag's change names. */
 export type ViewportPlace = PlaceScene & {
@@ -1992,7 +2010,10 @@ export class ViewportController {
 	 * second, from where it is, and put back after each: its frames, stages,
 	 * and what was drawn again.
 	 */
-	private async timeMoving(phase: (name: string) => void): Promise<MovingRow[]> {
+	private async timeMoving(
+		phase: (name: string) => void,
+		only?: readonly string[],
+	): Promise<MovingRow[]> {
 		const dt = 1 / 60;
 		const forward = () => {
 			const b = this.back();
@@ -2009,6 +2030,7 @@ export class ViewportController {
 		const from = { ...this.cam, target: [...this.cam.target] };
 		const rows: MovingRow[] = [];
 		for (const [label, step] of motions) {
+			if (only && !only.includes(label)) continue;
 			phase(label);
 			const view = this.view;
 			if (!view) break;
@@ -2044,6 +2066,179 @@ export class ViewportController {
 			this.redraw();
 		}
 		return rows;
+	}
+
+	// -- the benchmark: see benchmark/stations.ts ------------------------------------
+
+	/** Drawing stopped while another view is measured: the editor's own, during a benchmark. */
+	private suspended = false;
+
+	setSuspended(on: boolean): void {
+		this.suspended = on;
+		if (!on) this.redraw();
+	}
+
+	/** Once the view is made, its assets are in and its pipelines built. False if it never is. */
+	async whenReady(): Promise<boolean> {
+		const from = performance.now();
+		while (!this.view || this.starting) {
+			if (performance.now() - from > 20000) return false;
+			await new Promise((r) => setTimeout(r, 100));
+		}
+		await this.viewSettled();
+		return true;
+	}
+
+	/** The camera where a station's pose puts it: at `eye`, looking at `at`. */
+	private pose(eye: readonly number[], at: readonly number[]): void {
+		const d = eye.map((v, a) => v - at[a]);
+		const dist = Math.max(1e-3, Math.hypot(d[0], d[1], d[2]));
+		this.cam.target = [...at];
+		this.cam.dist = dist;
+		this.cam.pitch = Math.asin(d[1] / dist);
+		this.cam.yaw = Math.atan2(d[0], d[2]);
+	}
+
+	/**
+	 * Roswaal Benchmark: each station's place drawn and measured, at the view's
+	 * level as set, or at every level from 1 to 21. Still frames waited for,
+	 * the GPU's stages, and an orbit (each control's motion, for the Moving
+	 * station). Automatic's steps are held while it runs. Partial when
+	 * `cancelled` says stop.
+	 */
+	async runBenchmark(run: {
+		stations: readonly Station[];
+		kind: BenchmarkKind;
+		benchmark: number;
+		seed: number;
+		onProgress: (progress: BenchmarkProgress) => void;
+		cancelled: () => boolean;
+	}): Promise<BenchmarkResult | null> {
+		if (!this.view || this.state.profiling) return null;
+		const options = this.options;
+		const auto = this.auto;
+		this.auto = null;
+		const startLevel = this.state.quality.level;
+		const levels: (number | null)[] =
+			run.kind === "sweep" ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
+		const variants = run.stations.reduce((n, s) => n + s.variants.length, 0);
+		const facts = this.view.deviceFacts();
+		const result: BenchmarkResult = {
+			benchmark: run.benchmark,
+			seed: run.seed,
+			kind: run.kind,
+			release: RELEASES[0]?.version ?? "",
+			date: new Date().toISOString(),
+			renderer: this.view.backend,
+			gpu: facts.gpu,
+			gpuTimers: facts.timers,
+			pixelRatio: devicePixelRatio || 1,
+			userAgent: navigator.userAgent,
+			levels: [],
+		};
+		let done = 0;
+		let lastFrame = Number.NaN;
+		const report = (level: string, station: Station | null, variant: string, phase: string) => {
+			this.set({ profiling: { phase, done, of: levels.length * variants } });
+			run.onProgress({
+				level,
+				station: station ? `${station.n} ${station.name}${variant ? ` · ${variant}` : ""}` : "",
+				phase,
+				done,
+				of: levels.length * variants,
+				frameMs: lastFrame,
+			});
+		};
+		try {
+			for (const want of levels) {
+				if (run.cancelled()) break;
+				if (want !== null) {
+					this.options = { ...options, antialias: undefined, renderScale: "auto" };
+					const made: ViewRenderer | null = this.view;
+					await this.toLevel(want, true);
+					if (this.view !== made) await this.viewSettled();
+				}
+				const level = this.state.quality.level;
+				const label =
+					want === null ? `Level ${level}${auto ? " (Automatic's)" : ""}` : `Level ${level}`;
+				const rows: BenchmarkStationResult[] = [];
+				for (const station of run.stations)
+					for (const variant of station.variants) {
+						if (run.cancelled()) break;
+						report(label, station, variant.label, "Building");
+						this.setPlace(variant.place());
+						this.pose(station.pose.eye, station.pose.at);
+						await this.viewSettled();
+						report(label, station, variant.label, "Settling");
+						await this.waitedFrames(10, 2000);
+						if (variant.settleMs) {
+							const until = performance.now() + variant.settleMs;
+							while (performance.now() < until && !run.cancelled())
+								await this.waitedFrames(1, 1000);
+						}
+						report(label, station, variant.label, "Still");
+						const still = await this.timeWaited(station.name, 60);
+						lastFrame = still.median;
+						report(label, station, variant.label, "Stages");
+						const view = this.view;
+						if (!view) break;
+						const frames: StageFrame[] = [];
+						const gpuFrames: StageFrame[] = [];
+						view.setProfiling(
+							(each) => frames.push(each),
+							(each) => gpuFrames.push(each),
+						);
+						await this.waitedFrames(30, PROFILE_BUDGET);
+						view.setProfiling(null);
+						await view.settled();
+						await new Promise((r) => setTimeout(r, 50));
+						report(
+							label,
+							station,
+							variant.label,
+							station.allMotions ? "Each control's motion" : "Orbit",
+						);
+						const moving = await this.timeMoving(
+							(name) => report(label, station, variant.label, name),
+							station.allMotions ? undefined : ["Orbit drag"],
+						);
+						const stats = this.view?.stats();
+						rows.push({
+							n: station.n,
+							id: station.id,
+							name: station.name,
+							variant: variant.label,
+							still,
+							gpu: stageRows(gpuFrames),
+							gpuTotal: stagesTotal(gpuFrames),
+							moving,
+							counts: {
+								draws: stats?.draws ?? 0,
+								instances: stats?.instances ?? 0,
+								triangles: stats?.triangles ?? 0,
+								particles: stats?.particles ?? 0,
+								beams: stats?.beams ?? 0,
+							},
+						});
+						done++;
+					}
+				result.levels.push({
+					label,
+					level,
+					canvas: { width: this.canvas?.width ?? 0, height: this.canvas?.height ?? 0 },
+					antialias: this.view ? antialiasInfo(this.view.antialias).label : "",
+					stations: rows,
+				});
+			}
+		} finally {
+			this.set({ profiling: null });
+			this.options = options;
+			this.auto = auto;
+			if (levels[0] !== null && this.state.quality.level !== startLevel)
+				await this.toLevel(startLevel, false);
+		}
+		if (run.cancelled()) result.cancelled = true;
+		return result;
 	}
 
 	private async toLevel(level: number, reset: boolean): Promise<void> {
@@ -2142,7 +2337,7 @@ export class ViewportController {
 	 */
 	private redraw(still = false): void {
 		if (!still) this.stillNext = false;
-		if (this.pending || !this.view) return;
+		if (this.pending || !this.view || this.suspended) return;
 		this.pending = true;
 		this.stillNext = still;
 		this.wantedAt = performance.now();
@@ -2197,6 +2392,7 @@ export class ViewportController {
 		n: number,
 		budget: number,
 		before?: (frame: number) => void,
+		after?: () => void,
 	): Promise<number[]> {
 		const times: number[] = [];
 		const from = performance.now();
@@ -2208,6 +2404,7 @@ export class ViewportController {
 			this.drawOnce(start);
 			await view.finished();
 			times.push(performance.now() - start);
+			after?.();
 			if (times.length >= PROFILE_FEWEST && performance.now() - from > budget) break;
 			// The page's turn, between frames: the progress shows, and nothing waits on this.
 			await new Promise((r) => setTimeout(r, 0));
@@ -2220,16 +2417,31 @@ export class ViewportController {
 		// The pipelines for these switches, not the ones drawing while they compile.
 		await this.view?.pipelinesReady();
 		await this.waitedFrames(3, 400);
-		// The GPU's own time beside the waited one, where it has timers.
+		// The GPU's own time beside the waited one, where it has timers; the CPU's for each frame.
 		const view = this.view;
 		const gpu: number[] = [];
+		const cpu: number[] = [];
+		const effects: number[] = [];
+		const culling: number[] = [];
 		view?.setProfiling(null, (f) => gpu.push(Object.values(f).reduce((a, b) => a + (b ?? 0), 0)));
-		const times = await this.waitedFrames(n, PROFILE_BUDGET);
+		const times = await this.waitedFrames(n, PROFILE_BUDGET, undefined, () => {
+			const s = this.view?.stats();
+			if (!s) return;
+			cpu.push(s.cpu);
+			if (s.cpuSteps) {
+				effects.push(s.cpuSteps.effects);
+				culling.push(s.cpuSteps.culling);
+			}
+		});
 		view?.setProfiling(null);
 		return {
 			label,
 			...spread(times),
 			...(gpu.length >= Math.min(5, n) ? { gpuMs: spread(gpu).median } : {}),
+			...(cpu.length > 0 ? { cpuMs: spread(cpu).median } : {}),
+			...(effects.length > 0
+				? { cpuSteps: { effects: spread(effects).median, culling: spread(culling).median } }
+				: {}),
 		};
 	}
 

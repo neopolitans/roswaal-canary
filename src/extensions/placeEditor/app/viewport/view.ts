@@ -1299,6 +1299,11 @@ export interface RenderStats {
 	/** Milliseconds of the page's time spent issuing the last frame. */
 	cpu: number;
 	/**
+	 * Of `cpu`, where the renderer times them: Beams and particles simulated
+	 * and sent to the GPU, and the parts culled against the view.
+	 */
+	cpuSteps?: { effects: number; culling: number };
+	/**
 	 * Milliseconds of the GPU's time, by pass, where the browser can time
 	 * them: the sun's and sky's maps, the place, and its glow and effects.
 	 */

@@ -5,6 +5,7 @@
  * browser that never draws a place never downloads it.
  */
 
+export { Benchmark } from "./Benchmark.jsx";
 export { GizmoSection } from "./GizmoSection.jsx";
 export {
 	MeshesPanel,

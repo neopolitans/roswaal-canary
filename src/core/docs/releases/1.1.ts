@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.30",
+		date: "2026-11-23",
+		headline:
+			"The web editor starts again in Edge 158 with a folder remembered from an earlier visit.",
+		changed: [
+			"**The web editor no longer waits on a remembered folder the browser does not answer for.** Edge 158 stopped answering for a folder kept from an earlier session, and try.html and the designer stayed blank. After two seconds the editor starts, and the folder is offered by name to open with a click.",
+		],
+		affects: ["editor", "designer"],
+	},
+	{
 		version: "1.1.0-canary.29",
 		date: "2026-11-22",
 		headline: "The Place Editor is 0.22.0: DoubleSided MeshParts, and Roswaal Benchmark 4.",

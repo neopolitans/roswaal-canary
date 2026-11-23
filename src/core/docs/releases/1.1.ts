@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.31",
+		date: "2026-11-23",
+		headline: "A web page that fails to start says so, rather than staying blank.",
+		changed: [
+			"**The editor, the designer and the docs show what went wrong when they fail to start**: an error, a file that did not load, or a start that has not finished 10 seconds after the page loaded. The screen gives the details to copy, a reload and, for a stuck start, a way to forget the folders remembered from earlier visits.",
+		],
+		affects: ["editor", "designer", "docs"],
+	},
+	{
 		version: "1.1.0-canary.30",
 		date: "2026-11-23",
 		headline:

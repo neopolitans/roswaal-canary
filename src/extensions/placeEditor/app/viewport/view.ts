@@ -55,6 +55,14 @@ export interface ViewRenderer {
 	 */
 	setUpscale?(output: { width: number; height: number } | null, mode: UpscaleMode): void;
 	/**
+	 * Builds ahead the pipelines for each set of switches, where the renderer
+	 * builds them for a set: see WebGpuView.warmShaders.
+	 */
+	warmShaders?(
+		sets: readonly RenderFeatures[],
+		progress?: (done: number, of: number) => void,
+	): Promise<number>;
+	/**
 	 * The boxes to outline, in the scene's own instance layout, each in the
 	 * colour and alpha its colour word holds: what is picked, and what the
 	 * pointer is over.

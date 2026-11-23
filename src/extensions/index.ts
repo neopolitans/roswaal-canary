@@ -34,6 +34,7 @@ export {
 	type ViewportFrameRate,
 	type ViewportRenderer,
 } from "./placeEditor/settings.js";
+export { reportShaders, SHADER_EVENT } from "./placeEditor/shaderEvent.js";
 
 /** Every extension, in the order Settings lists them. */
 export const EXTENSIONS: readonly ExtensionManifest[] = [PLACE_EDITOR];

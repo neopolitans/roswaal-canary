@@ -92,7 +92,7 @@ export function Benchmark({
 		if (!el) return;
 		let stopped = false;
 		const controller = new ViewportController(() => {});
-		controller.setOptions({ ...settings, editable: false });
+		controller.setOptions({ ...settings, editable: false, buildShaders: false });
 		const unmount = controller.mount({ holder: el });
 		void Promise.resolve(STATIONS[0].variants[0].place()).then((place) => {
 			if (!stopped) controller.setPlace(place);

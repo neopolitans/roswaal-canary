@@ -13,6 +13,13 @@ describe("startingText", () => {
 		expect(startingText("WebGL2", 1)).toBe("Starting (WebGL2 – Shaders 100%)");
 	});
 
+	it("says when an update changed the shaders, so a slow start is explained", () => {
+		expect(startingText("WebGPU", 0.4, true)).toBe(
+			"Starting (WebGPU – Shaders 40%, new in this update)",
+		);
+		expect(startingText("WebGPU", null, true)).toBe("Starting (WebGPU, new in this update)");
+	});
+
 	it("reads 100% only once every shader has compiled", () => {
 		expect(startingText("WebGPU", 20 / 21)).toBe("Starting (WebGPU – Shaders 95%)");
 		expect(startingText("WebGPU", 0.999)).toBe("Starting (WebGPU – Shaders 99%)");

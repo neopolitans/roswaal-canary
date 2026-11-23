@@ -40,6 +40,8 @@ import {
 	PLACE_EDITOR,
 	type PlaceEditorModule,
 	type PlaceEditorSettings,
+	reportShaders,
+	SHADER_EVENT,
 } from "../extensions/index.js";
 import { AddPackageDialog, realmLanding } from "./AddPackageDialog.jsx";
 import { AliasDocument } from "./AliasDocument.jsx";
@@ -536,6 +538,15 @@ export function App() {
 		};
 		window.addEventListener(BENCHMARK_EVENT, start);
 		return () => window.removeEventListener(BENCHMARK_EVENT, start);
+	}, []);
+	// Settings' "Build shaders now": the open place's view builds them, or says there is none.
+	useEffect(() => {
+		const build = () => {
+			if (viewportNow.current) void viewportNow.current.buildShaders();
+			else reportShaders({ state: "no-view" });
+		};
+		window.addEventListener(SHADER_EVENT, build);
+		return () => window.removeEventListener(SHADER_EVENT, build);
 	}, []);
 	useEffect(() => {
 		if (!benchmark || viewer) return;

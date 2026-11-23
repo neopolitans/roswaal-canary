@@ -272,6 +272,10 @@ export function settingsPage(): DocPage {
 						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19); **Native**, every pixel the screen has, twice as many each way on a Retina screen; or **150%**, **100%**, **75%** or **50%**. A share past the screen's own pixels draws Native. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
 					],
 					[
+						"Shaders",
+						"The browser keeps the shaders it builds, so only the first start after an update that changes them is slower; the view says so while it starts. **Build now** builds every quality level's shaders for the open place, so changing level, or Automatic doing so, waits for none. **Build after an update**, on by default, does that in the background a few seconds after a place opens. WebGPU only.",
+					],
+					[
 						"Upscaling",
 						"Where the render scale draws fewer pixels than the screen has, the view brings them up itself rather than the browser stretching them. **Off**, the default; **When still**: once the view stops moving, 16 frames drawn a fraction of a pixel apart are gathered into the screen's own pixels, about the detail Native draws, at the render scale's cost, and a moving view is stretched; or **Always**, which sharpens moving frames as well. WebGPU only; WebGL2 stretches as before.",
 					],

@@ -12,7 +12,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.24.1",
+	version: "0.25.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -39,7 +39,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 			note: "How a place is drawn in 3D. Part of the Place Editor, kept in this browser.",
 			groups: SCENE_VIEW,
 			component: () =>
-				import("./settings/BenchmarkSection.jsx").then((m) => ({ default: m.BenchmarkSection })),
+				import("./settings/SceneViewSections.jsx").then((m) => ({ default: m.SceneViewSections })),
 		},
 		{
 			id: "roblox",
@@ -50,6 +50,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.25.0",
+			roswaal: "1.1.0-canary.37",
+			date: "2026-11-23",
+			text: "Shaders in Settings: whether an update changed them, Build now, and Build after an update; the view's start says when they are new; depth-only probes skip the glow and post pass.",
+		},
 		{
 			version: "0.24.1",
 			roswaal: "1.1.0-canary.36",

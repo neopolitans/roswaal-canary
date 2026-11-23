@@ -9,6 +9,22 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.37",
+		date: "2026-11-23",
+		headline: "Shaders built ahead after an update, and a start that says why it is slow.",
+		added: [
+			"**Shaders**, in Settings › Scene view: whether the last update changed them, and **Build now**, which builds every quality level's shaders for the open place, so changing level waits for none.",
+			"**Build after an update**, on by default, builds them in the background a few seconds after a place opens, once after each update that changed them.",
+		],
+		changed: [
+			'**The 3D view\'s start says "new in this update"** while it builds shaders the browser does not have yet.',
+		],
+		fixed: [
+			"**Pixel cost's depth-only times no longer include the glow and post pass**, which made the parts' depth look twice as costly at stations with Neon or post effects.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.36",
 		date: "2026-11-23",
 		headline: "The benchmark waits for its view to start after an update.",

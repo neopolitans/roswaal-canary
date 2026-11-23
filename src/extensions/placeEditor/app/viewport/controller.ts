@@ -16,6 +16,14 @@ import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
 import {
+	autoBuildWanted,
+	markShadersBuilt,
+	noteShaders,
+	readShaderRecord,
+	reportShaders,
+	shadersNew,
+} from "../../shaderEvent.js";
+import {
 	type BenchmarkKind,
 	type BenchmarkResult,
 	type BenchmarkStationResult,
@@ -154,6 +162,12 @@ export interface ViewportOptions {
 	 * detail (see upscale.ts); off or unset, the browser stretches it.
 	 */
 	upscale?: UpscaleMode;
+	/**
+	 * Builds the shaders for every quality level after an update changed
+	 * them, as Settings' "Build after an update" says: false for a view of
+	 * its own, as the benchmark's, which must not build while it measures.
+	 */
+	buildShaders?: boolean;
 	/** Antialiasing: see antialias.ts; unset, the quality level's. Changing it builds the view again. */
 	antialias?: AntialiasMode;
 	/** WebGPU's shader in half precision where the device can: see webgpu.ts's HALF. Unset, yes. */
@@ -181,7 +195,7 @@ const PICKED_ALPHA = 255;
 const HOVER_ALPHA = 105;
 
 import { WebGl2View } from "./webgl2.js";
-import { WebGpuView } from "./webgpu.js";
+import { shaderFingerprint, WebGpuView } from "./webgpu.js";
 
 export { TOOLS, type Tool } from "./tools.js";
 
@@ -1809,11 +1823,19 @@ export class ViewportController {
 
 	private starting = false;
 	/** The renderer starting, and the share of its shaders compiled, for the readout. */
-	private startup: { backend: ViewRenderer["backend"]; shaders: number | null } | null = null;
+	private startup: {
+		backend: ViewRenderer["backend"];
+		shaders: number | null;
+		updated: boolean;
+	} | null = null;
 
 	/** Starts `view`, the readout following its shaders as they compile. */
 	private async initView(view: ViewRenderer, canvas: HTMLCanvasElement, place: PlaceScene) {
-		const startup = { backend: view.backend, shaders: null as number | null };
+		const startup = {
+			backend: view.backend,
+			shaders: null as number | null,
+			updated: view.backend === "WebGPU" && shadersNew(shaderFingerprint()),
+		};
 		this.startup = startup;
 		try {
 			await view.init(canvas, place, (shaders) => {
@@ -1922,6 +1944,61 @@ export class ViewportController {
 		this.attach(this.canvas as HTMLCanvasElement);
 		this.refreshSelection();
 		this.fit();
+		this.shadersAfterStart(view);
+	}
+
+	/**
+	 * After a start: the shaders noted against what the browser last saw, and,
+	 * where they are not yet built for every level, built in the background a
+	 * few seconds on, as Settings' "Build after an update" asks.
+	 */
+	private shadersAfterStart(view: ViewRenderer): void {
+		if (view.backend !== "WebGPU" || !view.warmShaders) return;
+		const fingerprint = shaderFingerprint();
+		noteShaders(fingerprint);
+		if (this.options.buildShaders === false || !autoBuildWanted()) return;
+		if (readShaderRecord()?.built === fingerprint) return;
+		setTimeout(() => {
+			if (this.view === view && !this.state.profiling) void this.buildShaders();
+		}, 4000);
+	}
+
+	private warming = false;
+
+	/**
+	 * The shaders for every quality level built ahead, for this place: so
+	 * Automatic, a level chosen or a sweep waits for none. Progress goes to
+	 * Settings (reportShaders).
+	 */
+	async buildShaders(): Promise<void> {
+		const view = this.view;
+		if (!view) {
+			reportShaders({ state: "no-view" });
+			return;
+		}
+		if (!view.warmShaders) {
+			reportShaders({ state: "webgl2" });
+			return;
+		}
+		if (this.warming) return;
+		this.warming = true;
+		const from = performance.now();
+		const sets = [
+			...Array.from({ length: TOP_LEVEL }, (_, i) => this.levelFeatures(qualityLevel(i + 1))),
+			this.state.render.features,
+		];
+		try {
+			const pipelines = await view.warmShaders(sets, (done, of) =>
+				reportShaders({ state: "building", done, of }),
+			);
+			const ms = performance.now() - from;
+			markShadersBuilt(shaderFingerprint(), ms, pipelines);
+			reportShaders({ state: "built", ms, of: pipelines });
+		} catch (err) {
+			reportShaders({ state: "failed", message: err instanceof Error ? err.message : String(err) });
+		} finally {
+			this.warming = false;
+		}
 	}
 
 	/** The view made again: another renderer, or another number of samples a pixel. */
@@ -3203,7 +3280,7 @@ export class ViewportController {
 		const idle = last === undefined || now - last > 400;
 		if (this.corner)
 			this.corner.rate.textContent = this.startup
-				? startingText(this.startup.backend, this.startup.shaders)
+				? startingText(this.startup.backend, this.startup.shaders, this.startup.updated)
 				: `${idle ? "Idle" : `${this.frames.length}Hz`} (${this.state.backend ?? "…"})`;
 	}
 

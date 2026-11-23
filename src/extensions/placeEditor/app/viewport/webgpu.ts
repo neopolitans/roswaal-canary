@@ -18,6 +18,7 @@ import {
 	SCENE_STRIDE,
 	type SceneHighlight,
 } from "../../core/scene.js";
+import { shaderHash } from "../../shaderEvent.js";
 import {
 	AA_WGSL,
 	type AntialiasMode,
@@ -40,7 +41,7 @@ import {
 	sidePlanes,
 	visibleRuns,
 } from "./culling.js";
-import { GpuEffects } from "./effectsGpu.js";
+import { EFFECT_SHADER, GpuEffects } from "./effectsGpu.js";
 import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geometry.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
@@ -53,7 +54,13 @@ import {
 	type StageFrame,
 	type StageSink,
 } from "./profile.js";
-import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
+import {
+	FEATURE_BIT,
+	featureBits,
+	featureOn,
+	passesOf,
+	type RenderFeatures,
+} from "./renderFeatures.js";
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
@@ -131,6 +138,20 @@ import {
 	type ViewQuality,
 	type ViewRenderer,
 } from "./view.js";
+
+/**
+ * The WebGPU shaders' fingerprint: their text, hashed. The browser keeps what
+ * it compiled by the text, so a new fingerprint is a build from nothing.
+ * The small passes written where they are made are left out: the main
+ * shader and its passes are where the time goes.
+ */
+export function shaderFingerprint(): string {
+	return shaderHash(
+		[SHADER, POST, AA_WGSL, UPSCALE_WGSL, OVERDRAW_WGSL, VIEWS_WGSL, EFFECT_SHADER].join(
+			"\n\u0000\n",
+		),
+	);
+}
 
 /** What a frame is to upscaling: the first since a move, the history full, beams or particles moving. */
 interface UpStep {
@@ -1842,8 +1863,8 @@ export class WebGpuView implements ViewRenderer {
 	 * ones for what the place has none of -- lights, Neon, CrackedLava -- whose
 	 * code would only take room.
 	 */
-	private litBits(): number {
-		let bits = featureBits(this.render.features);
+	private litBits(features: RenderFeatures = this.render.features): number {
+		let bits = featureBits(features);
 		if (!this.hasLights)
 			bits &= ~(
 				FEATURE_BIT.pointLights |
@@ -1905,6 +1926,32 @@ export class WebGpuView implements ViewRenderer {
 			this.litPending.set(bits, pending);
 		}
 		return generic;
+	}
+
+	/**
+	 * The lit pipelines for each set of switches, built ahead (a quality
+	 * level's, for this place), and upscaling's: so changing level later
+	 * waits for none. `progress` hears each set as it is built. Answers how
+	 * many pipelines were asked for.
+	 */
+	async warmShaders(
+		sets: readonly RenderFeatures[],
+		progress?: (done: number, of: number) => void,
+	): Promise<number> {
+		const bits = [...new Set(sets.map((f) => this.litBits(f)))];
+		this.makeUpscale();
+		const jobs: Promise<unknown>[] = [
+			...bits.map((b) => {
+				this.litFor(b);
+				return this.litPending.get(b) ?? Promise.resolve();
+			}),
+			...this.compiling.splice(0),
+		];
+		let done = 0;
+		progress?.(0, jobs.length);
+		const step = () => progress?.(++done, jobs.length);
+		await Promise.all(jobs.map((job) => job.then(step, step)));
+		return bits.length * Object.keys(this.litDescs).length + Object.keys(this.upPipes).length;
 	}
 
 	/** The pipelines init asked for, compiling side by side: see pipeline. */
@@ -3397,7 +3444,8 @@ fn at(c: vec2i) -> u32 {
 		// The heatmaps and the wireframe are the place's shapes alone; the sun
 		// maps' tints are left as they are drawn.
 		const tinted = mode === "sunMaps";
-		const postOn = this.postOn && show.post && !heat && !wire && !tinted;
+		// A probe is the parts alone: no glow or post pass over them.
+		const postOn = this.postOn && show.post && !heat && !wire && !tinted && !this.probe;
 		this.shape = glowShape(this.lighting?.post, postOn);
 		this.setCamera(camera);
 		let encoder = this.device.createCommandEncoder();
@@ -3462,7 +3510,13 @@ fn at(c: vec2i) -> u32 {
 		// A BloomEffect blooms the whole picture, Neon or not: see fsBright.
 		const bloom = postOn && !!this.lighting?.post.bloom && show.glow && !heat && !wire && !tinted;
 		const glowing =
-			(this.glowing || bloom) && !!this.glow && show.glow && !heat && !wire && !tinted;
+			(this.glowing || bloom) &&
+			!!this.glow &&
+			show.glow &&
+			!heat &&
+			!wire &&
+			!tinted &&
+			!this.probe;
 		const post = postActive(this.lighting?.post, postOn);
 		// The place is drawn into its own texture first when anything is added
 		// to it after: Neon's glow, or a post effect; or a heatmap's colours.

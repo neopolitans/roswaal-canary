@@ -519,12 +519,12 @@ export function App() {
 	useEffect(() => {
 		const start = (e: Event) => {
 			const asked = (e as CustomEvent<BenchmarkRequest>).detail;
-			if (asked?.kind !== "current" && asked?.kind !== "sweep" && asked?.kind !== "ab") return;
+			if (!["current", "sweep", "ab", "pixels"].includes(asked?.kind)) return;
 			if (asked.kind === "ab" && !asked.ab) return;
 			setSettingsOpen(false);
 			setBenchmark({
 				kind: asked.kind,
-				passes: asked.passes === 2 && asked.kind !== "ab" ? 2 : 1,
+				passes: asked.passes === 2 && (asked.kind === "current" || asked.kind === "sweep") ? 2 : 1,
 				...(asked.ab ? { ab: asked.ab } : {}),
 				features: viewportNow.current?.renderSettings().features,
 			});

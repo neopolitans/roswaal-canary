@@ -51,6 +51,14 @@ export function BenchmarkSection() {
 				</button>
 			</Row>
 			<Row
+				label="Pixel cost"
+				help="Measures every station at each render scale this screen has, from 50% to Native, shaded and as the parts' depth alone, and says what a frame costs however few pixels it has and what each pixel adds, by GPU stage. About 10 minutes."
+			>
+				<button type="button" className="tb" onClick={() => startBenchmark("pixels", 1)}>
+					Run Pixel cost
+				</button>
+			</Row>
+			<Row
 				label="Warm pass"
 				help="Measures every station again after the whole first pass, when the device has warmed up, and shows how much slower each is warm. Scores and comparisons stay the first pass's. Twice as long."
 			>

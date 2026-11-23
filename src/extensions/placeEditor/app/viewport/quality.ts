@@ -87,7 +87,10 @@ function makeLevel(level: number): QualityLevel {
 	return {
 		level,
 		distance: stepped(DISTANCE, level),
-		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : level <= 17 ? 1 : "native",
+		// 150% before Native: on a Retina screen Native is four times 100%'s
+		// pixels, and Level 18 took an iPad Mini from 6 to 23 ms a frame in one
+		// step (Benchmark 4 sweep, 23 Nov 2026); 150% is 2.25 times.
+		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : level <= 17 ? 1 : level === 18 ? 1.5 : "native",
 		// No level multisamples: at the screen's own pixels MSAA 4× took an iPad
 		// Mini from 15 ms of GPU a frame to 62, one draw or two (canary.16), for
 		// little to see over SMAA. It is the Antialiasing setting's to choose.

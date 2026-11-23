@@ -13,6 +13,8 @@ import {
 	type BenchmarkStationResult,
 	benchmarkReport,
 	levelScore,
+	pixelFit,
+	stationPixelFits,
 	stationScore,
 } from "../src/extensions/placeEditor/app/benchmark/result.js";
 import {
@@ -274,5 +276,115 @@ describe("an A/B run", () => {
 		};
 		expect(compareRuns(plain, result).levels).toEqual([]);
 		expect(compareRuns(plain, result).warnings[0]).toMatch(/A\/B run/);
+	});
+});
+
+describe("a Pixel cost run", () => {
+	const timed = (gpuMs: number) => ({ label: "", median: gpuMs + 1, p95: gpuMs + 1, gpuMs });
+	// An iPad Mini's view at 50%, 100% and Native: 0.19, 0.75 and 2.98 million pixels.
+	const sizes = [
+		[0.5, 567, 329],
+		[1, 1133, 658],
+		[2, 2266, 1316],
+	] as const;
+	const measured = (fixed: number, perMp: number, depthPerMp: number): BenchmarkStationResult => ({
+		...station(1, 0, 0),
+		pixels: sizes.map(([scale, width, height]) => {
+			const mp = (width * height) / 1e6;
+			return {
+				scale,
+				width,
+				height,
+				still: timed(fixed + perMp * mp),
+				depthOnly: timed(fixed + depthPerMp * mp),
+				gpu: [
+					{ stage: "occlusion" as const, frames: 30, median: 0.2 + 0.5 * mp, p95: 0 },
+					{ stage: "place" as const, frames: 30, median: fixed + (perMp - 0.5) * mp, p95: 0 },
+				],
+				gpuTotal: { median: fixed + perMp * mp, p95: 0 },
+			};
+		}),
+	});
+
+	it("fits a fixed cost and a cost a million pixels, and how nearly the times lie on it", () => {
+		const fit = pixelFit([
+			[1, 3],
+			[2, 5],
+			[4, 9],
+		]);
+		expect(fit?.fixed).toBeCloseTo(1, 9);
+		expect(fit?.perMp).toBeCloseTo(2, 9);
+		expect(fit?.r2).toBeCloseTo(1, 9);
+		expect(pixelFit([[1, 3]])).toBeNull();
+		expect(
+			pixelFit([
+				[1, 3],
+				[1, 4],
+			]),
+		).toBeNull();
+		expect(
+			pixelFit([
+				[1, 3],
+				[2, Number.NaN],
+			]),
+		).toBeNull();
+		expect(
+			pixelFit([
+				[1, 1],
+				[2, 3],
+				[3, 2],
+			])?.r2,
+		).toBeLessThan(0.5);
+	});
+
+	it("separates the shaded pixel from the parts' depth, and each stage", () => {
+		const fits = stationPixelFits(measured(1.5, 4, 0.6), true);
+		expect(fits?.shaded?.fixed).toBeCloseTo(1.5, 6);
+		expect(fits?.shaded?.perMp).toBeCloseTo(4, 6);
+		expect(fits?.depth?.perMp).toBeCloseTo(0.6, 6);
+		expect(fits?.stages.map(([stage, f]) => [stage, Number(f.perMp.toFixed(6))])).toEqual([
+			["occlusion", 0.5],
+			["place", 3.5],
+		]);
+		expect(stationPixelFits(station(1, 4, 5), true)).toBeNull();
+	});
+
+	it("reports each station's costs, and is never compared as a run", () => {
+		const result: BenchmarkResult = {
+			benchmark: 4,
+			seed: 1,
+			kind: "pixels",
+			release: "1.1.0-canary.34",
+			date: "2026-11-23T20:00:00.000Z",
+			renderer: "WebGPU",
+			gpu: "apple",
+			gpuTimers: true,
+			pixelRatio: 2,
+			userAgent: "Test",
+			levels: [
+				{
+					label: "Level 18",
+					level: 18,
+					canvas: { width: 2266, height: 1316 },
+					antialias: "SMAA",
+					stations: [
+						measured(1.5, 4, 0.6),
+						{ ...measured(2, 3, 0.5), n: 2, name: "Station 2" },
+						{ ...measured(1, 2, 0.4), n: 3, name: "Station 3" },
+					],
+				},
+			],
+		};
+		const text = benchmarkReport(result);
+		expect(text).toContain("· Pixel cost");
+		expect(text).toContain("Level 18 · SMAA · 50% 567×329, 100% 1133×658, 200% 2266×1316");
+		expect(text).toContain(
+			"A shaded pixel: 3.00 ns across the stations (the median), up to 4.00; the parts' depth alone 0.50 ns.",
+		);
+		expect(text).toMatch(/1 Station 1\s+1\.50 ms\s+4\.00\s+0\.60\s+3\.40\s+1\.00/);
+		expect(text).toContain("Occlusion 0.50 (0.20 ms)");
+		const plain = { ...result, kind: "current" as const, date: "2026-11-23T19:00:00.000Z" };
+		expect(compareRuns(plain, result).levels).toEqual([]);
+		expect(compareRuns(plain, result).warnings[0]).toMatch(/Pixel cost run/);
 	});
 });

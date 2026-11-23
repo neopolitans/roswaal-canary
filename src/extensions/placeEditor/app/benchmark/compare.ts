@@ -135,6 +135,15 @@ function compareLevel(
 export function compareRuns(before: BenchmarkResult, after: BenchmarkResult): Comparison {
 	const warnings: string[] = [];
 	// An A/B run measures a switch, not the stations' scores.
+	if (before.kind === "pixels" || after.kind === "pixels")
+		return {
+			before,
+			after,
+			levels: [],
+			warnings: [
+				"One of these is a Pixel cost run, which measures what a pixel costs rather than the stations: its own report says.",
+			],
+		};
 	if (before.ab || after.ab)
 		return {
 			before,

@@ -36,12 +36,93 @@ export interface BenchmarkStationResult {
 	repeat?: Timed;
 	/** An A/B run's measurements: its switch on, off, on, off, in that order. */
 	ab?: { on: Timed[]; off: Timed[] };
+	/** A Pixel cost run's measurements: one a render scale, fewest pixels first. */
+	pixels?: PixelPoint[];
 	/** The GPU's own time by stage, sun maps drawn every frame as when moving. */
 	gpu: StageRow[];
 	gpuTotal: { median: number; p95: number };
 	/** An orbit; for the Moving station, each control's motion. */
 	moving: MovingRow[];
 	counts: { draws: number; instances: number; triangles: number; particles: number; beams: number };
+}
+
+/** The render scales a Pixel cost run times each station at, as shares of the page's pixels; a 1x screen stops at 100%. */
+export const PIXEL_SCALES = [0.5, 0.75, 1, 1.5, 2] as const;
+
+/** One station drawn at one render scale. */
+export interface PixelPoint {
+	/** The share of the page's pixels across and down. */
+	scale: number;
+	width: number;
+	height: number;
+	/** The frame shaded, as the station is drawn. */
+	still: Timed;
+	/** The parts' depth alone, no colour worked out for any pixel: where the renderer has the probe. */
+	depthOnly?: Timed;
+	gpu: StageRow[];
+	gpuTotal: { median: number; p95: number };
+}
+
+/**
+ * A straight line through times against pixels: what a frame costs however
+ * few it has (`fixed`, ms), and what each million adds (`perMp`, ms, which
+ * is also nanoseconds a pixel). `r2`, how nearly the times lie on it.
+ */
+export interface PixelFit {
+	fixed: number;
+	perMp: number;
+	r2: number;
+}
+
+/** The least-squares line through `[megapixels, ms]`; null with fewer than two sizes or a time missing. */
+export function pixelFit(points: readonly (readonly [number, number])[]): PixelFit | null {
+	if (points.length < 2 || !points.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)))
+		return null;
+	const n = points.length;
+	const mx = points.reduce((s, [x]) => s + x, 0) / n;
+	const my = points.reduce((s, [, y]) => s + y, 0) / n;
+	let sxx = 0;
+	let sxy = 0;
+	let syy = 0;
+	for (const [x, y] of points) {
+		sxx += (x - mx) ** 2;
+		sxy += (x - mx) * (y - my);
+		syy += (y - my) ** 2;
+	}
+	if (sxx === 0) return null;
+	const perMp = sxy / sxx;
+	return { fixed: my - perMp * mx, perMp, r2: syy === 0 ? 1 : (sxy * sxy) / (sxx * syy) };
+}
+
+const megapixels = (p: PixelPoint) => (p.width * p.height) / 1e6;
+
+/** A station's fits: the shaded frame, the parts' depth alone, and each GPU stage. */
+export function stationPixelFits(
+	s: BenchmarkStationResult,
+	gpu: boolean,
+): {
+	shaded: PixelFit | null;
+	depth: PixelFit | null;
+	stages: [StageRow["stage"], PixelFit][];
+} | null {
+	const points = s.pixels;
+	if (!points || points.length < 2) return null;
+	const time = (t: Timed) => (gpu ? (t.gpuMs ?? Number.NaN) : t.median);
+	const shaded = pixelFit(points.map((p) => [megapixels(p), time(p.still)] as const));
+	const depth = points.every((p) => p.depthOnly)
+		? pixelFit(points.map((p) => [megapixels(p), time(p.depthOnly as Timed)] as const))
+		: null;
+	const stages: [StageRow["stage"], PixelFit][] = [];
+	for (const row of points[0].gpu) {
+		const fit = pixelFit(
+			points.map(
+				(p) =>
+					[megapixels(p), p.gpu.find((r) => r.stage === row.stage)?.median ?? Number.NaN] as const,
+			),
+		);
+		if (fit) stages.push([row.stage, fit]);
+	}
+	return { shaded, depth, stages };
 }
 
 export interface BenchmarkLevelResult {
@@ -130,7 +211,7 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	const lines: string[] = [];
 	const total = runScore(result);
 	lines.push(
-		`Roswaal Benchmark ${result.benchmark} · Roswaal ${result.release} · ${result.ab ? `A/B: ${result.ab.label}` : result.kind === "sweep" ? "Full sweep" : "Current settings"}`,
+		`Roswaal Benchmark ${result.benchmark} · Roswaal ${result.release} · ${result.ab ? `A/B: ${result.ab.label}` : result.kind === "sweep" ? "Full sweep" : result.kind === "pixels" ? "Pixel cost" : "Current settings"}`,
 	);
 	lines.push(
 		`Renderer: ${result.renderer} · GPU: ${result.gpu} · GPU timers: ${result.gpuTimers ? "yes" : "no"} · Pixel ratio ${Number(result.pixelRatio.toFixed(2))}`,
@@ -150,6 +231,10 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	);
 	if (result.ab) {
 		lines.push(...abReport(result));
+		return lines.join("\n");
+	}
+	if (result.kind === "pixels") {
+		lines.push(...pixelsReport(result));
 		return lines.join("\n");
 	}
 	for (const level of result.levels) {
@@ -285,6 +370,59 @@ function abReport(result: BenchmarkResult): string[] {
 						: `no clear difference (±${msText(f.noise)})`;
 			lines.push(
 				`  ${name.padEnd(28)}${msText(f.on).padStart(10)}${msText(f.off).padStart(10)}${saves.padStart(10)}  ${verdict}`,
+			);
+		}
+	}
+	return lines;
+}
+
+const middle = (values: number[]) => {
+	const v = values.filter(Number.isFinite).sort((a, b) => a - b);
+	if (v.length === 0) return Number.NaN;
+	const m = Math.floor(v.length / 2);
+	return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+
+/** "3.71": a cost per million pixels in ms, which is also nanoseconds a pixel. */
+const nsText = (v: number | undefined) =>
+	v !== undefined && Number.isFinite(v) ? (Math.abs(v) < 0.005 ? 0 : v).toFixed(2) : "–";
+
+function pixelsReport(result: BenchmarkResult): string[] {
+	const gpu = result.gpuTimers;
+	const lines: string[] = [];
+	lines.push(
+		`Each station timed at every render scale this screen has, shaded and as the parts' depth alone, by the ${gpu ? "GPU's own time" : "frame interval"}, and fitted as a fixed cost plus a cost per million pixels. 1 ms per million pixels is 1 ns a pixel.`,
+	);
+	for (const level of result.levels) {
+		const fits = level.stations.map((s) => [s, stationPixelFits(s, gpu)] as const);
+		const sizes = (level.stations[0]?.pixels ?? []).map(
+			(p) => `${Math.round(p.scale * 100)}% ${p.width}×${p.height}`,
+		);
+		lines.push("");
+		lines.push(`${level.label} · ${level.antialias} · ${sizes.join(", ")}`);
+		const shaded = fits.map(([, f]) => f?.shaded?.perMp ?? Number.NaN);
+		const depth = fits.map(([, f]) => f?.depth?.perMp ?? Number.NaN);
+		const finite = shaded.filter(Number.isFinite);
+		lines.push(
+			`  A shaded pixel: ${nsText(middle(shaded))} ns across the stations (the median), up to ${nsText(finite.length ? Math.max(...finite) : Number.NaN)}; the parts' depth alone ${nsText(middle(depth))} ns.`,
+		);
+		lines.push(
+			`  ${"Station".padEnd(28)}${"Fixed".padStart(9)}${"Per Mpx".padStart(10)}${"Depth".padStart(9)}${"Shading".padStart(10)}${"Fit".padStart(7)}`,
+		);
+		for (const [s, f] of fits) {
+			const name = `${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`;
+			const shading = f?.shaded && f.depth ? f.shaded.perMp - f.depth.perMp : Number.NaN;
+			lines.push(
+				`  ${name.padEnd(28)}${(f?.shaded ? msText(f.shaded.fixed) : "–").padStart(9)}${nsText(f?.shaded?.perMp).padStart(10)}${nsText(f?.depth?.perMp).padStart(9)}${nsText(shading).padStart(10)}${nsText(f?.shaded?.r2).padStart(7)}`,
+			);
+		}
+		lines.push("");
+		lines.push("  Each station's GPU stages: per million pixels, and fixed:");
+		for (const [s, f] of fits) {
+			if (!f || f.stages.length === 0) continue;
+			lines.push(`  ${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`);
+			lines.push(
+				`      ${f.stages.map(([stage, fit]) => `${STAGE_SHORT[stage]} ${nsText(fit.perMp)} (${msText(fit.fixed)})`).join(" · ")}`,
 			);
 		}
 	}

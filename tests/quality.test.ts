@@ -100,13 +100,14 @@ describe("quality levels", () => {
 			"smaa",
 			"smaa",
 		]);
-		expect([1, 2, 3, 9, 10, 17, 18].map((n) => qualityLevel(n).scale)).toEqual([
+		expect([1, 2, 3, 9, 10, 17, 18, 19].map((n) => qualityLevel(n).scale)).toEqual([
 			0.5,
 			0.5,
 			0.75,
 			0.75,
 			1,
 			1,
+			1.5,
 			"native",
 		]);
 	});

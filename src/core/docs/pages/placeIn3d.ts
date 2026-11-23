@@ -284,7 +284,7 @@ export function placeEditorRenderingPage(): DocPage {
 					["13–16", "Parts to 2,200–6,000 studs, SMAA, shadows reaching further"],
 					[
 						"17–21",
-						"Every part, far shadows, soft edges, sky and scene reflections, blur; from 18 the screen's native resolution; 21 is As Studio. No level turns on MSAA: Settings' Antialiasing does",
+						"Every part, far shadows, soft edges, sky and scene reflections, blur; 150% at 18 and the screen's native resolution from 19; 21 is As Studio. No level turns on MSAA: Settings' Antialiasing does",
 					],
 				],
 			},
@@ -544,6 +544,9 @@ export function placeEditorPerformancePage(): DocPage {
 					"A run draws with the Rendering panel's switches as they are, and its report names any that are off. " +
 					"**A/B a switch**, in Settings, measures every station with one switch on, off, on and off, back to " +
 					"back, so a warming device slows both alike, and says what the switch saves or costs at each. " +
+					"**Pixel cost** measures every station at each render scale the screen has, from 50% to Native, " +
+					"shaded and as the parts' depth alone, and fits what a frame costs however few pixels it has and " +
+					"what each pixel adds, for the whole frame and each GPU stage. " +
 					"**Copy report** gives the text; **Download results** saves the whole run as JSON.",
 			},
 			{

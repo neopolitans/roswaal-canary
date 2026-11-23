@@ -15,10 +15,12 @@ import { type LightingParams, SKY_FACES } from "../../core/lighting.js";
 import type { FileMesh } from "../../core/mesh.js";
 import { type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import { addUnions, unionOutline, unionsWaiting } from "../../core/unions.js";
-import type {
-	BenchmarkKind,
-	BenchmarkResult,
-	BenchmarkStationResult,
+import {
+	type BenchmarkKind,
+	type BenchmarkResult,
+	type BenchmarkStationResult,
+	PIXEL_SCALES,
+	type PixelPoint,
 } from "../benchmark/result.js";
 import type { Station } from "../benchmark/stations.js";
 import { type AntialiasMode, antialiasInfo } from "./antialias.js";
@@ -2278,7 +2280,8 @@ export class ViewportController {
 		const startLevel = this.state.quality.level;
 		const levels: (number | null)[] =
 			run.kind === "sweep" && !run.ab ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
-		const passes = run.ab ? 1 : (run.passes ?? 1);
+		const pixels = run.kind === "pixels" && !run.ab;
+		const passes = run.ab || pixels ? 1 : (run.passes ?? 1);
 		const busy = run.measure === "busy";
 		const renderWas = this.state.render;
 		const base = run.features ?? renderWas.features;
@@ -2349,6 +2352,16 @@ export class ViewportController {
 							while (performance.now() < until && !run.cancelled())
 								await this.waitedFrames(1, 1000);
 						}
+						if (pixels) {
+							rows.push(
+								await this.pixelCost(station, variant.label, busy, timeStill, run.cancelled, (p) =>
+									report(label, station, variant.label, p),
+								),
+							);
+							lastFrame = rows[rows.length - 1].still.median;
+							done++;
+							continue;
+						}
 						if (run.ab) {
 							const on: Timed[] = [];
 							const off: Timed[] = [];
@@ -2366,7 +2379,6 @@ export class ViewportController {
 								lastFrame = timed.median;
 							}
 							this.setRender({ ...this.state.render, features: base });
-							const stats = this.view?.stats();
 							if (on.length === 2 && off.length === 2)
 								rows.push({
 									n: station.n,
@@ -2378,13 +2390,7 @@ export class ViewportController {
 									gpu: [],
 									gpuTotal: { median: Number.NaN, p95: Number.NaN },
 									moving: [],
-									counts: {
-										draws: stats?.draws ?? 0,
-										instances: stats?.instances ?? 0,
-										triangles: stats?.triangles ?? 0,
-										particles: stats?.particles ?? 0,
-										beams: stats?.beams ?? 0,
-									},
+									counts: this.benchCounts(),
 								});
 							done++;
 							continue;
@@ -2393,18 +2399,8 @@ export class ViewportController {
 						const still = await timeStill(station.name);
 						lastFrame = still.median;
 						report(label, station, variant.label, "Stages");
-						const view = this.view;
-						if (!view) break;
-						const gpuFrames: StageFrame[] = [];
-						view.setProfiling(
-							() => {},
-							(each) => gpuFrames.push(each),
-						);
-						if (busy) await this.busyFrames(30);
-						else await this.waitedFrames(30, PROFILE_BUDGET);
-						await view.settled();
-						await new Promise((r) => setTimeout(r, 50));
-						view.setProfiling(null);
+						if (!this.view) break;
+						const gpuFrames = await this.stageFrames(busy);
 						report(
 							label,
 							station,
@@ -2416,7 +2412,6 @@ export class ViewportController {
 							station.allMotions ? undefined : ["Orbit drag"],
 							busy,
 						);
-						const stats = this.view?.stats();
 						rows.push({
 							n: station.n,
 							id: station.id,
@@ -2426,13 +2421,7 @@ export class ViewportController {
 							gpu: stageRows(gpuFrames, busy ? steady : undefined),
 							gpuTotal: stagesTotal(gpuFrames, busy ? steady : undefined),
 							moving,
-							counts: {
-								draws: stats?.draws ?? 0,
-								instances: stats?.instances ?? 0,
-								triangles: stats?.triangles ?? 0,
-								particles: stats?.particles ?? 0,
-								beams: stats?.beams ?? 0,
-							},
+							counts: this.benchCounts(),
 						});
 						done++;
 					}
@@ -2468,14 +2457,114 @@ export class ViewportController {
 			}
 		} finally {
 			this.set({ profiling: null });
+			this.view?.setProbe(null);
 			this.options = options;
 			this.auto = auto;
+			if (pixels) this.fit();
 			if (this.state.render.features !== renderWas.features) this.setRender(renderWas);
 			if (levels[0] !== null && this.state.quality.level !== startLevel)
 				await this.toLevel(startLevel, false);
 		}
 		if (run.cancelled()) result.cancelled = true;
 		return result;
+	}
+
+	/** What the view draws now, for a benchmark station's row. */
+	private benchCounts(): BenchmarkStationResult["counts"] {
+		const stats = this.view?.stats();
+		return {
+			draws: stats?.draws ?? 0,
+			instances: stats?.instances ?? 0,
+			triangles: stats?.triangles ?? 0,
+			particles: stats?.particles ?? 0,
+			beams: stats?.beams ?? 0,
+		};
+	}
+
+	/** The GPU's stages for 30 frames, as the benchmark times them. */
+	private async stageFrames(busy: boolean): Promise<StageFrame[]> {
+		const view = this.view;
+		if (!view) return [];
+		const gpuFrames: StageFrame[] = [];
+		view.setProfiling(
+			() => {},
+			(each) => gpuFrames.push(each),
+		);
+		if (busy) await this.busyFrames(30);
+		else await this.waitedFrames(30, PROFILE_BUDGET);
+		await view.settled();
+		await new Promise((r) => setTimeout(r, 50));
+		view.setProfiling(null);
+		return gpuFrames;
+	}
+
+	/**
+	 * A Pixel cost run's station: its still frame at each of PIXEL_SCALES the
+	 * screen has (a 1x screen stops at 100%), shaded and as the parts' depth
+	 * alone, with the GPU's stages, so the time a pixel adds can be fitted
+	 * apart from what a frame costs however few it has (see pixelFit).
+	 */
+	private async pixelCost(
+		station: Station,
+		variant: string,
+		busy: boolean,
+		timeStill: (label: string) => Promise<Timed>,
+		cancelled: () => boolean,
+		phase: (name: string) => void,
+	): Promise<BenchmarkStationResult> {
+		const native = Math.min(2, devicePixelRatio || 1);
+		const asked = this.options;
+		const points: PixelPoint[] = [];
+		const sizes = new Set<string>();
+		try {
+			for (const want of PIXEL_SCALES) {
+				if (cancelled() || !this.view) break;
+				const scale = Math.min(native, want);
+				this.options = { ...asked, renderScale: scale };
+				this.fit();
+				const width = this.canvas?.width ?? 0;
+				const height = this.canvas?.height ?? 0;
+				if (sizes.has(`${width}x${height}`)) continue;
+				sizes.add(`${width}x${height}`);
+				await this.waitedFrames(10, 2000);
+				phase(`${Math.round(scale * 100)}%, shaded`);
+				const still = await timeStill(station.name);
+				const gpuFrames = await this.stageFrames(busy);
+				let depthOnly: Timed | undefined;
+				if (this.view?.setProbe("depth")) {
+					phase(`${Math.round(scale * 100)}%, depth only`);
+					await this.waitedFrames(3, 1000);
+					depthOnly = await timeStill(station.name);
+					this.view?.setProbe(null);
+				}
+				points.push({
+					scale,
+					width,
+					height,
+					still,
+					...(depthOnly ? { depthOnly } : {}),
+					gpu: stageRows(gpuFrames, busy ? steady : undefined),
+					gpuTotal: stagesTotal(gpuFrames, busy ? steady : undefined),
+				});
+			}
+		} finally {
+			this.view?.setProbe(null);
+			this.options = asked;
+			this.fit();
+		}
+		const top = points[points.length - 1];
+		return {
+			n: station.n,
+			id: station.id,
+			name: station.name,
+			variant,
+			still: top?.still ?? { label: station.name, median: Number.NaN, p95: Number.NaN },
+			gpu: top?.gpu ?? [],
+			gpuTotal: top?.gpuTotal ?? { median: Number.NaN, p95: Number.NaN },
+			moving: [],
+			counts: this.benchCounts(),
+			pixels: points,
+		};
 	}
 
 	private async toLevel(level: number, reset: boolean): Promise<void> {

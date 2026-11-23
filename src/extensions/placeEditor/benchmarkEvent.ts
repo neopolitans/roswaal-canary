@@ -5,8 +5,11 @@
  * Editor's.
  */
 
-/** "ab": each station's still frame with one render switch on and off, in turn. */
-export type BenchmarkKind = "current" | "sweep" | "ab";
+/**
+ * "ab": each station's still frame with one render switch on and off, in
+ * turn. "pixels": each at every render scale, for what a pixel costs.
+ */
+export type BenchmarkKind = "current" | "sweep" | "ab" | "pixels";
 
 /** What a run is asked for: its kind, and whether each station is measured twice. */
 export interface BenchmarkRequest {

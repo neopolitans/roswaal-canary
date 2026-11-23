@@ -61,6 +61,7 @@ export type ViewportQuality = "auto" | `${number}`;
 export const VIEWPORT_RENDER_SCALES = [
 	{ value: "auto", label: "Automatic" },
 	{ value: "native", label: "Native" },
+	{ value: "150", label: "150%" },
 	{ value: "100", label: "100%" },
 	{ value: "75", label: "75%" },
 	{ value: "50", label: "50%" },
@@ -143,7 +144,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "renderScale",
 				title: "Render scale",
-				help: "How many pixels the place is drawn at, across and down, as a share of the page's own: a Retina screen has twice as many each way, which Native draws. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, Native from 18",
+				help: "How many pixels the place is drawn at, across and down, as a share of the page's own: a Retina screen has twice as many each way, which Native draws. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,

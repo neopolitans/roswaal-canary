@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.34",
+		date: "2026-11-23",
+		headline: "Quality Level 18 draws at 150%, and the benchmark measures what a pixel costs.",
+		changed: [
+			"**Quality Level 18 draws at 150%** of the page's pixels, Native from Level 19. On a Retina screen Native is four times 100%'s pixels, and an iPad's frame time quadrupled at Level 18.",
+			"**Render scale** has 150%.",
+		],
+		added: [
+			"**Pixel cost**, in Settings › Scene view › Benchmark, times every station at each render scale the screen has, shaded and as the parts' depth alone, and reports what a frame costs however few pixels it has and what each pixel adds, by GPU stage.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.33",
 		date: "2026-11-23",
 		headline: "Converting a place keeps its Expanded Terrain.",

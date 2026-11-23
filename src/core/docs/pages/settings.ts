@@ -269,7 +269,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Render scale",
-						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, Native from 18); **Native**, every pixel the screen has, twice as many each way on a Retina screen; or **100%**, **75%** or **50%**. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
+						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19); **Native**, every pixel the screen has, twice as many each way on a Retina screen; or **150%**, **100%**, **75%** or **50%**. A share past the screen's own pixels draws Native. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
 					],
 					[
 						"Antialiasing",

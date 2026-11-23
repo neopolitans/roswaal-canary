@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.32",
+		date: "2026-11-23",
+		headline: "A place's AssetContentMap properties are named in what Roswaal leaves out.",
+		fixed: [
+			"**A place file's AssetContentMap properties** are named as such where Roswaal lists what it left out, rather than as type 35.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.31",
 		date: "2026-11-23",
 		headline: "A web page that fails to start says so, rather than staying blank.",

@@ -91,7 +91,7 @@ describe("the binary reader", () => {
 						className: "ParticleEmitter",
 						name: "Sparks",
 						props: {
-							// Type 35, Terrain's asset content map: a type this reader leaves alone.
+							// Type 35, AssetContentMap: a type this reader leaves alone, named in what it left out.
 							VoxelGridAssetContentMap: {
 								type: 35,
 								value: Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 0),
@@ -108,7 +108,7 @@ describe("the binary reader", () => {
 				]),
 			]),
 		);
-		expect(doc.undecoded.get("type 35")).toBe(1);
+		expect(doc.undecoded.get("AssetContentMap")).toBe(1);
 		const sparks = doc.instances.find((i) => i.name === "Sparks")!;
 		expect(sparks.props.has("VoxelGridAssetContentMap")).toBe(false);
 		expect(sparks.props.get("Size")?.value).toEqual([

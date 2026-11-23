@@ -75,6 +75,9 @@ const TYPE_NAMES: Record<number, string> = {
 	32: "Font",
 	33: "SecurityCapabilities",
 	34: "Content",
+	// Not decoded: named so a place's left-out list says what it is. A general
+	// type, not Terrain's alone, as Rojo's maintainers confirmed (23 Nov 2026).
+	35: "AssetContentMap",
 };
 
 class Reader {

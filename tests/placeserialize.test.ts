@@ -215,10 +215,10 @@ describe("converting a place", () => {
 	it("reports the kinds of property it could not carry", () => {
 		const xml = `<roblox version="4"><Item class="Part" referent="RBX1"><Properties>
 			<string name="Name">P</string>
-			<AssetContentMap name="VoxelGridAssetContentMap">[]</AssetContentMap>
+			<FutureType name="Mystery">1</FutureType>
 		</Properties></Item></roblox>`;
 		const converted = convertPlace(utf8.encode(xml), "rbxl");
-		expect(converted.leftOut.map(([type]) => type)).toEqual(["AssetContentMap"]);
+		expect(converted.leftOut.map(([type]) => type)).toEqual(["FutureType"]);
 		expect(readRbx(converted.bytes).instances[0]!.name).toBe("P");
 	});
 

@@ -12,6 +12,7 @@ import { ownTable } from "../ownTable.js";
 import { ENGINE, type EngineProperty, findProperty } from "../robloxEngine.js";
 import { attributeEdit, attributeEntries } from "./attributes.js";
 import {
+	type AssetContentMapValue,
 	type ContentValue,
 	type FontValue,
 	type PhysicalValue,
@@ -472,6 +473,16 @@ function formatValue(
 		case "Content": {
 			const c = prop.value as ContentValue;
 			return { value: c.source === 1 ? (c.uri ?? "") : "None" };
+		}
+		case "AssetContentMap": {
+			const m = prop.value as AssetContentMapValue;
+			if (!m.entries) return { value: `In uploaded asset ${m.bundle ?? ""}` };
+			const bytes = m.entries.reduce((sum, [, data]) => sum + data.length, 0);
+			const size =
+				bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
+			return {
+				value: `${m.entries.length} ${m.entries.length === 1 ? "entry" : "entries"}, ${size}`,
+			};
 		}
 		case "UDim2": {
 			const [sx, ox, sy, oy] = prop.value as number[];

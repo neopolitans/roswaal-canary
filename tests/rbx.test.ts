@@ -91,9 +91,9 @@ describe("the binary reader", () => {
 						className: "ParticleEmitter",
 						name: "Sparks",
 						props: {
-							// Type 35, AssetContentMap: a type this reader leaves alone, named in what it left out.
-							VoxelGridAssetContentMap: {
-								type: 35,
+							// Type 99, which no Roblox type is yet: one this reader leaves alone, counted.
+							FutureProperty: {
+								type: 99,
 								value: Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 0, 0),
 							},
 							Size: {
@@ -108,9 +108,9 @@ describe("the binary reader", () => {
 				]),
 			]),
 		);
-		expect(doc.undecoded.get("AssetContentMap")).toBe(1);
+		expect(doc.undecoded.get("type 99")).toBe(1);
 		const sparks = doc.instances.find((i) => i.name === "Sparks")!;
-		expect(sparks.props.has("VoxelGridAssetContentMap")).toBe(false);
+		expect(sparks.props.has("FutureProperty")).toBe(false);
 		expect(sparks.props.get("Size")?.value).toEqual([
 			[0, 1, 0],
 			[1, 2, 0],
@@ -205,7 +205,9 @@ describe("the XML reader", () => {
 			style: 0,
 			cachedFaceId: "",
 		});
-		expect(doc.undecoded.get("AssetContentMap")).toBe(1);
+		// An empty AssetContentMap, as rbx-dom's docs/xml.md writes one.
+		expect(ws.props.get("VoxelGridAssetContentMap")?.value).toEqual({ entries: [] });
+		expect(doc.undecoded.size).toBe(0);
 	});
 
 	it("says where malformed XML goes wrong", () => {

@@ -289,7 +289,7 @@ describe("a binary place with a property Roswaal does not read", () => {
 				{
 					className: "Folder",
 					name: "Odd",
-					props: { Mystery: { type: 35, value: Uint8Array.of(1, 2, 3, 4) } },
+					props: { Mystery: { type: 99, value: Uint8Array.of(1, 2, 3, 4) } },
 				},
 				{ className: "Part", name: "Plate" },
 			]),

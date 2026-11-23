@@ -19,6 +19,7 @@
 
 import { chunkData, readChunks, readReferents, transposedU32s, unzigzag } from "./chunks.js";
 import {
+	type AssetContentMapValue,
 	asRbxError,
 	type CFrameValue,
 	type Prop,
@@ -75,8 +76,7 @@ const TYPE_NAMES: Record<number, string> = {
 	32: "Font",
 	33: "SecurityCapabilities",
 	34: "Content",
-	// Not decoded: named so a place's left-out list says what it is. A general
-	// type, not Terrain's alone, as Rojo's maintainers confirmed (23 Nov 2026).
+	// A general type, not Terrain's alone, as Rojo's maintainers confirmed (23 Nov 2026).
 	35: "AssetContentMap",
 };
 
@@ -387,6 +387,37 @@ function readValues(
 			);
 			if (next !== uris.length) return undefined;
 			return ["Content", out];
+		}
+		case 35: {
+			// AssetContentMap, as rbx-dom's docs/binary.md describes it: not
+			// interleaved, each value whole in turn. A flag byte; bit 0, a
+			// bundle's asset id; bit 1, a little-endian i64 count and that many
+			// key and data strings. A flag this does not know, or a value that
+			// runs past its chunk, leaves the property undecoded rather than read
+			// wrong or the place refused: before this read it, every place with
+			// one opened.
+			const out: AssetContentMapValue[] = [];
+			try {
+				for (let i = 0; i < count; i++) {
+					const flags = r.u8();
+					if (flags & ~3) return undefined;
+					const value: AssetContentMapValue = {};
+					if (flags & 1) value.bundle = text(r.string());
+					if (flags & 2) {
+						const n = r.bytes(8);
+						const low = (n[0] | (n[1] << 8) | (n[2] << 16) | (n[3] << 24)) >>> 0;
+						const high = (n[4] | (n[5] << 8) | (n[6] << 16) | (n[7] << 24)) >>> 0;
+						if (high !== 0) return undefined;
+						const entries: [string, Uint8Array][] = [];
+						for (let k = 0; k < low; k++) entries.push([text(r.string()), r.string()]);
+						value.entries = entries;
+					}
+					out.push(value);
+				}
+			} catch {
+				return undefined;
+			}
+			return ["AssetContentMap", out];
 		}
 		case 31: {
 			// 16 bytes a value, transposed like everything else. Kept as hex,

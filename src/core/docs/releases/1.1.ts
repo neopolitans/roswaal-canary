@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.33",
+		date: "2026-11-23",
+		headline: "Converting a place keeps its Expanded Terrain.",
+		fixed: [
+			"**Converting a place between .rbxl and .rbxlx keeps its Expanded Terrain.** Roswaal now reads and writes AssetContentMap, where Roblox keeps the terrain's voxels; a converted place lost them. A map only in an uploaded bundle cannot be written to .rbxlx, and the export says so.",
+		],
+		changed: ["**Properties** shows an AssetContentMap as its number of entries and their size."],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.32",
 		date: "2026-11-23",
 		headline: "A place's AssetContentMap properties are named in what Roswaal leaves out.",

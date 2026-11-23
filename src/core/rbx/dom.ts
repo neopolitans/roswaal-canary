@@ -40,6 +40,7 @@ export type PropType =
 	| "Font"
 	| "SecurityCapabilities"
 	| "Content"
+	| "AssetContentMap"
 	// A handle's faces and axes, as bitmasks; a RayValue's origin then
 	// direction; a TerrainRegion's corners in whole studs.
 	| "Faces"
@@ -82,6 +83,20 @@ export interface ContentValue {
 	uri?: string;
 	/** For an Object: the instance, or null where it is not in the file. */
 	object?: RbxInstance | null;
+}
+
+/**
+ * An AssetContentMap: named pieces of binary data, which Roblox keeps
+ * Expanded Terrain's voxels in (Terrain.VoxelGridAssetContentMap). Either
+ * the entries are in the file, or `bundle` names an uploaded asset that holds
+ * them. The data is opaque: carried, never read. The layout is rbx-dom's
+ * published description of the format (docs/binary.md and docs/xml.md).
+ */
+export interface AssetContentMapValue {
+	/** The uploaded asset holding the entries, as decimal digits; "0" for none. */
+	bundle?: string;
+	/** Each key and its data, in the file's order; absent where the file keeps none. */
+	entries?: [string, Uint8Array][];
 }
 
 export interface CFrameValue {

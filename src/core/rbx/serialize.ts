@@ -20,6 +20,7 @@ import { md5 } from "../md5.js";
 import { findProperty } from "../robloxEngine.js";
 import { cdata, putU32, sealChunk, zigzag } from "./chunks.js";
 import {
+	type AssetContentMapValue,
 	type CFrameValue,
 	type ContentValue,
 	type FontValue,
@@ -113,6 +114,7 @@ export const TYPE_BYTE: Record<string, number> = {
 	Font: 32,
 	SecurityCapabilities: 33,
 	Content: 34,
+	AssetContentMap: 35,
 	OptionalCFrame: 30,
 	UniqueId: 31,
 };
@@ -272,6 +274,21 @@ export function binaryValues(
 			w.bytes(out);
 			return;
 		}
+		case "AssetContentMap":
+			// Each value whole, one after another: see binary.ts's reader.
+			for (const v of vs as AssetContentMapValue[]) {
+				w.u8((v.bundle !== undefined ? 1 : 0) | (v.entries ? 2 : 0));
+				if (v.bundle !== undefined) w.string(v.bundle);
+				if (v.entries) {
+					w.u32(v.entries.length);
+					w.u32(0);
+					for (const [key, data] of v.entries) {
+						w.string(key);
+						w.string(data);
+					}
+				}
+			}
+			return;
 		case "Content": {
 			const values = vs as ContentValue[];
 			w.ints(values.map((v) => v.source));
@@ -413,6 +430,8 @@ export function blank(type: string): unknown {
 			return 0n;
 		case "Content":
 			return { source: 0 } satisfies ContentValue;
+		case "AssetContentMap":
+			return { entries: [] } satisfies AssetContentMapValue;
 		case "UniqueId":
 			return "0".repeat(32);
 		default:
@@ -699,6 +718,19 @@ export function xmlProperty(
 		}
 		case "SecurityCapabilities":
 			return el("SecurityCapabilities", String(v));
+		case "AssetContentMap": {
+			const m = v as AssetContentMapValue;
+			// XML has no form for a bundle: a map only in one is left out, as
+			// rbx-dom's docs/xml.md requires, never written as an empty one.
+			if (!m.entries)
+				return `<!-- ${n}: AssetContentMap in uploaded bundle ${escapeXml((m.bundle ?? "").replace(/-/g, ""))}, which XML cannot hold -->`;
+			// Keys are unique in XML; Roblox keeps the first of a repeated one.
+			const seen = new Set<string>();
+			const entries = m.entries
+				.filter(([key]) => !seen.has(key) && (seen.add(key), true))
+				.map(([key, data]) => ({ key, data: base64(data) }));
+			return el("AssetContentMap", escapeXml(JSON.stringify(entries)));
+		}
 		case "Content": {
 			const c = v as ContentValue;
 			return el(
@@ -839,8 +871,18 @@ export function leftOutOf(bytes: Uint8Array): [string, number][] {
 export function convertPlace(bytes: Uint8Array, to: PlaceFormat): ConvertedPlace {
 	const doc = readRbx(bytes);
 	if ((doc.format === "binary") === (to === "rbxl")) return { bytes, leftOut: [] };
+	const leftOut = new Map(doc.undecoded);
+	// XML cannot hold an AssetContentMap that is only in an uploaded bundle.
+	if (to === "rbxlx") {
+		let bundled = 0;
+		for (const inst of doc.instances)
+			for (const prop of inst.props.values())
+				if (prop.type === "AssetContentMap" && !(prop.value as AssetContentMapValue).entries)
+					bundled++;
+		if (bundled > 0) leftOut.set("AssetContentMap in an uploaded bundle", bundled);
+	}
 	return {
 		bytes: to === "rbxl" ? writeBinaryPlace(doc) : utf8.encode(writeXmlPlace(doc)),
-		leftOut: [...doc.undecoded].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+		leftOut: [...leftOut].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
 	};
 }

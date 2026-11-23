@@ -210,6 +210,24 @@ function readValue(
 			if (el.children.some((c) => c.name === "null")) return ["String", new Uint8Array(0)];
 			return undefined;
 		}
+		case "AssetContentMap": {
+			// A JSON array of { key, data }, the data Base64 (rbx-dom's
+			// docs/xml.md). Anything else is left undecoded.
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(t);
+			} catch {
+				return undefined;
+			}
+			if (!Array.isArray(parsed)) return undefined;
+			const entries: [string, Uint8Array][] = [];
+			for (const item of parsed) {
+				const { key, data } = (item ?? {}) as { key?: unknown; data?: unknown };
+				if (typeof key !== "string" || typeof data !== "string") return undefined;
+				entries.push([key, base64(data.replace(/\s+/g, ""))]);
+			}
+			return ["AssetContentMap", { entries }];
+		}
 		case "bool":
 			return ["Bool", t.trim() === "true"];
 		case "int":

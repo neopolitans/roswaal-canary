@@ -542,6 +542,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "Value", type: "boolean" },
 	],
 	BoxHandleAdornment: [
+		{ name: "DoubleSided", type: "boolean" },
 		{ name: "Shading", type: "string", enum: "AdornShading" },
 		{ name: "Size", type: "Vector3" },
 	],
@@ -732,6 +733,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "Threshold", type: "number" },
 	],
 	ConeHandleAdornment: [
+		{ name: "DoubleSided", type: "boolean" },
 		{ name: "Height", type: "number" },
 		{ name: "Hollow", type: "boolean" },
 		{ name: "Radius", type: "number" },
@@ -789,6 +791,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 	],
 	CylinderHandleAdornment: [
 		{ name: "Angle", type: "number" },
+		{ name: "DoubleSided", type: "boolean" },
 		{ name: "Height", type: "number" },
 		{ name: "InnerRadius", type: "number" },
 		{ name: "Radius", type: "number" },
@@ -874,6 +877,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "MetalnessMapContent", type: "string" },
 		{ name: "NormalMap", type: "string" },
 		{ name: "NormalMapContent", type: "string" },
+		{ name: "ResampleMode", type: "string", enum: "ResamplerMode" },
 		{ name: "Rotation", type: "number" },
 		{ name: "RoughnessMap", type: "string" },
 		{ name: "RoughnessMapContent", type: "string" },
@@ -1302,6 +1306,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "Sit", type: "boolean" },
 		{ name: "TargetPoint", type: "Vector3" },
 		{ name: "UseJumpPower", type: "boolean" },
+		{ name: "UsesAvatarCollider", type: "boolean" },
 		{ name: "WalkSpeed", type: "number" },
 		{ name: "WalkToPart", type: "BasePart" },
 		{ name: "WalkToPoint", type: "Vector3" },
@@ -1493,6 +1498,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "TileSize", type: "UDim2" },
 	],
 	ImageHandleAdornment: [
+		{ name: "DoubleSided", type: "boolean" },
 		{ name: "Image", type: "string" },
 		{ name: "ImageContent", type: "string" },
 		{ name: "Size", type: "Vector2" },
@@ -1968,6 +1974,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "Adornee", type: "PVInstance" },
 	],
 	PyramidHandleAdornment: [
+		{ name: "DoubleSided", type: "boolean" },
 		{ name: "Height", type: "number" },
 		{ name: "Shading", type: "string", enum: "AdornShading" },
 		{ name: "Sides", type: "number" },
@@ -2230,6 +2237,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "MeshType", type: "string", enum: "MeshType" },
 	],
 	SphereHandleAdornment: [
+		{ name: "DoubleSided", type: "boolean" },
 		{ name: "Radius", type: "number" },
 		{ name: "Shading", type: "string", enum: "AdornShading" },
 	],
@@ -2397,6 +2405,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "ReservedServerAccessCode", type: "string" },
 	],
 	TeleportOptions: [
+		{ name: "ForcePublicServer", type: "boolean" },
 		{ name: "ReservedServerId", type: "string" },
 		{ name: "ServerInstanceId", type: "string" },
 		{ name: "VipServerId", type: "string" },
@@ -2422,18 +2431,7 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 		{ name: "SizeInCells", type: "Vector3" },
 	],
 	TestService: [
-		{ name: "AutoRuns", type: "boolean" },
-		{ name: "Description", type: "string" },
-		{ name: "ErrorCount", type: "number" },
-		{ name: "ExecuteWithStudioRun", type: "boolean" },
-		{ name: "IsPhysicsEnvironmentalThrottled", type: "boolean" },
-		{ name: "IsSleepAllowed", type: "boolean" },
-		{ name: "NumberOfPlayers", type: "number" },
-		{ name: "SimulateSecondsLag", type: "number" },
-		{ name: "TestCount", type: "number" },
-		{ name: "ThrottlePhysicsToRealtime", type: "boolean" },
-		{ name: "Timeout", type: "number" },
-		{ name: "WarnCount", type: "number" },
+		{ name: "Enabled", type: "boolean" },
 	],
 	TextBox: [
 		{ name: "ClearTextOnFocus", type: "boolean" },
@@ -2502,7 +2500,9 @@ export const CLASS_PROPERTIES: Readonly<Record<string, readonly ClassProperty[]>
 	],
 	TextChatCommand: [
 		{ name: "AutocompleteVisible", type: "boolean" },
+		{ name: "DeliverMessage", type: "boolean" },
 		{ name: "Enabled", type: "boolean" },
+		{ name: "MatchMode", type: "TextChatCommandMatchMode" },
 		{ name: "PrimaryAlias", type: "string" },
 		{ name: "SecondaryAlias", type: "string" },
 	],

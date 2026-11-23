@@ -100,7 +100,11 @@ export function Benchmark({
 		let shown = 0;
 		void (async () => {
 			if (!(await controller.whenReady())) {
-				if (!stopped) setFailed("The view did not start.");
+				if (!stopped)
+					setFailed(
+						controller.getState().error ??
+							"The view did not start in time. Run it again: a second try starts faster, as the browser keeps the shaders it built.",
+					);
 				return;
 			}
 			try {
@@ -164,7 +168,12 @@ export function Benchmark({
 							</span>
 						</>
 					) : (
-						<strong>Roswaal Benchmark {BENCHMARK_VERSION}</strong>
+						<>
+							<strong>Roswaal Benchmark {BENCHMARK_VERSION}</strong>
+							<span>
+								Starting the view: after an update, building its shaders can take a minute
+							</span>
+						</>
 					)}
 				</div>
 			)}

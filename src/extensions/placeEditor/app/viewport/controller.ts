@@ -2237,7 +2237,13 @@ export class ViewportController {
 	async whenReady(): Promise<boolean> {
 		const from = performance.now();
 		while (!this.view || this.starting) {
-			if (performance.now() - from > 20000) return false;
+			if (this.state.error) return false;
+			// Waited for as long as it is under way: after an update a tablet's
+			// browser compiles every shader afresh, which took an iPad past the
+			// 20 seconds this once allowed (23 Nov 2026). Twenty seconds only
+			// for a start that has not begun, and three minutes at most.
+			const waited = performance.now() - from;
+			if ((!this.starting && waited > 20000) || waited > 180000) return false;
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		await this.viewSettled();

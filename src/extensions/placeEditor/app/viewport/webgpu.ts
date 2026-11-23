@@ -57,6 +57,7 @@ import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.
 import { OVERDRAW_WGSL, VIEWS_WGSL } from "./renderViews.js";
 import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
+import { MOVING_DECAY, UPSCALE_WGSL, type UpscaleMode } from "./upscale.js";
 import {
 	BLOOM_STEEP,
 	BLOOM_STRENGTH,
@@ -130,6 +131,13 @@ import {
 	type ViewQuality,
 	type ViewRenderer,
 } from "./view.js";
+
+/** What a frame is to upscaling: the first since a move, the history full, beams or particles moving. */
+interface UpStep {
+	fresh: boolean;
+	settled: boolean;
+	moving: boolean;
+}
 
 // WebGPU's flags, as the spec numbers them: TypeScript's DOM types have the
 // interfaces but not these namespaces.
@@ -266,8 +274,8 @@ const SAMPLES = 4;
 
 /** The pipelines built again for one set of switches: see WebGpuView.litFor. */
 type LitKind = "solid" | "solidWrite" | "blended" | "glassBlended";
-/** Where the material table starts in the frame's uniforms, in bytes: after `U`'s two matrices and fourteen vec4s. */
-const UNIFORM_MATERIALS = 352;
+/** Where the material table starts in the frame's uniforms, in bytes: after `U`'s two matrices and fifteen vec4s. */
+const UNIFORM_MATERIALS = 368;
 /**
  * Half precision: the shader's colour arithmetic (the tone curve, the
  * lights' sums) in f16 where the device has shader-f16, which on Apple's
@@ -289,6 +297,9 @@ struct U {
 	// drawn, whether the heatmaps are linear rather than by cell, and the view
 	// drawn over it: see view.ts's renderDebug.
 	debug: vec4f,
+	// x: the textures' mip bias, below 0 while upscaling gathers still frames,
+	// so they are as sharp as the screen's pixels rather than the frame's.
+	lod: vec4f,
 	// The material table: two rows a material, as \`materialBlock\` writes it.
 	mats: array<vec4f, ${MATERIALS.length * 3}>,
 };
@@ -997,7 +1008,7 @@ fn surface(i: VOut) -> vec4f {
 	// A texture once its layer has loaded; the material's own pattern until then.
 	let uv = faceUv(i.local, i.lnormal);
 	let layer = i32(b.w) - 1;
-	let look = textureSample(looks, lookSampler, uv / tex.x, max(layer, 0));
+	let look = textureSampleBias(looks, lookSampler, uv / tex.x, max(layer, 0), u.lod.x);
 	// The pattern only where something reads it: its x and y for grain, its z
 	// for CrackedLava's light. Left out of a place with neither.
 	var pat = vec3f(1.0, 1.0, 0.0);
@@ -1068,7 +1079,7 @@ fn glowSource(i: VOut) -> vec3f {
 	let uv = faceUv(i.local, i.lnormal);
 	let layer = i32(b.w) - 1;
 	// Sampled before any branch: WGSL samples only in uniform control flow.
-	let look = textureSample(looks, lookSampler, uv / tex.x, max(layer, 0));
+	let look = textureSampleBias(looks, lookSampler, uv / tex.x, max(layer, 0), u.lod.x);
 	if (b.y > 0.5 && b.y < 1.5) {
 		if (!has(${FEATURE_BIT.neonGlow}u)) { return vec3f(0.0); }
 		let e = pow(max(neonLevel(i.colour, i.alpha), vec3f(0.0)), vec3f(2.2));
@@ -1242,7 +1253,7 @@ struct IOut {
 	return o;
 }
 @fragment fn fsImage(i: IOut) -> @location(0) vec4f {
-	let t = textureSample(image, imageSampler, i.uv);
+	let t = textureSampleBias(image, imageSampler, i.uv, u.lod.x);
 	let edge = nearEdge(i.world);
 	let wide = fwidth(edge);
 	let albedo = pow(t.rgb, vec3f(2.2)) * i.tint.rgb;
@@ -3069,6 +3080,7 @@ fn at(c: vec2i) -> u32 {
 		this.width = Math.max(1, width);
 		this.height = Math.max(1, height);
 		this.makeAaTargets();
+		this.makeUpTargets();
 		for (const t of [
 			this.msaa,
 			this.depth,
@@ -3303,6 +3315,9 @@ fn at(c: vec2i) -> u32 {
 		this.selection = count > 0 ? { buffer: this.make(boxes, BUFFER.VERTEX), count } : null;
 	}
 
+	/** The textures' mip bias: see U.lod. */
+	private lodBias = 0;
+
 	private setCamera(camera: Camera): void {
 		const vp = jitterClip(
 			multiply(
@@ -3322,6 +3337,7 @@ fn at(c: vec2i) -> u32 {
 		u.set([this.width, this.height, this.band(), sky], 76);
 		u.set(this.shape.gate, 80);
 		u.set(renderDebug(this.render), 84);
+		u.set([this.lodBias, 0, 0, 0], 88);
 		this.device.queue.writeBuffer(this.uniform, 0, u);
 	}
 
@@ -3350,18 +3366,26 @@ fn at(c: vec2i) -> u32 {
 		// Still-frame TAA: a frame aside by a fraction of a pixel, while the
 		// camera and the place are as they were; otherwise a fresh one.
 		const aaPass = antialiasInfo(this.aaMode).pass;
+		// Upscaling gathers still frames' samples itself: TAA's own average is not drawn as well.
+		const up = this.upscaling();
 		this.taaWeight = 1;
 		this.jitter = [0, 0];
-		if (aaPass === "taa") {
+		let upStep: UpStep = { fresh: true, settled: false, moving: false };
+		if (aaPass === "taa" || up) {
 			const moving = this.effects?.last.moving ?? false;
 			const step = this.still.next(
 				still,
-				`${camera.eye.join(",")} ${camera.at.join(",")} ${this.width}x${this.height}`,
+				`${camera.eye.join(",")} ${camera.at.join(",")} ${this.width}x${this.height} ${up ? `${this.upOut?.width}x${this.upOut?.height}` : ""}`,
 				moving,
 			);
 			this.jitter = step.jitter;
 			this.taaWeight = step.weight;
+			upStep = { fresh: this.still.count <= 1, settled: step.weight === 0, moving };
 		}
+		// Gathered still frames: textures as sharp as the screen's pixels, and
+		// no pass over each frame, as the gathering smooths the edges itself.
+		const gathering = up && !upStep.fresh;
+		this.lodBias = gathering ? Math.log2(this.width / (this.upOut?.width ?? this.width)) : 0;
 		this.tally = { draws: 0, instances: 0, triangles: 0 };
 		const { mode } = this.render;
 		const show = passesOf(this.render.features);
@@ -3380,8 +3404,11 @@ fn at(c: vec2i) -> u32 {
 		const lit = this.litFor(this.litBits());
 		const clock = this.clock;
 		clock?.start();
+		const canvasView = this.context.getCurrentTexture().createView();
+		// Everything is drawn into the frame the render scale's size; upscaled, that is not the canvas.
+		const final = up ? this.upIn!.createView() : canvasView;
 		if (this.probe === "empty") {
-			this.drawEmpty(encoder, started);
+			this.drawEmpty(encoder, started, final, up ? canvasView : null);
 			return;
 		}
 		const partsMoved = this.skyDirty;
@@ -3423,11 +3450,15 @@ fn at(c: vec2i) -> u32 {
 		const lean = this.leanDepth();
 		const early = passes.occlusion && !lean;
 		const load = early && mode !== "overdraw" && mode !== "density";
-		const canvasView = this.context.getCurrentTexture().createView();
 		// Antialiasing by a pass over the frame: everything is drawn into its
 		// input, and the pass draws the canvas.
-		const aaOn = aaPass !== "none" && !!this.aaColour && !this.probe;
-		const screen = aaOn ? this.aaColour!.createView() : canvasView;
+		const aaOn =
+			aaPass !== "none" &&
+			!(aaPass === "taa" && up) &&
+			!gathering &&
+			!!this.aaColour &&
+			!this.probe;
+		const screen = aaOn ? this.aaColour!.createView() : final;
 		// A BloomEffect blooms the whole picture, Neon or not: see fsBright.
 		const bloom = postOn && !!this.lighting?.post.bloom && show.glow && !heat && !wire && !tinted;
 		const glowing =
@@ -3607,13 +3638,20 @@ fn at(c: vec2i) -> u32 {
 			pass.draw(this.overlay.count);
 		}
 		pass.end();
-		if (aaOn) this.antialiasPasses(encoder, canvasView);
-		if (hlOn) this.drawHighlights(encoder, canvasView);
-		this.stampsAre(glow ? "composite" : "place");
+		if (aaOn) this.antialiasPasses(encoder, final);
+		if (hlOn) this.drawHighlights(encoder, final);
+		let last: Stage = glow ? "composite" : "place";
+		if (up) {
+			this.stampsAre(last);
+			encoder = this.cut(encoder, last);
+			this.upscalePasses(encoder, canvasView, upStep);
+			last = "upscale";
+		}
+		this.stampsAre(last);
 		const read = this.readStamps(encoder);
 		this.device.queue.submit([encoder.finish()]);
 		if (clock) {
-			clock.submitted(glow ? "composite" : "place", this.device.queue.onSubmittedWorkDone());
+			clock.submitted(last, this.device.queue.onSubmittedWorkDone());
 			clock.end();
 		}
 		read?.();
@@ -3655,12 +3693,17 @@ fn at(c: vec2i) -> u32 {
 	}
 
 	/** A profile's empty frame: the targets cleared and resolved to the screen, nothing drawn. */
-	private drawEmpty(encoder: GPUCommandEncoder, started: number): void {
+	private drawEmpty(
+		encoder: GPUCommandEncoder,
+		started: number,
+		target: GPUTextureView,
+		upTo: GPUTextureView | null,
+	): void {
 		const pass = encoder.beginRenderPass({
 			timestampWrites: this.stamp(null),
 			colorAttachments: [
 				{
-					...this.into(this.context.getCurrentTexture().createView()),
+					...this.into(target),
 					clearValue: { r: 0.16, g: 0.17, b: 0.19, a: 1 },
 					loadOp: "clear",
 				},
@@ -3673,6 +3716,7 @@ fn at(c: vec2i) -> u32 {
 			},
 		});
 		pass.end();
+		if (upTo) this.upscalePasses(encoder, upTo, { fresh: true, settled: false, moving: false });
 		this.device.queue.submit([encoder.finish()]);
 		if (this.clock) {
 			this.clock.submitted("place", this.device.queue.onSubmittedWorkDone());
@@ -3739,7 +3783,7 @@ fn at(c: vec2i) -> u32 {
 		return (
 			(this.effects?.last.moving ?? false) ||
 			this.occlusionStale ||
-			(antialiasInfo(this.aaMode).pass === "taa" && this.still.settling)
+			((antialiasInfo(this.aaMode).pass === "taa" || this.upscaling()) && this.still.settling)
 		);
 	}
 
@@ -4485,6 +4529,164 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		run(this.aaPipes.taa, into.createView(), group({ colour, history: from }), true);
 		this.aaHistoryRead = 1 - this.aaHistoryRead;
 		run(this.aaPipes.copy, canvas, group({ colour: into }), true);
+	}
+
+	// -- upscaling: the frame brought up to the screen's pixels; see upscale.ts -----------
+
+	private upOut: { width: number; height: number } | null = null;
+	private upMode: UpscaleMode = "off";
+	/** The frame as drawn, the render scale's size, before it is brought up. */
+	private upIn: GPUTexture | null = null;
+	/** Still frames' samples so far, the screen's size: two, to read one and write the other. */
+	private upHistory: GPUTexture[] = [];
+	private upRead = 0;
+	private upPipes: Partial<
+		Record<"stretch" | "sharp" | "accumulate" | "resolve", GPURenderPipeline>
+	> = {};
+	private upLayout: GPUBindGroupLayout | null = null;
+	private upUniform: GPUBuffer | null = null;
+	private upLinear: GPUSampler | null = null;
+
+	setUpscale(output: { width: number; height: number } | null, mode: UpscaleMode): void {
+		const same =
+			this.upMode === mode &&
+			this.upOut?.width === output?.width &&
+			this.upOut?.height === output?.height;
+		this.upOut = output;
+		this.upMode = mode;
+		if (!same) this.makeUpTargets();
+	}
+
+	/** Whether the frame is drawn smaller than the canvas and brought up to it. */
+	private upscaling(): boolean {
+		const out = this.upOut;
+		return (
+			this.upMode !== "off" &&
+			out !== null &&
+			(out.width > this.width || out.height > this.height) &&
+			!!this.upIn
+		);
+	}
+
+	private makeUpscale(): void {
+		if (this.upLayout) return;
+		const d = this.device;
+		const module = d.createShaderModule({ code: UPSCALE_WGSL });
+		this.upLayout = d.createBindGroupLayout({
+			entries: [
+				{ binding: 0, visibility: STAGE.FRAGMENT, buffer: {} },
+				{ binding: 1, visibility: STAGE.FRAGMENT, texture: {} },
+				{ binding: 2, visibility: STAGE.FRAGMENT, sampler: {} },
+				{ binding: 3, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+			],
+		});
+		this.upUniform = d.createBuffer({ size: 48, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+		this.upLinear = d.createSampler({ magFilter: "linear", minFilter: "linear" });
+		const layout = d.createPipelineLayout({ bindGroupLayouts: [this.upLayout] });
+		const make = (entry: string, format: GPUTextureFormat, key: keyof WebGpuView["upPipes"]) =>
+			this.pipeline((p) => (this.upPipes[key] = p), {
+				layout,
+				vertex: { module, entryPoint: "vs" },
+				fragment: { module, entryPoint: entry, targets: [{ format }] },
+				primitive: { topology: "triangle-list" },
+			});
+		make("fsStretch", this.format, "stretch");
+		make("fsSharp", this.format, "sharp");
+		make("fsAccumulate", "rgba16float", "accumulate");
+		make("fsResolve", this.format, "resolve");
+	}
+
+	/** The frame the render scale's size, and the history the canvas's. */
+	private makeUpTargets(): void {
+		for (const t of [this.upIn, ...this.upHistory]) t?.destroy();
+		this.upIn = null;
+		this.upHistory = [];
+		const out = this.upOut;
+		if (!this.device || this.upMode === "off" || !out) return;
+		if (out.width <= this.width && out.height <= this.height) return;
+		this.makeUpscale();
+		const d = this.device;
+		this.upIn = d.createTexture({
+			size: [this.width, this.height],
+			format: this.format,
+			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+		});
+		const history = () =>
+			d.createTexture({
+				size: [out.width, out.height],
+				format: "rgba16float",
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
+		this.upHistory = [history(), history()];
+		this.still.reset();
+	}
+
+	/**
+	 * The frame onto the canvas: a moving frame stretched (or sharpened,
+	 * Always); a still one's samples into the history, which is drawn. The
+	 * first still frame after a move is not jittered: it is shown stretched,
+	 * and the history starts from the next.
+	 */
+	private upscalePasses(encoder: GPUCommandEncoder, canvas: GPUTextureView, step: UpStep): void {
+		const out = this.upOut;
+		const frame = this.upIn;
+		if (!out || !frame) return;
+		const d = this.device;
+		const second = !step.fresh && this.still.count === 2;
+		d.queue.writeBuffer(
+			this.upUniform!,
+			0,
+			new Float32Array([
+				this.width,
+				this.height,
+				1 / this.width,
+				1 / this.height,
+				out.width,
+				out.height,
+				1 / out.width,
+				1 / out.height,
+				// The jitter moves clip space up, so the picture down: rows run down the frame.
+				this.jitter[0],
+				-this.jitter[1],
+				step.moving ? MOVING_DECAY : 1,
+				second ? 1 : 0,
+			]),
+		);
+		const group = (history: GPUTexture) =>
+			d.createBindGroup({
+				layout: this.upLayout!,
+				entries: [
+					{ binding: 0, resource: { buffer: this.upUniform! } },
+					{ binding: 1, resource: frame.createView() },
+					{ binding: 2, resource: this.upLinear! },
+					{ binding: 3, resource: history.createView() },
+				],
+			});
+		const run = (pipe: GPURenderPipeline | undefined, into: GPUTextureView, bind: GPUBindGroup) => {
+			if (!pipe) return false;
+			const p = encoder.beginRenderPass({
+				timestampWrites: this.stamp(null),
+				colorAttachments: [
+					{ view: into, loadOp: "clear", clearValue: { r: 0, g: 0, b: 0, a: 1 }, storeOp: "store" },
+				],
+			});
+			p.setPipeline(pipe);
+			p.setBindGroup(0, bind);
+			p.draw(3);
+			p.end();
+			return true;
+		};
+		const [from, into] = [this.upHistory[this.upRead], this.upHistory[1 - this.upRead]];
+		const moving = this.upMode === "always" ? this.upPipes.sharp : this.upPipes.stretch;
+		if (step.fresh || !from || !into) {
+			if (!run(moving, canvas, group(from ?? frame)))
+				run(this.upPipes.stretch, canvas, group(frame));
+			return;
+		}
+		if (!step.settled && run(this.upPipes.accumulate, into.createView(), group(from)))
+			this.upRead = 1 - this.upRead;
+		if (!run(this.upPipes.resolve, canvas, group(this.upHistory[this.upRead])))
+			run(this.upPipes.stretch, canvas, group(from));
 	}
 
 	/** The shaders' textures and samplers, made again when one is replaced. */
@@ -5582,7 +5784,13 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		this.device?.destroy();
 	}
 
-	async pick(camera: Camera, x: number, y: number): Promise<number> {
+	async pick(camera: Camera, cx: number, cy: number): Promise<number> {
+		// The canvas's pixels to the frame's, where it is upscaled.
+		const out = this.upscaling() ? this.upOut : null;
+		const x = out ? Math.floor((cx * this.width) / out.width) : cx;
+		const y = out ? Math.floor((cy * this.height) / out.height) : cy;
+		// The pick is not jittered, as no still frame's is.
+		this.jitter = [0, 0];
 		this.setCamera(camera);
 		const encoder = this.device.createCommandEncoder();
 		const pass = encoder.beginRenderPass({

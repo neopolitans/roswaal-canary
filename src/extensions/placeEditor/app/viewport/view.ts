@@ -22,6 +22,7 @@ import type { Handles } from "./handles.js";
 import { lookAt, type Mat4, multiply } from "./math.js";
 import type { Probe, StageSink } from "./profile.js";
 import { featureBits, type RenderFeatures, STUDIO_FEATURES } from "./renderFeatures.js";
+import type { UpscaleMode } from "./upscale.js";
 
 export interface Camera {
 	eye: number[];
@@ -47,6 +48,12 @@ export interface ViewRenderer {
 		progress?: (shaders: number) => void,
 	): Promise<void>;
 	resize(width: number, height: number): void;
+	/**
+	 * Upscaling, where the renderer has it: the canvas `output` pixels, the
+	 * place drawn at resize's size and brought up to them (see upscale.ts).
+	 * Null, or "off": the canvas is the size the place is drawn at.
+	 */
+	setUpscale?(output: { width: number; height: number } | null, mode: UpscaleMode): void;
 	/**
 	 * The boxes to outline, in the scene's own instance layout, each in the
 	 * colour and alpha its colour word holds: what is picked, and what the

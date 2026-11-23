@@ -103,6 +103,7 @@ import {
 } from "./tools.js";
 import { trickle } from "./trickle.js";
 import { loadUnionModels } from "./unions.js";
+import type { UpscaleMode } from "./upscale.js";
 import {
 	type Camera,
 	DEFAULT_RENDER,
@@ -147,6 +148,12 @@ export interface ViewportOptions {
 	 * every pixel the screen has; Automatic, the quality level's.
 	 */
 	renderScale?: number | "native" | "auto";
+	/**
+	 * Upscaling: the place drawn at the render scale and brought up to the
+	 * screen's own pixels by the renderer, still frames gathered to its
+	 * detail (see upscale.ts); off or unset, the browser stretches it.
+	 */
+	upscale?: UpscaleMode;
 	/** Antialiasing: see antialias.ts; unset, the quality level's. Changing it builds the view again. */
 	antialias?: AntialiasMode;
 	/** WebGPU's shader in half precision where the device can: see webgpu.ts's HALF. Unset, yes. */
@@ -725,7 +732,7 @@ export class ViewportController {
 		this.view.setOutline(options.outlineWidth, options.hideBehind);
 		this.view.setGlassHides(options.glassHides);
 		this.view.setPostEffects(options.postEffects);
-		if (was.renderScale !== options.renderScale) this.fit();
+		if (was.renderScale !== options.renderScale || was.upscale !== options.upscale) this.fit();
 		this.redraw();
 	}
 
@@ -2029,7 +2036,7 @@ export class ViewportController {
 		return {
 			...timed,
 			level: n,
-			canvas: { width: this.canvas?.width ?? 0, height: this.canvas?.height ?? 0 },
+			canvas: { ...this.drawn },
 			antialias: antialiasInfo(view.antialias).label,
 			shadowMap: view.shadowMap,
 			reach: q.reach,
@@ -2450,7 +2457,7 @@ export class ViewportController {
 				result.levels.push({
 					label,
 					level,
-					canvas: { width: this.canvas?.width ?? 0, height: this.canvas?.height ?? 0 },
+					canvas: { ...this.drawn },
 					antialias: this.view ? antialiasInfo(this.view.antialias).label : "",
 					stations: rows,
 				});
@@ -2522,8 +2529,7 @@ export class ViewportController {
 				const scale = Math.min(native, want);
 				this.options = { ...asked, renderScale: scale };
 				this.fit();
-				const width = this.canvas?.width ?? 0;
-				const height = this.canvas?.height ?? 0;
+				const { width, height } = this.drawn;
 				if (sizes.has(`${width}x${height}`)) continue;
 				sizes.add(`${width}x${height}`);
 				await this.waitedFrames(10, 2000);
@@ -2620,16 +2626,42 @@ export class ViewportController {
 		return Math.min(native, scale === "native" ? native : scale) * this.resolutionScale;
 	}
 
+	/** The size the place is drawn at: the canvas's, unless it is upscaled. */
+	private drawn = { width: 0, height: 0 };
+	private upKey = "";
+
 	private fit(): void {
 		const { view, canvas, els } = this;
 		if (!view || !canvas || !els) return;
 		const dpr = this.pixelRatio();
 		const w = Math.max(1, Math.round(els.holder.clientWidth * dpr));
 		const h = Math.max(1, Math.round(els.holder.clientHeight * dpr));
-		if (canvas.width !== w || canvas.height !== h) {
-			canvas.width = w;
-			canvas.height = h;
+		// Upscaled: the canvas the screen's own pixels, the place drawn at w x h into it.
+		const native = Math.min(2, devicePixelRatio || 1);
+		const mode = this.options.upscale ?? "off";
+		const out =
+			mode !== "off" && view.setUpscale && dpr < native - 1e-3
+				? {
+						width: Math.max(1, Math.round(els.holder.clientWidth * native)),
+						height: Math.max(1, Math.round(els.holder.clientHeight * native)),
+					}
+				: null;
+		const cw = out?.width ?? w;
+		const ch = out?.height ?? h;
+		const upKey = out ? `${mode} ${cw}x${ch}` : "";
+		if (
+			canvas.width !== cw ||
+			canvas.height !== ch ||
+			this.drawn.width !== w ||
+			this.drawn.height !== h ||
+			this.upKey !== upKey
+		) {
+			canvas.width = cw;
+			canvas.height = ch;
 			view.resize(w, h);
+			view.setUpscale?.(out, out ? mode : "off");
+			this.drawn = { width: w, height: h };
+			this.upKey = upKey;
 		}
 		this.redraw();
 	}
@@ -2849,11 +2881,11 @@ export class ViewportController {
 		if (!view || !canvas || this.state.profiling) return null;
 		const render = this.state.render;
 		const options = this.options;
-		const pixels = { width: canvas.width, height: canvas.height };
+		const pixels = { ...this.drawn };
 		// Its size on the page, before the antialiasing sweep replaces the canvas.
 		const box = canvas.getBoundingClientRect();
 		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
-		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)`;
+		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)${this.upKey ? `, upscaled ${options.upscale === "always" ? "always" : "when still"} to ${canvas.width}×${canvas.height}` : ""}`;
 		const steps = RENDER_STEPS.length;
 		// The level and the camera the profile began from, for its head.
 		const startQ = this.state.quality;
@@ -2986,8 +3018,7 @@ export class ViewportController {
 				phase(`Resolution ${Math.round(scale * 100)}%`);
 				this.resolutionScale = Math.sqrt(scale);
 				this.fit();
-				const w = this.canvas?.width ?? 0;
-				const h = this.canvas?.height ?? 0;
+				const { width: w, height: h } = this.drawn;
 				resolution.push(await this.timeWaited(`${Math.round(scale * 100)}% (${w}×${h})`, 30));
 			}
 			this.resolutionScale = 1;

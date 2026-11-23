@@ -68,6 +68,14 @@ export const VIEWPORT_RENDER_SCALES = [
 ] as const;
 export type ViewportRenderScale = (typeof VIEWPORT_RENDER_SCALES)[number]["value"];
 
+/** Upscaling: the frame brought up to the screen's own pixels by the renderer, or stretched by the browser. */
+export const VIEWPORT_UPSCALES = [
+	{ value: "off", label: "Off" },
+	{ value: "still", label: "When still" },
+	{ value: "always", label: "Always" },
+] as const;
+export type ViewportUpscale = (typeof VIEWPORT_UPSCALES)[number]["value"];
+
 /**
  * Antialiasing: the quality level's, or a mode (see antialias.ts). MSAA's
  * values are its counts, as canary.7's 4× was stored.
@@ -97,6 +105,7 @@ export interface PlaceEditorSettings {
 	quality: ViewportQuality;
 	frameRate: ViewportFrameRate;
 	renderScale: ViewportRenderScale;
+	upscale: ViewportUpscale;
 	/** Stored as `antialiasing`: 1.1.0-canary.6 saved `antialias` as "4" for everyone. */
 	antialiasing: ViewportAntialias;
 	outlineWidth: OutlineWidth;
@@ -148,6 +157,14 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,
+			},
+			{
+				key: "upscale",
+				title: "Upscaling",
+				help: "Where the render scale draws fewer pixels than the screen has, the view brings them up itself rather than the browser stretching them. When still: once the view stops, frames drawn a fraction of a pixel apart are gathered to the screen's own detail, about Native's, at the render scale's cost; moving, it is stretched. Always: moving frames are sharpened as well. WebGPU only.",
+				type: "choice",
+				default: "off",
+				choices: VIEWPORT_UPSCALES,
 			},
 			{
 				key: "antialiasing",

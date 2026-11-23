@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.35",
+		date: "2026-11-23",
+		headline: "Upscaling: a still view at the screen's own detail, drawn at a lower render scale.",
+		added: [
+			"**Upscaling**, in Settings › Scene view: where the render scale draws fewer pixels than the screen has, the view brings them up itself. **When still** gathers 16 frames, each a fraction of a pixel aside, into the screen's own pixels once the view stops, close to Native's detail at the render scale's cost; a moving view is stretched. **Always** also sharpens moving frames. WebGPU only; off by default.",
+			"**Upscaling** is a stage of its own in the profile and the benchmark's GPU times.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.34",
 		date: "2026-11-23",
 		headline: "Quality Level 18 draws at 150%, and the benchmark measures what a pixel costs.",

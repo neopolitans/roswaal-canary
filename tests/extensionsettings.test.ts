@@ -35,6 +35,7 @@ describe("an extension's settings", () => {
 			quality: "auto",
 			frameRate: "vsync",
 			renderScale: "auto",
+			upscale: "off",
 			antialiasing: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,

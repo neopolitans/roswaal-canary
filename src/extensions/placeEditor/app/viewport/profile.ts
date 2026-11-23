@@ -32,6 +32,7 @@ export const STAGES = [
 	"place",
 	"effects",
 	"composite",
+	"upscale",
 	"marks",
 ] as const;
 
@@ -48,6 +49,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
 	place: "Parts and images",
 	effects: "Beams and particles",
 	composite: "Glow, bloom and post",
+	upscale: "Upscaling",
 	marks: "Selection and handles",
 };
 
@@ -63,6 +65,7 @@ export const STAGE_SHORT: Record<Stage, string> = {
 	place: "Parts",
 	effects: "Effects",
 	composite: "Post",
+	upscale: "Upscale",
 	marks: "Marks",
 };
 
@@ -81,6 +84,8 @@ export const STAGE_HINTS: Record<Stage, string> = {
 		"Solid parts, Decals and Textures, and see-through parts. On WebGPU, with the sky, beams and particles: one pass.",
 	effects: "Beams and ParticleEmitters.",
 	composite: "Neon's glow and bloom, post effects, and the finished frame onto the screen.",
+	upscale:
+		"The frame drawn at the render scale brought up to the screen's pixels: still frames' samples gathered, a moving one stretched.",
 	marks: "The selection, handles and lines drawn over the place.",
 };
 

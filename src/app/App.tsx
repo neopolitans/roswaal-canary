@@ -485,6 +485,10 @@ export function App() {
 						: sceneView.renderScale === "native"
 							? "native"
 							: Number(sceneView.renderScale) / 100,
+				upscale:
+					sceneView.upscale === "still" || sceneView.upscale === "always"
+						? sceneView.upscale
+						: "off",
 				antialias: antialiasSetting(sceneView.antialiasing),
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
@@ -501,6 +505,7 @@ export function App() {
 			sceneView.frameRate,
 			sceneView.altClickSteps,
 			sceneView.renderScale,
+			sceneView.upscale,
 			sceneView.antialiasing,
 			sceneView.quality,
 		],

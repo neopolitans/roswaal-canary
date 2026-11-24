@@ -406,7 +406,7 @@ describe("the documentation's toolbar linker", () => {
 	});
 
 	it("defines every transpiler helper it calls", () => {
-		const called = new Set([...linker.matchAll(/(__[A-Za-z]\w*)\s*\(/g)].map((found) => found[1]));
+		const called = new Set([...linker.matchAll(/\b(__[A-Za-z]\w*)\s*\(/g)].map((found) => found[1]));
 		const undeclared = [...called].filter(
 			(name) => !new RegExp("(?:var|let|const|function)\s+" + name + "\b").test(linker),
 		);

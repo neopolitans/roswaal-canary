@@ -56,6 +56,7 @@ import {
 	graphY,
 } from "./viewport/frameGraph.js";
 import { type HeavyMesh, shortCount } from "./viewport/heaviest.js";
+import { downloadFailures, onDownloadFailures } from "./viewport/images.js";
 import { prepareScene } from "./viewport/prepare.js";
 import {
 	fpsText,
@@ -780,7 +781,15 @@ const ASSETS_FADE = 600;
  * pending it settles to one line and fades. A count seen before, as after the
  * place is saved, is not shown again.
  */
+/** The commonest reason downloads failed, for the asset card's notes. */
+function useFailureWhy(): { reason: string; count: number; others: number } | undefined {
+	const list = useSyncExternalStore(onDownloadFailures, downloadFailures);
+	const top = list[0];
+	return top ? { reason: top.reason, count: top.count, others: list.length - 1 } : undefined;
+}
+
 function AssetCard({ assets }: { assets: AssetProgress | null }) {
+	const why = useFailureWhy();
 	const [phase, setPhase] = useState<"hidden" | "shown" | "fading">("hidden");
 	/** Whether the card is up: read by the effect, which does not follow it. */
 	const up = useRef(false);
@@ -814,7 +823,7 @@ function AssetCard({ assets }: { assets: AssetProgress | null }) {
 		};
 	}, [counted, pending, missing]);
 	if (!assets || phase === "hidden") return null;
-	const { head, notes } = assetWords(assets);
+	const { head, notes } = assetWords(assets, why);
 	const share = (n: number) => `${Math.min(100, (n / Math.max(1, assets.needed)) * 100)}%`;
 	return (
 		<div
@@ -1478,6 +1487,7 @@ function ProfileSection({
  */
 export function PerformancePanel({ controller }: { controller: ViewportController }) {
 	const { backend, assets, profiling, profile } = useViewport(controller);
+	const why = useFailureWhy();
 	const [stats, setStats] = useState<RenderStats | null>(null);
 	useEffect(() => {
 		setStats(controller.renderStats());
@@ -1528,7 +1538,7 @@ export function PerformancePanel({ controller }: { controller: ViewportControlle
 										"Assets",
 										[
 											`${assets.uploaded.toLocaleString()} of ${assets.needed.toLocaleString()} loaded`,
-											...assetWords(assets).notes,
+											...assetWords(assets, why).notes,
 										].join(", "),
 									],
 								]}

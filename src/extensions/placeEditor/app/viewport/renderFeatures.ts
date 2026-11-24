@@ -261,6 +261,15 @@ export function setOffOnThisDevice(keys: readonly FeatureKey[]): void {
 	offHere = keys;
 }
 
+/**
+ * The switches no level turns on for a GPU, by the name the browser gives it:
+ * Occlusion culling on Apple's. Before 1.1.0-canary.51 the word test held two
+ * backspaces where its word boundaries belonged, and matched no GPU at all.
+ */
+export function offForGpu(gpu: string): FeatureKey[] {
+	return /\bapple\b/i.test(gpu) ? ["occlusionCulling"] : [];
+}
+
 /** A level's or Studio's switches as this device has them. */
 export function onThisDevice(features: RenderFeatures): RenderFeatures {
 	if (!offHere.some((k) => features[k])) return features;

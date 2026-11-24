@@ -38,10 +38,17 @@ export function assetsMissing(p: AssetProgress): number {
 	return p.failed + p.signIn + p.unavailable;
 }
 
-/** The progress card's words: its line, and what will not come, if anything. */
-export function assetWords(p: AssetProgress): { head: string; notes: string[] } {
+/** The progress card's words: its line, and what will not come, if anything. `why`: the commonest download failure. */
+export function assetWords(
+	p: AssetProgress,
+	why?: { reason: string; count: number; others: number },
+): { head: string; notes: string[] } {
 	const notes: string[] = [];
 	if (p.failed > 0) notes.push(`${p.failed.toLocaleString()} failed`);
+	if (p.failed > 0 && why)
+		notes.push(
+			`${why.count.toLocaleString()}: ${why.reason}${why.others > 0 ? ` (and ${why.others} other reason${why.others === 1 ? "" : "s"})` : ""}`,
+		);
 	if (p.signIn > 0) notes.push(`${p.signIn.toLocaleString()} need Sign in with Roblox`);
 	if (p.unavailable > 0) notes.push(`${p.unavailable.toLocaleString()} need roswaal serve`);
 	const of = (n: number) => `${n.toLocaleString()} of ${p.needed.toLocaleString()}`;

@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.51",
+		date: "2026-11-24",
+		headline: "Failed downloads say why, and occlusion culling is off on Apple's GPUs as meant.",
+		fixed: [
+			"**The asset card says why downloads failed**: the commonest reason and how many it stopped, beside the count. The browser's console lists every reason with an asset it happened to.",
+			"**A batch of downloads Roswaal refuses as a whole no longer stops the batches after it.**",
+			"**Occlusion culling is off on Apple's GPUs unless turned on by hand**, as 1.1.0-canary.28 meant. A mistyped word test matched no GPU, so iPads and Macs had it on.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.50",
 		date: "2026-11-24",
 		headline: "Meshes and images download on the website too.",

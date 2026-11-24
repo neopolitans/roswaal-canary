@@ -32,14 +32,71 @@ export function decalImageOf(bytes: Uint8Array): string | undefined {
 	return found ? assetIdOf(found[1]) : undefined;
 }
 
-/** Downloads `ids` through the daemon, in batches; answers with those that are here. */
+/** Why each asset that failed to download did, by id, for the progress card and the console. */
+const failures = new Map<string, string>();
+const failureListeners = new Set<() => void>();
+let failureList: { reason: string; count: number; example: string }[] = [];
+
+/** A reason without its asset's id, so the same failure counts once whatever the asset. */
+export function generalReason(reason: string): string {
+	return reason
+		.replace(/\basset \d+/gi, "an asset")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function noteFailures(): void {
+	const grouped = new Map<string, { count: number; example: string }>();
+	for (const [id, reason] of failures) {
+		const at = grouped.get(reason);
+		if (at) at.count++;
+		else grouped.set(reason, { count: 1, example: id });
+	}
+	failureList = [...grouped]
+		.map(([reason, { count, example }]) => ({ reason, count, example }))
+		.sort((a, b) => b.count - a.count);
+	for (const listener of failureListeners) listener();
+}
+
+/** Why downloads failed, commonest first, with an asset each happened to. */
+export function downloadFailures(): { reason: string; count: number; example: string }[] {
+	return failureList;
+}
+
+export function onDownloadFailures(listener: () => void): () => void {
+	failureListeners.add(listener);
+	return () => failureListeners.delete(listener);
+}
+
+/**
+ * Downloads `ids` through the host, in batches; answers with those that are
+ * here. A batch the host refuses as a whole fails its own ids, not the rest.
+ */
 export async function ensure(ids: string[]): Promise<Set<string>> {
 	const ready = new Set<string>();
 	for (let at = 0; at < ids.length; at += BATCH) {
-		const { assets } = await robloxApi.fetchAssets(ids.slice(at, at + BATCH));
-		for (const [id, outcome] of Object.entries(assets))
-			if (outcome.state === "ready") ready.add(id);
+		const batch = ids.slice(at, at + BATCH);
+		try {
+			const { assets } = await robloxApi.fetchAssets(batch);
+			for (const [id, outcome] of Object.entries(assets)) {
+				if (outcome.state === "ready") {
+					ready.add(id);
+					failures.delete(id);
+				} else if (outcome.state === "failed") {
+					failures.set(id, generalReason(outcome.reason));
+				}
+			}
+		} catch (err) {
+			const reason = generalReason(err instanceof Error ? err.message : String(err));
+			for (const id of batch) failures.set(id, reason);
+		}
 	}
+	noteFailures();
+	if (failureList.length > 0)
+		console.warn(
+			"Roswaal: assets that did not download, by reason",
+			failureList.map((f) => `${f.count}× ${f.reason} (e.g. ${f.example})`),
+		);
 	return ready;
 }
 

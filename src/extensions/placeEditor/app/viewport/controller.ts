@@ -92,6 +92,7 @@ import {
 	type FeatureKey,
 	featureOn,
 	litFor,
+	offForGpu,
 	onThisDevice,
 	RENDER_STEPS,
 	type RenderFeatures,
@@ -1873,7 +1874,7 @@ export class ViewportController {
 		const gl2 = this.options.renderer === "webgl2";
 		if (this.gpuSeen === null) {
 			this.gpuSeen = await gpuName(gl2);
-			setOffOnThisDevice(/apple/i.test(this.gpuSeen) ? ["occlusionCulling"] : []);
+			setOffOnThisDevice(offForGpu(this.gpuSeen));
 			// The level's own switches, as this device has them.
 			const q = this.level();
 			if (changedFrom(this.state.render.features, q.features).length === 0)

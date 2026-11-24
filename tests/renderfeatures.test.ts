@@ -13,6 +13,7 @@ import {
 	featureBits,
 	featureOn,
 	litFor,
+	offForGpu,
 	onThisDevice,
 	passesOf,
 	presetById,
@@ -181,5 +182,18 @@ describe("switches a device leaves off", () => {
 			setOffOnThisDevice([]);
 		}
 		expect(presetById("level-21").features.occlusionCulling).toBe(true);
+	});
+});
+
+describe("the switches a GPU leaves off", () => {
+	it("leaves occlusion culling off on Apple's GPUs, by the names browsers give them", () => {
+		for (const gpu of [
+			"Apple M2",
+			"apple",
+			"ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)",
+		])
+			expect(offForGpu(gpu)).toEqual(["occlusionCulling"]);
+		for (const gpu of ["NVIDIA GeForce RTX 4070", "Pineapple GPU", "unknown", ""])
+			expect(offForGpu(gpu)).toEqual([]);
 	});
 });

@@ -292,7 +292,13 @@ export class RobloxSignIn implements RobloxAccount {
 			};
 			return { status: 200, text: "Signed in to Roswaal. You can close this tab.", end: true };
 		} catch (err) {
-			this.failed = err instanceof Error ? err.message : "The sign-in could not be finished.";
+			// A request the browser or the network stopped says only "Failed to fetch".
+			this.failed =
+				err instanceof TypeError
+					? "Roswaal could not reach Roblox to finish the sign-in. Check the connection, then sign in again."
+					: err instanceof Error
+						? err.message
+						: "The sign-in could not be finished.";
 			return { status: 200, text: `${this.failed} You can close this tab.`, end: true };
 		} finally {
 			this.exchanging = false;

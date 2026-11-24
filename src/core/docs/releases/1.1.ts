@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.49",
+		date: "2026-11-24",
+		headline: "The Privacy Policy is right about Cloudflare, and a failed sign-in says why.",
+		fixed: [
+			"**The Privacy Policy says Cloudflare passes roswaal.app's traffic on**, adding its security headers, and so receives each visit's IP address and request, as GitHub does. It said Cloudflare only answered the domain's DNS.",
+			'**A sign-in Roswaal could not finish for lack of a connection to Roblox says so**, where it said only "Failed to fetch".',
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.48",
 		date: "2026-11-24",
 		headline: "Sign in with Roblox on the website.",

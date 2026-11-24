@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.48",
+		date: "2026-11-24",
+		headline: "Sign in with Roblox on the website.",
+		added: [
+			"**Sign in with Roblox works on the website**, from Settings › Roblox account: Roblox's page opens in a new tab, which comes back to roswaal.app's own sign-in page and closes. The sign-in is kept in the browser's own storage for the site; Roswaal has no server that sees it. Downloading a place's meshes and images on the website comes next.",
+		],
+		changed: [
+			"**The Privacy Policy says where the website keeps the sign-in**, beside where the daemon keeps it.",
+			"**Render scale's help says browser zoom counts too**, as Native follows it.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.47",
 		date: "2026-11-24",
 		headline: "The Roblox account is Roswaal's own, and Render scale says what Native is here.",

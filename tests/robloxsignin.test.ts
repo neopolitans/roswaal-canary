@@ -12,12 +12,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-
-import {
-	AccessLostError,
-	RobloxSignIn,
-} from "../src/extensions/placeEditor/server/roblox/signin.js";
-import { fileVault, memoryVault } from "../src/extensions/placeEditor/server/roblox/vault.js";
+// @ts-expect-error -- build tooling, plain JS, no declarations to import.
+import * as callbackPageModule from "../scripts/lib/oauthCallback.mjs";
+import { loopbackReceiver } from "../src/server/roblox/loopback.js";
+import { AccessLostError, RobloxSignIn } from "../src/server/roblox/signin.js";
+import { fileVault, memoryVault } from "../src/server/roblox/vault.js";
+import { channelReceiver, SIGN_IN_CHANNEL } from "../src/web/robloxSignIn.js";
 
 /** A port nothing is using, for this test's callback. */
 async function freePort(): Promise<number> {
@@ -93,7 +93,7 @@ async function signedIn(options: { now?: () => number } = {}) {
 	const account = new RobloxSignIn({
 		vault,
 		fetch: roblox.fetch,
-		redirect: { host: "localhost", port, path: "/oauth/callback" },
+		receiver: loopbackReceiver({ host: "localhost", port, path: "/oauth/callback" }),
 		onChange: (status) => changes.push(status),
 		onForget: async () => {
 			forgotten++;
@@ -254,7 +254,11 @@ describe("staying signed in", () => {
 		const other = new RobloxSignIn({
 			vault,
 			fetch: fakeRoblox(answers).fetch,
-			redirect: { host: "localhost", port: await freePort(), path: "/oauth/callback" },
+			receiver: loopbackReceiver({
+				host: "localhost",
+				port: await freePort(),
+				path: "/oauth/callback",
+			}),
 			now: () => clock,
 			onForget: async () => {
 				throw new Error("the other daemon forgot the sign-in");
@@ -317,4 +321,75 @@ describe("the vault", () => {
 		},
 		30_000,
 	);
+});
+
+describe("signing in with Roblox on the website", () => {
+	/** The callback page, as far as the worker can tell: a visit on the channel, and its answer. */
+	function callbackPage(search: string): Promise<string | null> {
+		const page = new BroadcastChannel(SIGN_IN_CHANNEL);
+		const id = `visit-${Math.random()}`;
+		return new Promise((resolve) => {
+			const late = setTimeout(() => {
+				page.close();
+				resolve(null);
+			}, 1500);
+			page.onmessage = (event: MessageEvent) => {
+				if (event.data?.kind !== "answer" || event.data.id !== id) return;
+				clearTimeout(late);
+				page.close();
+				resolve(event.data.text);
+			};
+			page.postMessage({ kind: "visit", id, search });
+		});
+	}
+
+	async function webSignIn() {
+		const roblox = fakeRoblox(tokenAnswers());
+		const vault = memoryVault();
+		const account = new RobloxSignIn({
+			vault,
+			fetch: roblox.fetch,
+			receiver: channelReceiver("https://canary.roswaal.app"),
+			keptIn: "browser",
+			wait: async () => {},
+		});
+		opened.push(account);
+		const { url } = await account.signIn();
+		return { account, vault, roblox, authorize: new URL(url) };
+	}
+
+	it("sends Roblox to the site's own callback page, registered for it", async () => {
+		const { authorize } = await webSignIn();
+		expect(authorize.searchParams.get("redirect_uri")).toBe(
+			"https://canary.roswaal.app/oauth/callback",
+		);
+	});
+
+	it("finishes from the callback page, and keeps it as the browser's", async () => {
+		const { account, vault, authorize } = await webSignIn();
+		const state = authorize.searchParams.get("state");
+		expect(await callbackPage(`?code=granted&state=${state}`)).toBe(
+			"Signed in to Roswaal. You can close this tab.",
+		);
+		expect(await vault.read()).toMatchObject({ userId: "958742555" });
+		const status = await account.status();
+		expect(status).toMatchObject({ signedIn: true, signingIn: false, keptIn: "browser" });
+	});
+
+	it("leaves a visit with another tab's state unanswered, and keeps waiting", async () => {
+		const { account } = await webSignIn();
+		expect(await callbackPage("?code=stolen&state=another-tab")).toBeNull();
+		expect((await account.status()).signingIn).toBe(true);
+	});
+
+	it("speaks on the same channel as the site's callback page", () => {
+		const page = callbackPageModule as {
+			SIGN_IN_CHANNEL: string;
+			CALLBACK_SCRIPT: string;
+			callbackPage: () => string;
+		};
+		expect(SIGN_IN_CHANNEL).toBe(page.SIGN_IN_CHANNEL);
+		expect(page.CALLBACK_SCRIPT).toContain(JSON.stringify(SIGN_IN_CHANNEL));
+		expect(page.callbackPage()).toContain('<script src="callback.js" defer></script>');
+	});
 });

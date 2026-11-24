@@ -47,7 +47,7 @@ export async function ensure(ids: string[]): Promise<Set<string>> {
 export async function notAsked(): Promise<NotAsked | null> {
 	const status = await robloxApi.status().catch(() => null);
 	if (!status) return "offline";
-	if (!status.available) return "unavailable";
+	if (!status.available || status.downloads === false) return "unavailable";
 	return status.signedIn ? null : "sign-in";
 }
 

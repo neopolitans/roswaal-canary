@@ -12,9 +12,12 @@
  *   handler or an `eval`, so a script that got into a page some other way has
  *   nowhere to load from. On the website this matters most: the hosted editor
  *   holds write access to folders somebody chose to open.
- * - **Requests to the site only.** The hosted editor talks to its own worker;
- *   the daemon's editor to the daemon. Nothing reaches out, so nothing a
- *   script might gather has anywhere to go.
+ * - **Requests to the site, and to Roblox's API and download hosts.** The
+ *   hosted editor talks to its own worker; the daemon's editor to the daemon.
+ *   Only Sign in with Roblox reaches out, from the website's worker: to
+ *   `apis.roblox.com` for the sign-in and assets, and to Roblox's download
+ *   servers (`*.rbxcdn.com`). Nothing else a script might gather has anywhere
+ *   to go.
  * - **Styles inline as well.** CodeMirror writes its own, and the docs'
  *   pictures carry theirs in `style` attributes.
  *
@@ -27,7 +30,7 @@ const DIRECTIVES = [
 	"style-src 'self' 'unsafe-inline'",
 	"img-src 'self' data: blob:",
 	"font-src 'self' data:",
-	"connect-src 'self'",
+	"connect-src 'self' https://apis.roblox.com https://*.rbxcdn.com",
 	"worker-src 'self' blob:",
 	"object-src 'none'",
 	"base-uri 'self'",

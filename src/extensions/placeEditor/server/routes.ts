@@ -14,13 +14,13 @@ import type { RbxInstance } from "../../../core/rbx/index.js";
 import { HttpError, UserError } from "../../../server/errors.js";
 import { findPlaceFile } from "../../../server/project.js";
 import { fields, query, type RouteRequest, text } from "../../../server/request.js";
+import type { RobloxAccount } from "../../../server/roblox/signin.js";
 import type { ExtensionContext } from "../../server.js";
 import { readLighting } from "../core/lighting.js";
 import { buildPlaceScene, type PlaceScene, SCENE_KINDS } from "../core/scene.js";
 import { diffScene } from "../core/sceneDiff.js";
 import { withUnions } from "../core/unions.js";
 import type { AssetOutcome } from "./roblox/assets.js";
-import type { RobloxAccount } from "./roblox/signin.js";
 
 /** The downloads' side of Sign in with Roblox, as the routes use it. */
 export interface RobloxAssets {
@@ -37,7 +37,7 @@ export interface RobloxAssets {
 export interface PlaceEditorCapabilities {
 	/**
 	 * Sign in with Roblox. The sign-in and its tokens stay on this computer
-	 * (`roblox/signin.ts`).
+	 * (`src/server/roblox/signin.ts`).
 	 */
 	roblox?: RobloxAccount;
 	/** What Sign in with Roblox downloads, kept in the project: `roblox/assets.ts`. */
@@ -138,7 +138,15 @@ export function placeEditorRoutes(
 		/** Whether anyone is signed in with Roblox, and who: never a token. */
 		"GET /roblox": async () => {
 			const account = capabilities.roblox;
-			return account ? { available: true, ...(await account.status()) } : { available: false };
+			// `downloads`: whether this host keeps what the sign-in fetches (the
+			// website does not yet), so the editor can say why nothing comes.
+			return account
+				? {
+						available: true,
+						downloads: capabilities.robloxAssets !== undefined,
+						...(await account.status()),
+					}
+				: { available: false };
 		},
 
 		/** Starts a sign-in; the editor opens the address it is given. */

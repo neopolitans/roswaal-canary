@@ -29,6 +29,7 @@ import {
 	type OpenProject,
 	writePlaceImport,
 } from "../server/project.js";
+import { RobloxSignIn } from "../server/roblox/signin.js";
 import { ApiSession, type ErrorBody, errorResponse } from "../server/routes.js";
 import { DirectoryFs, mountFor } from "./directoryFs.js";
 import { useFilesystem, usingVolume, volume } from "./host.js";
@@ -42,6 +43,7 @@ import type {
 	NewProjectMessage,
 	ToWorker,
 } from "./protocol.js";
+import { browserVault, channelReceiver } from "./robloxSignIn.js";
 import { PLAYGROUND_ROOT, playgroundFiles } from "./seed.js";
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -85,7 +87,20 @@ function opened(project: OpenProject): Reply {
 
 const store = persistence(opfsStore(), VERSION);
 
+/**
+ * Sign in with Roblox in this browser: kept in its own storage for the site,
+ * Roblox's answer heard through the site's /oauth/callback page. See
+ * `robloxSignIn.ts`. Its status goes to the editor as the daemon's does.
+ */
+const roblox = new RobloxSignIn({
+	vault: browserVault(),
+	receiver: channelReceiver(self.location.origin),
+	keptIn: "browser",
+	onChange: (status) => post({ kind: "event", event: "roblox", data: status }),
+});
+
 const session = new ApiSession({
+	extensions: { placeEditor: { roblox } },
 	capabilities: {
 		/**
 		 * The only thing this host can do that a machine cannot: throw the
@@ -131,6 +146,8 @@ const ready = (async () => {
 	}
 	if (stored?.root) playgroundRoot = stored.root;
 	await session.openAt(playgroundRoot);
+	// Whether Roblox still honours a kept sign-in: lost access deletes it.
+	void roblox.checkAccess();
 })();
 
 /** The volume as it now stands, for the store to write when things settle. */

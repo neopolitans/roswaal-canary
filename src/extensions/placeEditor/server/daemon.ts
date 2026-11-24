@@ -4,10 +4,11 @@
  * access, deletes all of it. The website has neither.
  */
 
+import { loopbackReceiver } from "../../../server/roblox/loopback.js";
+import { ROBLOX_REDIRECT, RobloxSignIn } from "../../../server/roblox/signin.js";
+import { fileVault } from "../../../server/roblox/vault.js";
 import type { DaemonExtensionOptions } from "../../daemon.js";
 import { AssetCache, downloadRegistry } from "./roblox/assets.js";
-import { RobloxSignIn } from "./roblox/signin.js";
-import { fileVault } from "./roblox/vault.js";
 import type { PlaceEditorCapabilities } from "./routes.js";
 
 export interface PlaceEditorDaemon {
@@ -24,6 +25,8 @@ export function placeEditorDaemon(options: DaemonExtensionOptions): PlaceEditorD
 		options.roblox === undefined
 			? new RobloxSignIn({
 					vault: fileVault(),
+					receiver: loopbackReceiver(ROBLOX_REDIRECT),
+					keptIn: "computer",
 					onChange: (status) => options.broadcast("roblox", status),
 					onForget: async () => {
 						await assets?.clearEverywhere();

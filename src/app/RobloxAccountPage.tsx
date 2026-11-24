@@ -24,13 +24,14 @@ export function RobloxAccountPage() {
 		return (
 			<Group title="Sign in with Roblox">
 				<Row
-					label="Not on the website"
-					help="Sign in with Roblox is offered by Roswaal on your computer. Here, meshes and images are drawn as stand-ins."
+					label="Not offered here"
+					help="This copy of Roswaal could not reach Sign in with Roblox. Meshes and images are drawn as stand-ins."
 				/>
 			</Group>
 		);
 	}
 
+	const browser = status.keptIn === "browser";
 	const run = async (action: () => Promise<void>) => {
 		setBusy(true);
 		setError(null);
@@ -68,14 +69,29 @@ export function RobloxAccountPage() {
 								Roblox asks you to let Roswaal download assets, read who made an asset, and know
 								your Roblox user ID. Nothing else: not your name, avatar or friends.
 							</li>
-							<li>
-								The sign-in stays on this computer, readable only by your account, and encrypted on
-								Windows. It never goes into a project, this tab or a log.
-							</li>
-							<li>
-								Meshes and images Roswaal downloads stay in the project's <code>.roswaal</code>{" "}
-								folder, out of Git, and are never shared.
-							</li>
+							{browser ? (
+								<li>
+									The sign-in stays in this browser's own storage for this site, which only the
+									site's pages can read. Roswaal has no server that sees it, and it never goes into
+									a project or a log.
+								</li>
+							) : (
+								<li>
+									The sign-in stays on this computer, readable only by your account, and encrypted
+									on Windows. It never goes into a project, this tab or a log.
+								</li>
+							)}
+							{status.downloads === false ? (
+								<li>
+									Downloading meshes and images here is still to come: for now, places show
+									stand-ins.
+								</li>
+							) : (
+								<li>
+									Meshes and images Roswaal downloads stay in the project's <code>.roswaal</code>{" "}
+									folder, out of Git, and are never shared.
+								</li>
+							)}
 							<li>
 								Sign out here at any time. It ends the sign-in on Roblox and deletes what was
 								downloaded.

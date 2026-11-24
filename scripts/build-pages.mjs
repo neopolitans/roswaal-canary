@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 
 import { landingPage } from "./lib/landing.mjs";
 import { notFoundPage } from "./lib/notFound.mjs";
+import { CALLBACK_SCRIPT, callbackPage } from "./lib/oauthCallback.mjs";
 import { withPolicyThroughout } from "./lib/policy.mjs";
 import { TOUR_SCRIPT } from "./lib/tour.mjs";
 
@@ -137,6 +138,15 @@ async function main() {
 		await mkdir(join(out, "technical"), { recursive: true });
 		await writeFile(join(out, "technical", "index.html"), technicalRedirect(), "utf8");
 	}
+
+	// `/oauth/callback`: where Roblox sends the tab that Sign in with Roblox
+	// opened, registered with Roswaal's app for roswaal.app and the canary.
+	// It hands the visit to the editor's worker and shows its answer: see
+	// `src/web/robloxSignIn.ts`. Its script is a file, as the policy allows
+	// no inline script.
+	await mkdir(join(out, "oauth"), { recursive: true });
+	await writeFile(join(out, "oauth", "callback.html"), callbackPage(), "utf8");
+	await writeFile(join(out, "oauth", "callback.js"), CALLBACK_SCRIPT, "utf8");
 
 	// Tells Pages not to run the files through Jekyll, which would drop every
 	// directory whose name begins with an underscore.

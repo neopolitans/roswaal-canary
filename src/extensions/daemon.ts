@@ -3,8 +3,8 @@
  * them up. Only the daemon imports this: it may need Node.
  */
 
+import type { RobloxSignIn } from "../server/roblox/signin.js";
 import { placeEditorDaemon } from "./placeEditor/server/daemon.js";
-import type { RobloxSignIn } from "./placeEditor/server/roblox/signin.js";
 import type { ExtensionCapabilities } from "./server.js";
 
 export interface DaemonExtensionOptions {

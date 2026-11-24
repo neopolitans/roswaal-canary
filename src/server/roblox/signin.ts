@@ -1,15 +1,20 @@
 /**
- * Sign in with Roblox, run by the daemon: OAuth 2.0's authorization code flow
- * with PKCE, as a public client with no secret, which Roblox accepts for the
- * exchange, a refresh and a revoke (probed 13 Nov 2026).
+ * Sign in with Roblox, Roswaal's own rather than an extension's, run by the
+ * daemon and by the website's worker alike:
+ * OAuth 2.0's authorization code flow with PKCE, as a public client with no
+ * secret, which Roblox accepts for the exchange, a refresh and a revoke
+ * (probed 13 Nov 2026). Nothing here needs Node: the crypto is WebCrypto, and
+ * what waits for Roblox to send the browser back is the host's receiver.
  *
  * - **Signing in.** The editor asks for a sign-in and opens the address it is
- *   given. While that is pending, and only then, a listener on
- *   `http://localhost:4474/oauth/callback` (the registered redirect) waits for
- *   Roblox to send the browser back with a code. The `state` must match, and a
- *   visit that brings nothing from Roblox is ignored rather than ending the
- *   wait. The code is exchanged with the PKCE verifier, and `openid`'s user id
- *   is read from userinfo.
+ *   given. While that is pending, and only then, the receiver waits for Roblox
+ *   to send the browser back with a code: the daemon's listens on
+ *   `http://localhost:4474/oauth/callback` (`loopback.ts`); the website's
+ *   hears its own `/oauth/callback` page (`web/robloxReceiver.ts`). Both are
+ *   registered redirects. The `state` must match, and a visit that brings
+ *   nothing from Roblox is ignored rather than ending the wait. The code is
+ *   exchanged with the PKCE verifier, and `openid`'s user id is read from
+ *   userinfo.
  * - **Keeping it.** The refresh token and user id go in the vault
  *   (`vault.ts`); the access token stays in memory for its fifteen minutes and
  *   is refreshed when needed. Each refresh hands back a new refresh token,
@@ -25,17 +30,31 @@
  * (CASA 2.1, 6.5).
  */
 
-import { createHash, randomBytes } from "node:crypto";
-import { createServer, type Server } from "node:http";
+/** What is kept: the refresh token and whose it is. */
+export interface KeptSignIn {
+	refreshToken: string;
+	/** The Roblox user id (`sub`), the only thing `openid` says about anyone. */
+	userId: string;
+}
 
-import type { KeptSignIn, SignInVault } from "./vault.js";
+/**
+ * Reads, writes and forgets the kept sign-in: the daemon's file (`vault.ts`)
+ * or the website's browser storage (`web/robloxSignIn.ts`).
+ */
+export interface SignInVault {
+	read(): Promise<KeptSignIn | null>;
+	write(kept: KeptSignIn): Promise<void>;
+	forget(): Promise<void>;
+}
 
 /** Roswaal's OAuth 2.0 app on Roblox. A public client's id, which is no secret. */
 export const ROBLOX_CLIENT_ID = "2020531128771082865";
 /** The scopes the app is registered for, and the Privacy Policy names. */
 export const ROBLOX_SCOPES = ["openid", "asset:read", "legacy-asset:manage"] as const;
-/** The redirect registered with the app: the address must match it exactly. */
+/** The daemon's redirect registered with the app: the address must match it exactly. */
 export const ROBLOX_REDIRECT = { host: "localhost", port: 4474, path: "/oauth/callback" };
+/** The website's, on its own address: `https://roswaal.app/oauth/callback`, and the canary's. */
+export const ROBLOX_WEB_REDIRECT_PATH = "/oauth/callback";
 
 const OAUTH = "https://apis.roblox.com/oauth";
 /** How long a sign-in waits for Roblox to send the browser back. */
@@ -54,6 +73,27 @@ export interface RobloxStatus {
 	signingIn: boolean;
 	/** Why the last sign-in did not finish, until the next one starts. */
 	failed?: string;
+	/** Where the sign-in is kept: on this computer, by the daemon; or in this browser, by the website. */
+	keptIn?: "computer" | "browser";
+}
+
+/**
+ * What a visit to the redirect is answered with: what the visitor's page
+ * says, and whether the sign-in is over. Null: not this sign-in's, a state
+ * that is not ours, which the website's receiver leaves to another tab.
+ */
+export type SignInAnswer = { status: number; text: string; end?: boolean } | null;
+
+/**
+ * Where Roblox sends the browser back: the host's own. `open` waits for
+ * visits, each answered by `visit`, until `close`; once an answer that ends
+ * the sign-in has reached the browser, it calls `ended`, and not before.
+ */
+export interface SignInReceiver {
+	/** The redirect address registered with the app, as the authorize request names it. */
+	readonly redirectUri: string;
+	open(visit: (query: URLSearchParams) => Promise<SignInAnswer>, ended: () => void): Promise<void>;
+	close(): void;
 }
 
 /** What a host offers the editor: the routes' view of Sign in with Roblox. */
@@ -73,9 +113,12 @@ export class AccessLostError extends Error {
 
 export interface RobloxSignInOptions {
 	vault: SignInVault;
+	/** Where Roblox sends the browser back: the daemon's listener, or the website's page. */
+	receiver: SignInReceiver;
+	/** Where the sign-in is kept, for the editor's words about it. */
+	keptIn?: RobloxStatus["keptIn"];
 	fetch?: typeof fetch;
 	clientId?: string;
-	redirect?: { host: string; port: number; path: string };
 	now?: () => number;
 	/** Told whenever the status changes, for the editor's event stream. */
 	onChange?: (status: RobloxStatus) => void;
@@ -92,18 +135,35 @@ export interface RobloxSignInOptions {
  */
 export const RIVAL_REFRESH_MS = 2000;
 
-const b64url = (bytes: Buffer) => bytes.toString("base64url");
+/** Bytes as base64url, no padding: PKCE's and the state's alphabet. */
+function b64url(bytes: Uint8Array): string {
+	let text = "";
+	for (const b of bytes) text += String.fromCharCode(b);
+	return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** `n` random bytes, as base64url. */
+function randomText(n: number): string {
+	return b64url(crypto.getRandomValues(new Uint8Array(n)));
+}
+
+/** The PKCE challenge for `verifier`: its SHA-256, as base64url. */
+async function challengeOf(verifier: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+	return b64url(new Uint8Array(digest));
+}
 
 interface Pending {
-	server: Server;
+	receiver: SignInReceiver;
 	timer: ReturnType<typeof setTimeout>;
 }
 
 export class RobloxSignIn implements RobloxAccount {
 	private readonly vault: SignInVault;
+	private readonly receiver: SignInReceiver;
+	private readonly keptIn: RobloxStatus["keptIn"];
 	private readonly fetch: typeof fetch;
 	private readonly clientId: string;
-	private readonly redirect: { host: string; port: number; path: string };
 	private readonly now: () => number;
 	private readonly onChange?: (status: RobloxStatus) => void;
 	private readonly onForget?: () => Promise<void>;
@@ -117,9 +177,10 @@ export class RobloxSignIn implements RobloxAccount {
 
 	constructor(options: RobloxSignInOptions) {
 		this.vault = options.vault;
-		this.fetch = options.fetch ?? fetch;
+		this.receiver = options.receiver;
+		this.keptIn = options.keptIn;
+		this.fetch = options.fetch ?? ((input, init) => fetch(input, init));
 		this.clientId = options.clientId ?? ROBLOX_CLIENT_ID;
-		this.redirect = options.redirect ?? ROBLOX_REDIRECT;
 		this.now = options.now ?? Date.now;
 		this.onChange = options.onChange;
 		this.onForget = options.onForget;
@@ -127,8 +188,7 @@ export class RobloxSignIn implements RobloxAccount {
 	}
 
 	private get redirectUri(): string {
-		const { host, port, path } = this.redirect;
-		return `http://${host}:${port}${path}`;
+		return this.receiver.redirectUri;
 	}
 
 	async status(): Promise<RobloxStatus> {
@@ -138,6 +198,7 @@ export class RobloxSignIn implements RobloxAccount {
 			...(kept ? { userId: kept.userId } : {}),
 			signingIn: this.pending !== null,
 			...(this.failed ? { failed: this.failed } : {}),
+			...(this.keptIn ? { keptIn: this.keptIn } : {}),
 		};
 	}
 
@@ -149,9 +210,9 @@ export class RobloxSignIn implements RobloxAccount {
 	async signIn(): Promise<{ url: string }> {
 		this.endPending();
 		this.failed = undefined;
-		const verifier = b64url(randomBytes(48));
-		const challenge = b64url(createHash("sha256").update(verifier).digest());
-		const state = b64url(randomBytes(24));
+		const verifier = randomText(48);
+		const challenge = await challengeOf(verifier);
+		const state = randomText(24);
 
 		const url = new URL(`${OAUTH}/v1/authorize`);
 		for (const [key, value] of Object.entries({
@@ -166,55 +227,31 @@ export class RobloxSignIn implements RobloxAccount {
 			url.searchParams.set(key, value);
 		}
 
-		const server = createServer((req, res) => {
-			void this.callback(req.url ?? "/", req.headers.host, state, verifier).then(
-				({ status, text, end }) => {
-					res.writeHead(status, {
-						"Content-Type": "text/plain; charset=utf-8",
-						"Cache-Control": "no-store",
-						"Referrer-Policy": "no-referrer",
-					});
-					// The listener closes once the browser has its answer, not before.
-					res.end(text, () => {
-						if (end && this.pending?.server === server) this.endPending();
-					});
-				},
-			);
-		});
-		await new Promise<void>((resolve, reject) => {
-			server.once("error", () =>
-				reject(
-					new Error(
-						`Sign in with Roblox needs port ${this.redirect.port}, and something else is using it.`,
-					),
-				),
-			);
-			server.listen(this.redirect.port, this.redirect.host, () => resolve());
-		});
+		const receiver = this.receiver;
+		await receiver.open(
+			(query) => this.callback(query, state, verifier),
+			// The receiver closes once the browser has its answer, not before.
+			() => {
+				if (this.pending?.receiver === receiver) this.endPending();
+			},
+		);
 		const timer = setTimeout(() => {
 			this.failed = "The sign-in waited ten minutes for Roblox and was stopped.";
 			this.endPending();
 			void this.changed();
 		}, SIGN_IN_WAIT_MS);
-		timer.unref?.();
-		this.pending = { server, timer };
+		(timer as { unref?: () => void }).unref?.();
+		this.pending = { receiver, timer };
 		void this.changed();
 		return { url: url.href };
 	}
 
-	/** One visit to the callback: what it answers, and whether the sign-in is over. */
+	/** One visit to the redirect: what it answers, and whether the sign-in is over. */
 	private async callback(
-		raw: string,
-		host: string | undefined,
+		query: URLSearchParams,
 		state: string,
 		verifier: string,
-	): Promise<{ status: number; text: string; end?: boolean }> {
-		const url = new URL(raw, this.redirectUri);
-		const expectedHost = `${this.redirect.host}:${this.redirect.port}`;
-		if (url.pathname !== this.redirect.path || (host && host !== expectedHost)) {
-			return { status: 404, text: "Not here." };
-		}
-		const query = url.searchParams;
+	): Promise<SignInAnswer> {
 		// Nothing from Roblox: someone opening the address by hand, or the
 		// browser asking again. Not the sign-in, and not a reason to end it.
 		if (!query.has("state") && !query.has("code") && !query.has("error")) {
@@ -223,10 +260,8 @@ export class RobloxSignIn implements RobloxAccount {
 				text: "Roswaal is waiting for Roblox to send you here after you sign in.",
 			};
 		}
-		// A state that does not match is not ours: answered, and ignored.
-		if (query.get("state") !== state) {
-			return { status: 400, text: "This sign-in is not the one Roswaal started." };
-		}
+		// A state that does not match is not ours: for the receiver to answer or leave.
+		if (query.get("state") !== state) return null;
 		// One answer per sign-in: a second visit with the same code is refused.
 		if (this.exchanging) return { status: 409, text: "This sign-in is already being finished." };
 		this.exchanging = true;
@@ -264,12 +299,11 @@ export class RobloxSignIn implements RobloxAccount {
 		}
 	}
 
-	/** Closes the callback listener, and tells the editor the wait is over. */
+	/** Closes the receiver, and tells the editor the wait is over. */
 	private endPending(): void {
 		if (!this.pending) return;
 		clearTimeout(this.pending.timer);
-		this.pending.server.closeAllConnections?.();
-		this.pending.server.close();
+		this.pending.receiver.close();
 		this.pending = null;
 		void this.changed();
 	}
@@ -416,5 +450,3 @@ export class RobloxSignIn implements RobloxAccount {
 		this.endPending();
 	}
 }
-
-export type { KeptSignIn };

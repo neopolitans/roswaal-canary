@@ -10,14 +10,18 @@ import { useSyncExternalStore } from "react";
 
 import { apiRequest } from "./api.js";
 
-/** Sign in with Roblox as the host tells it. See `extensions/placeEditor/server/roblox/signin.ts`. */
+/** Sign in with Roblox as the host tells it. See `server/roblox/signin.ts`. */
 export interface RobloxStatus {
-	/** Whether this copy of Roswaal offers it: the daemon does, the website does not yet. */
+	/** Whether this copy of Roswaal offers it: the daemon and the website both do. */
 	available: boolean;
 	signedIn?: boolean;
 	userId?: string;
 	signingIn?: boolean;
 	failed?: string;
+	/** Where the sign-in is kept: on this computer, by the daemon; or in this browser, by the website. */
+	keptIn?: "computer" | "browser";
+	/** Whether this host downloads what the sign-in fetches: the website does not yet. */
+	downloads?: boolean;
 }
 
 const post = <T>(url: string, body: unknown) =>
@@ -43,7 +47,8 @@ function set(next: RobloxStatus): void {
 
 /** What the host's `roblox` event says, which is the same shape as its status. */
 export function setRobloxStatus(next: Omit<RobloxStatus, "available">): void {
-	set({ ...next, available: true });
+	// The event says who is signed in; whether downloads are offered is the host's, unchanged.
+	set({ downloads: status.downloads, ...next, available: true });
 }
 
 /** Asks the host again. */

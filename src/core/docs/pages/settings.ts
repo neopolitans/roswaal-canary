@@ -54,8 +54,8 @@ export function settingsPage(): DocPage {
 					["**Node packs**", "`roswaal.json`", "The directories scanned for node packs"],
 					[
 						"**Roblox account**",
-						"This computer",
-						"Sign in with Roblox, for what Roswaal fetches from Roblox: today the meshes and images the Place Editor draws, through `roswaal serve`",
+						"This computer, or this browser on the website",
+						"Sign in with Roblox, for what Roswaal fetches from Roblox: today the meshes and images the Place Editor draws, downloaded through `roswaal serve`",
 					],
 					["**Canvas**", "This browser", "The grid, wires, node corners, and what scrolling does"],
 					[
@@ -269,7 +269,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Render scale",
-						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19); **Native**, every pixel the screen has, with what that comes to on your screen beside it (200% on a Retina screen, 100% on an ordinary one); or **150%**, **100%**, **75%** or **50%**. A share past the screen's own pixels draws Native, and says so. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
+						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19); **Native**, every pixel the screen has, with what that comes to on your screen beside it (200% on a Retina screen, 100% on an ordinary one; browser zoom counts too); or **150%**, **100%**, **75%** or **50%**. A share past the screen's own pixels draws Native, and says so. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
 					],
 					[
 						"Shaders",

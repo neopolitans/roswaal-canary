@@ -19,21 +19,10 @@ import nodeFs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 
-import { windowsProgram } from "../../../../server/programs.js";
+import { windowsProgram } from "../programs.js";
+import type { KeptSignIn, SignInVault } from "./signin.js";
 
-/** What is kept: the refresh token and whose it is. */
-export interface KeptSignIn {
-	refreshToken: string;
-	/** The Roblox user id (`sub`), the only thing `openid` says about anyone. */
-	userId: string;
-}
-
-/** Reads, writes and forgets the kept sign-in. */
-export interface SignInVault {
-	read(): Promise<KeptSignIn | null>;
-	write(kept: KeptSignIn): Promise<void>;
-	forget(): Promise<void>;
-}
+export type { KeptSignIn, SignInVault };
 
 /** Turns text into what is written, and back: DPAPI on Windows, nothing elsewhere. */
 interface Sealer {

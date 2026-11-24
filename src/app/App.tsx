@@ -566,7 +566,8 @@ export function App() {
 		};
 	}, [benchmark, viewer]);
 	useEffect(() => {
-		viewport?.setSuspended(benchmark !== null);
+		// Its view let go meanwhile, so the benchmark's has the GPU's memory to itself.
+		viewport?.setSuspended(benchmark !== null, true);
 	}, [viewport, benchmark]);
 	useEffect(() => {
 		if (!benchmark) return;

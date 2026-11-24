@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.41",
+		date: "2026-11-24",
+		headline: "The open place's 3D view lets go of the GPU while a benchmark runs.",
+		fixed: [
+			"**A benchmark run beside a large open place no longer runs a tablet out of memory.** The place's 3D view is let go while the run draws and built again after it; on an iPad, the two together had kept WebGPU from starting and the tab crashed.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.40",
 		date: "2026-11-24",
 		headline: "A benchmark run says when it was drawn by WebGL2 instead of WebGPU.",

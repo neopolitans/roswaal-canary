@@ -2328,10 +2328,33 @@ export class ViewportController {
 	/** Drawing stopped while another view is measured: the editor's own, during a benchmark. */
 	private suspended = false;
 
-	setSuspended(on: boolean): void {
+	setSuspended(on: boolean, release = false): void {
 		this.suspended = on;
-		if (!on) this.redraw();
+		if (on && release && this.view) {
+			// The GPU's memory back for what runs meanwhile: a benchmark's own view
+			// beside a large place's ran an iPad short, WebGPU did not start for
+			// it, and the tab crashed (24 Nov 2026). The place, its selection and
+			// its downloaded assets stay here; the view is built again after.
+			this.released = true;
+			this.view.destroy();
+			this.view = null;
+			this.canvas?.remove();
+			this.pivotMark?.remove();
+			this.pivotMark = null;
+			this.canvas = null;
+		}
+		if (!on) {
+			if (this.released) {
+				this.released = false;
+				void this.start();
+				return;
+			}
+			this.redraw();
+		}
 	}
+
+	/** Whether the view was let go while suspended, to be built again after. */
+	private released = false;
 
 	/** Once the view is made, its assets are in and its pipelines built. False if it never is. */
 	async whenReady(): Promise<boolean> {

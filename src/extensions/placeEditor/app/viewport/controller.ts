@@ -34,6 +34,7 @@ import type { Station } from "../benchmark/stations.js";
 import { type AntialiasMode, antialiasInfo } from "./antialias.js";
 import { type AssetGaps, type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import { boxAround } from "./box.js";
+import { DepthChoice } from "./depthChoice.js";
 import {
 	type DragStart,
 	dragMove,
@@ -525,6 +526,8 @@ export class ViewportController {
 			this.images.set(asset, Promise.resolve(image));
 		// A drag under way was of the place as it was: what is read now stands.
 		this.drag = null;
+		// Another place: Automatic's depth path is measured for it afresh.
+		this.depth.reset();
 		this.place = place;
 		this.host = place;
 		this.adopt(place);
@@ -1968,6 +1971,8 @@ export class ViewportController {
 		view.setPostEffects(this.options.postEffects);
 		view.setQuality(viewQuality(this.level(), this.pixelRatio()));
 		view.setRender(this.withSavings(this.state.render));
+		// A new view starts on the full path: Automatic's is measured for it afresh.
+		this.depth.reset();
 		this.view = view;
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
 		view.onRedraw = () => this.redraw();
@@ -2876,6 +2881,8 @@ export class ViewportController {
 			// The glow sized for the screen at this scale: see ViewQuality.glowCoarse.
 			view.setQuality(viewQuality(this.level(), dpr));
 			view.resize(w, h);
+			// Another size: the depth paths compare afresh.
+			this.depth.reset();
 			view.setUpscale?.(out, out ? mode : "off");
 			this.drawn = { width: w, height: h };
 			this.upKey = upKey;
@@ -2893,6 +2900,8 @@ export class ViewportController {
 
 	/** Dynamic optimization's savings: see dynamicScale.ts. */
 	private savings = new DynamicSavings();
+	/** Automatic's depth path, measured in use: see depthChoice.ts. */
+	private depth = new DepthChoice();
 
 	/** Dynamic and Dynamic optimization back to the start: Native, no savings taken. */
 	private resetDynamic(): void {
@@ -3005,21 +3014,31 @@ export class ViewportController {
 			const started = performance.now();
 			// Asked for by the view's own animation alone, the camera still.
 			const still = this.stillNext;
-			this.drawOnce(now);
 			const gap = this.refresh.drawn(now);
+			// Moving: drawn one after another, for the camera or the place, not a still frame.
+			const moving = !still && gap < this.refresh.period() * 4;
 			// WebGPU says when the GPU is done with the frame: how much room is left.
 			const timed = this.view.backend === "WebGPU";
+			// Automatic's depth path, measured on moving frames: see depthChoice.ts.
+			const depthPath =
+				timed && moving && this.depth.chosen === null && this.view.setDepthPath
+					? this.depth.next()
+					: null;
+			if (depthPath) this.view.setDepthPath?.(depthPath);
+			this.drawOnce(now);
 			if (rate === "steady") this.steady.drawn(now, timed);
 			const dynamic =
 				this.options.renderScale === "dynamic" || this.options.dynamicOptimization === true;
-			// Moving: drawn one after another, for the camera or the place, not a still frame.
-			const moving = !still && gap < this.refresh.period() * 4;
-			if (timed && (rate === "steady" || (dynamic && moving))) {
+			if (timed && (rate === "steady" || (dynamic && moving) || depthPath)) {
 				const steady = this.steady;
 				void this.view.settled().then(() => {
 					const ms = performance.now() - started;
 					if (rate === "steady") steady.worked(ms);
 					if (dynamic && moving) this.dynamicFrame(now, ms, true);
+					if (depthPath) {
+						this.depth.record(depthPath, ms);
+						if (this.depth.chosen) this.view?.setDepthPath?.(this.depth.chosen);
+					}
 				});
 			}
 			if (!timed && dynamic && moving) this.dynamicFrame(now, gap, false);
@@ -3318,6 +3337,8 @@ export class ViewportController {
 					depthPath.push(await this.timeWaited(label, 30));
 				}
 				view.setDepthPath("auto");
+				// Automatic measures its own again after the profile's.
+				this.depth.reset();
 			}
 			const resolution: Timed[] = [];
 			for (const scale of [1, 0.5, 0.25]) {

@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.40.0",
+	version: "0.41.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.41.0",
+			roswaal: "1.1.0-canary.66",
+			date: "2026-11-24",
+			text: "DepthChoice: Automatic's depth path timed on alternating moving frames (20 each), lean kept under 95% of full's median; reset for a new place, size, view or after a profile.",
+		},
 		{
 			version: "0.40.0",
 			roswaal: "1.1.0-canary.65",

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.66",
+		date: "2026-11-24",
+		headline: "Automatic's depth path is measured in use, and the faster kept.",
+		changed: [
+			"**The depth path is measured rather than assumed**: the first moving frames in a place alternate drawing the parts' depth first and drawing them in one pass, and the faster is kept, measured again for another place, size or view. Which is faster depends on the GPU and the place. WebGPU.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.65",
 		date: "2026-11-24",
 		headline: "The sun's far shadows are drawn less often while only the camera moves.",

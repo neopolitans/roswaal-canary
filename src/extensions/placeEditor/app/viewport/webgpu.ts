@@ -1570,8 +1570,10 @@ export class WebGpuView implements ViewRenderer {
 	 * small, and the parts shaded and depth-tested in one draw, for a
 	 * tile-based GPU (Apple's), which hides what is behind on its own
 	 * before it shades, so the full pass would draw the place twice.
-	 * Automatic is full on every GPU: on an iPad Mini (A15, Safari) lean
-	 * measured 9 ms a frame to full's 6 (22 Nov 2026). A profile times both.
+	 * Automatic is full until the controller has measured both on moving
+	 * frames (depthChoice.ts), and then the faster: on an iPad Mini (A15)
+	 * lean measured 9 ms a frame to full's 6 in one place (22 Nov 2026) and
+	 * 2.7 ms faster in another (24 Nov). A profile times both.
 	 */
 	private depthPath: "auto" | "full" | "lean" = "auto";
 	setDepthPath(path: "auto" | "full" | "lean"): void {

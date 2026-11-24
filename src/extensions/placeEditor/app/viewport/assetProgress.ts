@@ -58,6 +58,34 @@ export function assetWords(p: AssetProgress): { head: string; notes: string[] } 
 	return { head, notes };
 }
 
+/** Of each kind the place needs, how many are not in the view: see notLoadedText. */
+export interface AssetGaps {
+	meshes: { needed: number; missing: number };
+	unions: { needed: number; missing: number };
+	images: { needed: number; missing: number };
+}
+
+/**
+ * A report's line where assets are not drawn, or null where all are: a
+ * MeshPart or union without its asset is drawn as its box, and an image not
+ * at all, so the times leave their cost out. On the website no mesh comes,
+ * as it has no Sign in with Roblox.
+ */
+export function notLoadedText(g: AssetGaps | undefined): string | null {
+	if (!g) return null;
+	const part = (n: { needed: number; missing: number }, what: string) =>
+		n.missing > 0
+			? `${n.missing.toLocaleString("en")} of ${n.needed.toLocaleString("en")} ${what}`
+			: "";
+	const parts = [
+		part(g.meshes, "meshes"),
+		part(g.unions, "unions"),
+		part(g.images, "images"),
+	].filter(Boolean);
+	if (parts.length === 0) return null;
+	return `Not loaded: ${parts.join(", ")}. Their parts are drawn as boxes, so these times leave their cost out.`;
+}
+
 export class AssetTally {
 	private fetched = new Map<string, Fetch>();
 	private wanted = new Set<string>();
@@ -106,6 +134,18 @@ export class AssetTally {
 		this.fetched.set(key, "arrived");
 		this.given.add(key);
 		this.changed?.();
+	}
+
+	/** Of the keys starting `prefix` the view needs, how many it has not been given. */
+	gap(prefix: string): { needed: number; missing: number } {
+		let needed = 0;
+		let missing = 0;
+		for (const key of this.wanted) {
+			if (!key.startsWith(prefix)) continue;
+			needed++;
+			if (!this.given.has(key)) missing++;
+		}
+		return { needed, missing };
 	}
 
 	get progress(): AssetProgress {

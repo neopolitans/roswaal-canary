@@ -331,6 +331,21 @@ describe("what the profile says", () => {
 		);
 		expect(text).toMatch(/Parts' depth only\s+not here/);
 		expect(text).toContain("Quality: Automatic, Level 12");
+		expect(text).not.toContain("Not loaded");
+		const gaps = profileReport({
+			...RESULT,
+			facts: {
+				...RESULT.facts,
+				assets: {
+					meshes: { needed: 300, missing: 298 },
+					unions: { needed: 0, missing: 0 },
+					images: { needed: 12, missing: 0 },
+				},
+			},
+		});
+		expect(gaps).toContain(
+			"Not loaded: 298 of 300 meshes. Their parts are drawn as boxes, so these times leave their cost out.\nQuality:",
+		);
 		expect(text).toMatch(
 			/Camera moving[^\n]*\n\s+Orbit drag\s+16\.0 ms\s+63 fps\s+GPU\s+7\.00 ms\n\s+Sky maps 3\.00 ms · Parts 5\.00 ms\n\s+over 60 frames, drawn again: 60 reflection faces, 20 near sky maps/,
 		);

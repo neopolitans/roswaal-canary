@@ -10,6 +10,7 @@
  */
 
 import type { BenchmarkKind } from "../../benchmarkEvent.js";
+import { type AssetGaps, notLoadedText } from "../viewport/assetProgress.js";
 import {
 	fpsText,
 	type MovingRow,
@@ -43,7 +44,15 @@ export interface BenchmarkStationResult {
 	gpuTotal: { median: number; p95: number };
 	/** An orbit; for the Moving station, each control's motion. */
 	moving: MovingRow[];
-	counts: { draws: number; instances: number; triangles: number; particles: number; beams: number };
+	counts: {
+		draws: number;
+		instances: number;
+		triangles: number;
+		particles: number;
+		beams: number;
+		/** Assets the station needed that were not in the view: see notLoadedText. */
+		assets?: AssetGaps;
+	};
 }
 
 /** The render scales a Pixel cost run times each station at, as shares of the page's pixels; a 1x screen stops at 100%. */
@@ -279,6 +288,8 @@ export function benchmarkReport(result: BenchmarkResult): string {
 			lines.push(
 				`      ${s.counts.draws.toLocaleString("en")} draws · ${s.counts.instances.toLocaleString("en")} instances · ${Math.round(s.counts.triangles).toLocaleString("en")} triangles${s.counts.particles ? ` · ${s.counts.particles.toLocaleString("en")} particles` : ""}`,
 			);
+			const notLoaded = notLoadedText(s.counts.assets);
+			if (notLoaded) lines.push(`      ${notLoaded}`);
 			for (const m of s.moving.length > 1 ? s.moving : []) {
 				const total = m.gpu.length > 0 ? `GPU ${msText(m.gpuTotal.median)}` : "";
 				lines.push(`      ${m.label.padEnd(14)} ${msText(m.median)} ${fpsText(m.median)} ${total}`);

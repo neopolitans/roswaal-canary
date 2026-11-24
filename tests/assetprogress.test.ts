@@ -9,6 +9,7 @@ import {
 	assetsMissing,
 	assetsPending,
 	assetWords,
+	notLoadedText,
 } from "../src/extensions/placeEditor/app/viewport/assetProgress.js";
 
 describe("AssetTally", () => {
@@ -149,5 +150,34 @@ describe("assetWords", () => {
 		expect(assetWords({ ...none, needed: 4, unavailable: 4 }).notes).toEqual([
 			"4 need roswaal serve",
 		]);
+	});
+});
+
+describe("what a report says was not loaded", () => {
+	it("counts each kind the view was not given, and says the times leave them out", () => {
+		const tally = new AssetTally();
+		for (const key of ["mesh:1", "mesh:2", "mesh:3", "image:9", "union:5"]) tally.want(key);
+		tally.give("mesh:1");
+		tally.give("image:9");
+		tally.notAsked("mesh:2", "unavailable");
+		const gaps = {
+			meshes: tally.gap("mesh:"),
+			unions: tally.gap("union:"),
+			images: tally.gap("image:"),
+		};
+		expect(gaps).toEqual({
+			meshes: { needed: 3, missing: 2 },
+			unions: { needed: 1, missing: 1 },
+			images: { needed: 1, missing: 0 },
+		});
+		expect(notLoadedText(gaps)).toBe(
+			"Not loaded: 2 of 3 meshes, 1 of 1 unions. Their parts are drawn as boxes, so these times leave their cost out.",
+		);
+	});
+
+	it("says nothing where everything was drawn", () => {
+		const none = { needed: 4, missing: 0 };
+		expect(notLoadedText({ meshes: none, unions: none, images: none })).toBeNull();
+		expect(notLoadedText(undefined)).toBeNull();
 	});
 });

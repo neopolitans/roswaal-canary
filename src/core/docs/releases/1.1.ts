@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.39",
+		date: "2026-11-24",
+		headline: "Profiles and benchmark runs say when a place's meshes were not drawn.",
+		added: [
+			"**A profile and a benchmark station say how many meshes, unions and images were not loaded.** Those parts are drawn as boxes, so the times leave their cost out: on the website, which has no Sign in with Roblox, that is every mesh.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.38",
 		date: "2026-11-24",
 		headline: "Particles sorted faster, and the benchmark splits their CPU time.",

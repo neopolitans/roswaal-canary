@@ -20,6 +20,7 @@
  * report are tested without a GPU.
  */
 
+import { type AssetGaps, notLoadedText } from "./assetProgress.js";
 import type { EffectSteps } from "./view.js";
 
 /** A frame's stages, in the order they are drawn. Not every renderer has every one. */
@@ -325,6 +326,8 @@ export interface ProfileFacts {
 	depthPath: string;
 	/** The level the view was at when the profile began: "Automatic, Level 12", say. */
 	quality: string;
+	/** The place's assets not in the view when it was profiled: see notLoadedText. */
+	assets?: AssetGaps;
 	/** The antialiasing drawn then, by name. */
 	antialias: string;
 	/** Where the camera was, so two profiles can be taken from the same spot. */
@@ -506,6 +509,8 @@ export function profileReport(result: ProfileResult): string {
 	lines.push(
 		`Last frame: ${facts.draws.toLocaleString("en")} draw calls, ${facts.instances.toLocaleString("en")} instances, ${Math.round(facts.triangles).toLocaleString("en")} triangles, ${facts.beams} beams, ${facts.particles.toLocaleString("en")} particles`,
 	);
+	const notLoaded = notLoadedText(facts.assets);
+	if (notLoaded) lines.push(notLoaded);
 	if (facts.quality) lines.push(`Quality: ${facts.quality}`);
 	if (facts.camera) lines.push(`Camera: ${facts.camera}`);
 	lines.push(`Clock step: ${msText(result.clock)}`);

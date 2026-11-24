@@ -32,7 +32,7 @@ import {
 } from "../benchmark/result.js";
 import type { Station } from "../benchmark/stations.js";
 import { type AntialiasMode, antialiasInfo } from "./antialias.js";
-import { type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
+import { type AssetGaps, type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import { boxAround } from "./box.js";
 import {
 	type DragStart,
@@ -2578,15 +2578,27 @@ export class ViewportController {
 		return result;
 	}
 
+	/** The place's meshes, unions and images not in the view now. */
+	private assetGaps(): AssetGaps {
+		return {
+			meshes: this.tally.gap("mesh:"),
+			unions: this.tally.gap("union:"),
+			images: this.tally.gap("image:"),
+		};
+	}
+
 	/** What the view draws now, for a benchmark station's row. */
 	private benchCounts(): BenchmarkStationResult["counts"] {
 		const stats = this.view?.stats();
+		const gaps = this.assetGaps();
+		const missing = gaps.meshes.missing + gaps.unions.missing + gaps.images.missing;
 		return {
 			draws: stats?.draws ?? 0,
 			instances: stats?.instances ?? 0,
 			triangles: stats?.triangles ?? 0,
 			particles: stats?.particles ?? 0,
 			beams: stats?.beams ?? 0,
+			...(missing > 0 ? { assets: gaps } : {}),
 		};
 	}
 
@@ -3202,6 +3214,7 @@ export class ViewportController {
 					renderScale,
 					depthPath: view.leanDepth ? (view.leanDepth() ? "lean" : "full") : "",
 					quality: startedAt,
+					assets: this.assetGaps(),
 					antialias: antialiasInfo(view.antialias).label,
 					camera,
 					draws: stats.draws,

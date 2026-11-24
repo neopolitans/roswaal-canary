@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.55",
+		date: "2026-11-24",
+		headline:
+			"The website may download from contentdelivery.roblox.com, where Roblox sends some meshes.",
+		fixed: [
+			"**Meshes Roblox serves from contentdelivery.roblox.com download on the website.** Its security policy allowed only Roblox's API and CDN, so the browser stopped these before they started.",
+		],
+		affects: ["editor", "designer", "docs"],
+	},
+	{
 		version: "1.1.0-canary.54",
 		date: "2026-11-24",
 		headline: "Assets kept already draw first; only the missing ones download.",

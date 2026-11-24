@@ -6,6 +6,11 @@
  * the hosted editor, Node Design and the docs, on GitHub Pages, which sends no
  * headers of its own -- carries it as a `<meta>` tag in every page.
  *
+ * roswaal.app and canary.roswaal.app also pass through Cloudflare, which adds
+ * a Content-Security-Policy header of its own from a rule kept in Cloudflare,
+ * not here. A browser enforces both, so a change here does nothing on those
+ * sites until that rule is changed to match.
+ *
  * What it allows is what the pages use and no more:
  *
  * - **Scripts from the site only.** No page has an inline script, an inline
@@ -16,8 +21,9 @@
  *   hosted editor talks to its own worker; the daemon's editor to the daemon.
  *   Only Sign in with Roblox reaches out, from the website's worker: to
  *   `apis.roblox.com` for the sign-in and assets, and to Roblox's download
- *   servers (`*.rbxcdn.com`). Nothing else a script might gather has anywhere
- *   to go.
+ *   servers (`*.rbxcdn.com`, and `contentdelivery.roblox.com`, which asset
+ *   delivery names for some meshes). Nothing else a script might gather has
+ *   anywhere to go.
  * - **Styles inline as well.** CodeMirror writes its own, and the docs'
  *   pictures carry theirs in `style` attributes.
  *
@@ -30,7 +36,7 @@ const DIRECTIVES = [
 	"style-src 'self' 'unsafe-inline'",
 	"img-src 'self' data: blob:",
 	"font-src 'self' data:",
-	"connect-src 'self' https://apis.roblox.com https://*.rbxcdn.com",
+	"connect-src 'self' https://apis.roblox.com https://*.rbxcdn.com https://contentdelivery.roblox.com",
 	"worker-src 'self' blob:",
 	"object-src 'none'",
 	"base-uri 'self'",

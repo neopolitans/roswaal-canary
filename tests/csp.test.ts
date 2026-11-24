@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error -- build tooling, plain JS, no declarations to import.
 import { withPolicyThroughout } from "../scripts/lib/policy.mjs";
 import { CSP_HEADER, CSP_META, withCspMeta } from "../src/core/csp.js";
+import { isRobloxCdn } from "../src/extensions/placeEditor/server/roblox/assets.js";
 import { SECURITY_HEADERS } from "../src/server/app.js";
 
 const PAGE = `<!doctype html>
@@ -34,6 +35,28 @@ describe("the policy", () => {
 			expect(policy).not.toMatch(/script-src[^;]*('unsafe-|data:|blob:|https?:|\*)/);
 			expect(policy).toContain("object-src 'none'");
 			expect(policy).toContain("connect-src 'self'");
+		}
+	});
+
+	it("lets requests reach every host a download may come from, and no other", () => {
+		const connect = /connect-src ([^;]*)/.exec(CSP_META)?.[1].split(" ") ?? [];
+		expect(connect).toEqual([
+			"'self'",
+			"https://apis.roblox.com",
+			"https://*.rbxcdn.com",
+			"https://contentdelivery.roblox.com",
+		]);
+		// Each host the downloader accepts is one the policy lets a page reach.
+		for (const host of ["https://c0.rbxcdn.com/x", "https://contentdelivery.roblox.com/v1/x"]) {
+			expect(isRobloxCdn(host)).toBe(true);
+			const { hostname } = new URL(host);
+			expect(
+				connect.some((source) =>
+					source.startsWith("https://*.")
+						? hostname.endsWith(source.slice("https://*".length))
+						: source === `https://${hostname}`,
+				),
+			).toBe(true);
 		}
 	});
 

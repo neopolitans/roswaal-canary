@@ -2510,10 +2510,18 @@ export class ViewportController {
 								});
 								await this.viewSettled();
 								await this.waitedFrames(10, 2000);
-								report(label, station, variant.label, turn ? "Switch on" : "Switch off");
+								// No time beside it while it measures: the last was the switch's other way.
+								lastFrame = Number.NaN;
+								report(
+									label,
+									station,
+									variant.label,
+									turn ? "Measuring, switch on" : "Measuring, switch off",
+								);
 								const timed = await timeStill(station.name);
 								(turn ? on : off).push(timed);
 								lastFrame = timed.median;
+								report(label, station, variant.label, turn ? "Switch on" : "Switch off");
 							}
 							this.setRender({ ...this.state.render, features: base });
 							if (on.length === 2 && off.length === 2)

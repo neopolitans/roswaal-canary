@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.44",
+		date: "2026-11-24",
+		headline: "Neon's glow costs less, and an A/B run's status line is right.",
+		changed: [
+			"**Neon's glow and bloom cost less**: their wide blur is worked out at a quarter of the view's size, where it was half. It looks the same.",
+		],
+		fixed: [
+			"**An A/B run's status line shows each time beside the switch it was measured with.** It showed the last time beside the next switch's name.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.43",
 		date: "2026-11-24",
 		headline: "Sun shadows cost less where they are plain.",

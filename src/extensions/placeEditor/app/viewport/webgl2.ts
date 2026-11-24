@@ -1158,6 +1158,11 @@ interface WireSource {
 	edges?: { vao: WebGLVertexArrayObject; count: number };
 }
 
+/** The wide glow blur's size: a quarter of the view's, from the glow's half. */
+function quarterOf(w: number, h: number): [number, number] {
+	return [Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))];
+}
+
 export class WebGl2View implements ViewRenderer {
 	readonly backend = "WebGL2" as const;
 
@@ -2151,8 +2156,9 @@ export class WebGl2View implements ViewRenderer {
 		this.frameTex = gl.createTexture()!;
 		this.acrossFbo = gl.createFramebuffer()!;
 		this.acrossTex = gl.createTexture()!;
-		this.glowTex = [gl.createTexture()!, gl.createTexture()!, gl.createTexture()!];
-		this.glowFbo = [gl.createFramebuffer()!, gl.createFramebuffer()!, gl.createFramebuffer()!];
+		// Three half the view's size; the last two a quarter, for the wide blur (see sizeGlow).
+		this.glowTex = Array.from({ length: 5 }, () => gl.createTexture()!);
+		this.glowFbo = Array.from({ length: 5 }, () => gl.createFramebuffer()!);
 		this.setScene(scene);
 		for (const kind of HANDLE_KINDS) {
 			const m = handleMesh(kind);
@@ -2617,10 +2623,14 @@ export class WebGl2View implements ViewRenderer {
 		// Half floats where the browser can draw into them, so the blur's long
 		// fall does not round into steps; bytes elsewhere.
 		const half = gl.getExtension("EXT_color_buffer_float") !== null;
+		// The wide blur at a quarter of the view's size, as WebGpuView's sizeGlow.
+		const [qw, qh] = quarterOf(w, h);
 		this.glowTex.forEach((tex, i) => {
+			const [tw, th] = i < 3 ? [w, h] : [qw, qh];
 			gl.bindTexture(gl.TEXTURE_2D, tex);
-			if (half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-			else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+			if (half)
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, tw, th, 0, gl.RGBA, gl.HALF_FLOAT, null);
+			else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, tw, th, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -2730,12 +2740,16 @@ export class WebGl2View implements ViewRenderer {
 		const spread = glowSpread(h, this.shape);
 		const narrow = spread * GLOW_NARROW.width;
 		const more = spread * Math.sqrt(GLOW_WIDE.width ** 2 - GLOW_NARROW.width ** 2);
-		for (const [from, into, step, sigma] of [
-			[first, 1, [1 / w, 0], narrow],
-			[1, 0, [0, 1 / h], narrow],
-			[0, 1, [1 / w, 0], more],
-			[1, 2, [0, 1 / h], more],
+		const [qw, qh] = quarterOf(w, h);
+		const moreQ = (more * qh) / h;
+		// Narrow at half the view's size; the wide blur's two at a quarter, into 3 and 4.
+		for (const [from, into, step, sigma, size] of [
+			[first, 1, [1 / w, 0], narrow, [w, h]],
+			[1, 0, [0, 1 / h], narrow, [w, h]],
+			[0, 3, [1 / qw, 0], moreQ, [qw, qh]],
+			[3, 4, [0, 1 / qh], moreQ, [qw, qh]],
 		] as const) {
+			gl.viewport(0, 0, size[0], size[1]);
 			gl.bindFramebuffer(gl.FRAMEBUFFER, this.glowFbo[into]);
 			gl.bindTexture(gl.TEXTURE_2D, this.glowTex[from]);
 			gl.uniform4f(p, step[0], step[1], 0, sigma);
@@ -2799,7 +2813,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.activeTexture(gl.TEXTURE3);
 		gl.bindTexture(gl.TEXTURE_2D, this.frameTex);
 		gl.activeTexture(gl.TEXTURE11);
-		gl.bindTexture(gl.TEXTURE_2D, this.glowTex[2]);
+		gl.bindTexture(gl.TEXTURE_2D, this.glowTex[4]);
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, this.glowTex[0]);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);

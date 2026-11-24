@@ -98,6 +98,7 @@ export function Benchmark({
 			if (!stopped) controller.setPlace(place);
 		});
 		let shown = 0;
+		let lastPhase = "";
 		void (async () => {
 			if (!(await controller.whenReady())) {
 				if (!stopped)
@@ -120,8 +121,10 @@ export function Benchmark({
 					cancelled: () => stopped,
 					onProgress: (p) => {
 						const now = performance.now();
-						if (p.phase !== "Building" && now - shown < 250) return;
+						// A new phase always shows, so a time never stays beside another phase's name.
+						if (p.phase === lastPhase && now - shown < 250) return;
 						shown = now;
+						lastPhase = p.phase;
 						setProgress(p);
 					},
 				});

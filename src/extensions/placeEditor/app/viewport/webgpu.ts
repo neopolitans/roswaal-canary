@@ -1554,7 +1554,7 @@ export class WebGpuView implements ViewRenderer {
 			});
 		// The blur's groups name the source, and the composite the blur's
 		// targets: made again with it.
-		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c]) t?.destroy();
+		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c, this.glow?.d]) t?.destroy();
 		this.glow = undefined;
 		this.sizeGlow();
 		if (!this.frame || !this.glow) return;
@@ -1808,7 +1808,11 @@ export class WebGpuView implements ViewRenderer {
 	private glow?: {
 		a: GPUTexture;
 		b: GPUTexture;
+		/** The wide blur, and its spare: a quarter of the view's size (qw x qh). */
 		c: GPUTexture;
+		d: GPUTexture;
+		qw: number;
+		qh: number;
 		groups: GPUBindGroup[];
 		/** The bloom's bright-pass: the frame and Neon's glow source. */
 		bright: GPUBindGroup;
@@ -3193,7 +3197,7 @@ fn at(c: vec2i) -> u32 {
 			blurGroup(this.frameAcross, this.postParams[4]),
 		];
 		// Its bind groups name the source just made: made again with it.
-		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c]) t?.destroy();
+		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c, this.glow?.d]) t?.destroy();
 		this.glow = undefined;
 		this.pickTarget = d.createTexture({
 			size,
@@ -3214,7 +3218,7 @@ fn at(c: vec2i) -> u32 {
 		const h = Math.max(1, Math.round(this.height / 2));
 		if (this.glow && this.glow.w === w && this.glow.h === h) return;
 		const d = this.device;
-		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c]) t?.destroy();
+		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c, this.glow?.d]) t?.destroy();
 		const target = () =>
 			d.createTexture({
 				size: [w, h],
@@ -3223,7 +3227,20 @@ fn at(c: vec2i) -> u32 {
 			});
 		const a = target();
 		const b = target();
-		const c = target();
+		// The wide blur at a quarter of the view's size: its input is the narrow
+		// blur, with nothing fine left to lose, and a quarter of the pixels at
+		// half the taps cost an eighth. At an iPad's Native it was 27 reads a
+		// half-size pixel each way, most of what Neon's glow cost a frame.
+		const qw = Math.max(1, Math.round(w / 2));
+		const qh = Math.max(1, Math.round(h / 2));
+		const quarter = () =>
+			d.createTexture({
+				size: [qw, qh],
+				format: "rgba16float",
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
+		const c = quarter();
+		const spare = quarter();
 		this.shapeSpread = -1;
 		const group = (tex: GPUTexture, params: GPUBuffer) =>
 			d.createBindGroup({
@@ -3237,13 +3254,14 @@ fn at(c: vec2i) -> u32 {
 		// The source averaged down into A, A across into B, and B down into A,
 		// which is added over the frame.
 		// The source down to a; blurred narrow across into b and down into a;
-		// then a blurred on across into b and down into c, the wide blur.
+		// then a blurred on across into the quarter-size spare and down into c,
+		// the wide blur.
 		const groups = [
 			group(this.glowFull!, this.postParams[0]),
 			group(a, this.postParams[0]),
 			group(b, this.postParams[1]),
 			group(a, this.postParams[5]),
-			group(b, this.postParams[6]),
+			group(spare, this.postParams[6]),
 		];
 		// The bloom's bright-pass: Neon's glow source and the finished frame.
 		const bright = d.createBindGroup({
@@ -3257,7 +3275,7 @@ fn at(c: vec2i) -> u32 {
 				{ binding: 5, resource: c.createView() },
 			],
 		});
-		this.glow = { a, b, c, groups, bright, w, h };
+		this.glow = { a, b, c, d: spare, qw, qh, groups, bright, w, h };
 	}
 
 	/**
@@ -3311,7 +3329,7 @@ fn at(c: vec2i) -> u32 {
 		const steps: [GPURenderPipeline, number, GPUTexture, boolean][] = [];
 		if (bloom) steps.push([this.bright, -1, glow.a, true]);
 		steps.push([this.blur, 1, glow.b, false], [this.blur, 2, glow.a, false]);
-		steps.push([this.blur, 3, glow.b, false], [this.blur, 4, glow.c, false]);
+		steps.push([this.blur, 3, glow.d, false], [this.blur, 4, glow.c, false]);
 		this.glowSteps(encoder, steps);
 	}
 
@@ -3542,15 +3560,17 @@ fn at(c: vec2i) -> u32 {
 			new Float32Array([0, 0, glowing ? this.shape.gain : 0, sharesComposite(mode)]),
 		);
 		if (this.glow && this.shapeSpread !== this.shape.spread) {
-			const { w, h } = this.glow;
+			const { w, h, qw, qh } = this.glow;
 			const spread = glowSpread(h, this.shape);
 			// The narrow blur, then what takes it on to the wide one.
 			const narrow = spread * GLOW_NARROW.width;
 			const more = spread * Math.sqrt(GLOW_WIDE.width ** 2 - GLOW_NARROW.width ** 2);
 			q.writeBuffer(this.postParams[0], 0, new Float32Array([1 / w, 0, 0, narrow]));
 			q.writeBuffer(this.postParams[1], 0, new Float32Array([0, 1 / h, 0, narrow]));
-			q.writeBuffer(this.postParams[5], 0, new Float32Array([1 / w, 0, 0, more]));
-			q.writeBuffer(this.postParams[6], 0, new Float32Array([0, 1 / h, 0, more]));
+			// The wide blur's own, a quarter of the view: its texels twice as wide.
+			const moreQ = (more * qh) / h;
+			q.writeBuffer(this.postParams[5], 0, new Float32Array([1 / qw, 0, 0, moreQ]));
+			q.writeBuffer(this.postParams[6], 0, new Float32Array([0, 1 / qh, 0, moreQ]));
 			this.shapeSpread = this.shape.spread;
 		}
 		q.writeBuffer(this.gradeBuffer, 0, gradeBlock(this.lighting?.post, postOn));

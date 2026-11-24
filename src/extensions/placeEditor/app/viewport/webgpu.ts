@@ -10,7 +10,7 @@
  */
 
 import { type LightingParams, lightingBlock } from "../../core/lighting.js";
-import { MATERIAL_TEXTURES, MATERIALS, materialBlock } from "../../core/materials.js";
+import { MATERIALS, materialBlock } from "../../core/materials.js";
 import {
 	HIGHLIGHT_LIMIT,
 	type PlaceScene,
@@ -2780,12 +2780,7 @@ export class WebGpuView implements ViewRenderer {
 			usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
 		});
 		d.queue.writeBuffer(this.uniform, UNIFORM_MATERIALS, materialBlock());
-		this.looks = d.createTexture({
-			size: [TEXTURE_SIZE, TEXTURE_SIZE, MATERIAL_TEXTURES.length],
-			mipLevelCount: TEXTURE_LEVELS,
-			format: "rgba8unorm",
-			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT,
-		});
+		this.makeLooks(1);
 		this.lookSampler = d.createSampler({
 			addressModeU: "repeat",
 			addressModeV: "repeat",
@@ -6207,16 +6202,48 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		return at;
 	}
 
+	/** Where each material texture layer is in `looks`: only the ones the place uses. */
+	private lookSlots = new Map<number, number>();
+
+	/** The material textures' array, `count` layers; empty until each is given. */
+	private makeLooks(count: number): void {
+		this.looks?.destroy();
+		this.looks = this.device.createTexture({
+			size: [TEXTURE_SIZE, TEXTURE_SIZE, Math.max(1, count)],
+			mipLevelCount: TEXTURE_LEVELS,
+			format: "rgba8unorm",
+			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT,
+		});
+		this.loaded = new Set();
+	}
+
+	setLookLayers(layers: readonly number[]): boolean {
+		const fresh = layers.filter((l) => !this.lookSlots.has(l));
+		if (fresh.length === 0) return false;
+		for (const l of fresh) this.lookSlots.set(l, this.lookSlots.size);
+		this.makeLooks(this.lookSlots.size);
+		this.device.queue.writeBuffer(this.uniform, UNIFORM_MATERIALS, this.lookBlock());
+		if (this.bind) this.rebind();
+		return true;
+	}
+
+	private lookBlock(): Float32Array {
+		return materialBlock(this.loaded, (layer) => this.lookSlots.get(layer) ?? 0);
+	}
+
 	setLook(layer: number, levels: readonly (HTMLCanvasElement | ImageBitmap)[]): void {
+		const slot = this.lookSlots.get(layer);
+		// Not one the place said it uses: no room kept for it.
+		if (slot === undefined) return;
 		levels.forEach((source, mipLevel) => {
 			this.device.queue.copyExternalImageToTexture(
 				{ source },
-				{ texture: this.looks, mipLevel, origin: [0, 0, layer] },
+				{ texture: this.looks, mipLevel, origin: [0, 0, slot] },
 				[source.width, source.height],
 			);
 		});
 		this.loaded.add(layer);
-		this.device.queue.writeBuffer(this.uniform, UNIFORM_MATERIALS, materialBlock(this.loaded));
+		this.device.queue.writeBuffer(this.uniform, UNIFORM_MATERIALS, this.lookBlock());
 		// The reflection cube was drawn with the material's plain pattern: again, with its texture.
 		this.reflStale();
 	}

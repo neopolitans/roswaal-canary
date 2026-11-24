@@ -115,6 +115,12 @@ export interface ViewRenderer {
 	/** A material texture, as its mip levels, into its layer; drawn from then on. */
 	setLook(layer: number, levels: readonly (HTMLCanvasElement | ImageBitmap)[]): void;
 	/**
+	 * The material textures the place uses, so the array holds those and no
+	 * more. Grows to take new ones, never shrinks; true when it was made
+	 * again, which empties it: every texture is then given again.
+	 */
+	setLookLayers?(layers: readonly number[]): boolean;
+	/**
 	 * A Decal's or Texture's image, by the asset id the scene's `images` name;
 	 * the faces showing it are drawn from then on.
 	 */

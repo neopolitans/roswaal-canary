@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.67",
+		date: "2026-11-24",
+		headline: "The GPU holds only the material textures a place uses.",
+		changed: [
+			"**Material textures take room on the GPU only for the materials the place uses**, where all forty were kept: a place with three textured materials holds 4 MB of them where it held 54 MB on a computer (14 MB on a touch screen).",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.66",
 		date: "2026-11-24",
 		headline: "Automatic's depth path is measured in use, and the faster kept.",

@@ -204,11 +204,19 @@ export function materialIndex(value: unknown): number {
  * (the texture's studs, its strength, whether it glows, 0). `texture` is its layer + 1 once
  * that layer has loaded, and 0 until then, when the pattern is drawn instead.
  */
-export function materialBlock(loaded: ReadonlySet<number> = new Set()): Float32Array {
+/**
+ * `loaded`: the texture layers in the view; `slot`: where each one is in its
+ * array, which holds only the materials the place uses (the layer itself
+ * when every material has one). 0 for a material with none loaded.
+ */
+export function materialBlock(
+	loaded: ReadonlySet<number> = new Set(),
+	slot: (layer: number) => number = (layer) => layer,
+): Float32Array {
 	const out = new Float32Array(MATERIALS.length * MATERIAL_ROW);
 	MATERIALS.forEach((m, i) => {
 		const t = TEXTURE_OF.get(m.name);
-		const layer = t && loaded.has(t.layer) ? t.layer + 1 : 0;
+		const layer = t && loaded.has(t.layer) ? slot(t.layer) + 1 : 0;
 		out.set(
 			[
 				m.spec,

@@ -10,7 +10,7 @@
  */
 
 import { type LightingParams, lightingBlock } from "../../core/lighting.js";
-import { MATERIAL_TEXTURES, MATERIALS, materialBlock } from "../../core/materials.js";
+import { MATERIALS, materialBlock } from "../../core/materials.js";
 import { LIGHT_STRIDE, type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
 import {
 	AA_GLSL,
@@ -2169,24 +2169,7 @@ export class WebGl2View implements ViewRenderer {
 			gl.uniform1i(gl.getUniformLocation(prog.program, "reflCube"), 14);
 		}
 		gl.useProgram(this.main.program);
-		this.looks = gl.createTexture()!;
-		gl.activeTexture(gl.TEXTURE1);
-		gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.looks);
-		gl.texStorage3D(
-			gl.TEXTURE_2D_ARRAY,
-			TEXTURE_LEVELS,
-			gl.RGBA8,
-			TEXTURE_SIZE,
-			TEXTURE_SIZE,
-			MATERIAL_TEXTURES.length,
-		);
-		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
-		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
-		const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
-		if (aniso) gl.texParameterf(gl.TEXTURE_2D_ARRAY, aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
-		gl.activeTexture(gl.TEXTURE0);
+		this.makeLooks(1);
 		this.ids = this.link(VS, FS_ID);
 		this.over = this.link(VS_OVER, FS_OVER);
 		this.skyProgram = this.link(VS_SKY, FS_SKY);
@@ -3982,7 +3965,58 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniform1f(veil, 0);
 	}
 
+	/** Where each material texture layer is in `looks`: only the ones the place uses. */
+	private lookSlots = new Map<number, number>();
+
+	/** The material textures' array, `count` layers, on unit 1; empty until each is given. */
+	private makeLooks(count: number): void {
+		const gl = this.gl;
+		if (this.looks) gl.deleteTexture(this.looks);
+		this.looks = gl.createTexture()!;
+		gl.activeTexture(gl.TEXTURE1);
+		gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.looks);
+		gl.texStorage3D(
+			gl.TEXTURE_2D_ARRAY,
+			TEXTURE_LEVELS,
+			gl.RGBA8,
+			TEXTURE_SIZE,
+			TEXTURE_SIZE,
+			Math.max(1, count),
+		);
+		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
+		const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+		if (aniso) gl.texParameterf(gl.TEXTURE_2D_ARRAY, aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+		gl.activeTexture(gl.TEXTURE0);
+		this.loaded = new Set();
+	}
+
+	setLookLayers(layers: readonly number[]): boolean {
+		const fresh = layers.filter((l) => !this.lookSlots.has(l));
+		if (fresh.length === 0) return false;
+		for (const l of fresh) this.lookSlots.set(l, this.lookSlots.size);
+		this.makeLooks(this.lookSlots.size);
+		this.sendLookBlock();
+		return true;
+	}
+
+	/** The material table, with each texture's slot, to every program that reads it. */
+	private sendLookBlock(): void {
+		const gl = this.gl;
+		const block = materialBlock(this.loaded, (layer) => this.lookSlots.get(layer) ?? 0);
+		for (const prog of [this.main, this.glowProgram, this.reflProgram]) {
+			if (!prog) continue;
+			gl.useProgram(prog.program);
+			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), block);
+		}
+	}
+
 	setLook(layer: number, levels: readonly (HTMLCanvasElement | ImageBitmap)[]): void {
+		const slot = this.lookSlots.get(layer);
+		// Not one the place said it uses: no room kept for it.
+		if (slot === undefined) return;
 		const gl = this.gl;
 		gl.activeTexture(gl.TEXTURE1);
 		gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.looks);
@@ -3992,7 +4026,7 @@ export class WebGl2View implements ViewRenderer {
 				level,
 				0,
 				0,
-				layer,
+				slot,
 				source.width,
 				source.height,
 				1,
@@ -4003,11 +4037,7 @@ export class WebGl2View implements ViewRenderer {
 		});
 		gl.activeTexture(gl.TEXTURE0);
 		this.loaded.add(layer);
-		const block = materialBlock(this.loaded);
-		for (const prog of [this.main, this.glowProgram, this.reflProgram]) {
-			gl.useProgram(prog.program);
-			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), block);
-		}
+		this.sendLookBlock();
 		// The reflection cube was drawn with the material's plain pattern: again, with its texture.
 		this.reflAt = null;
 	}

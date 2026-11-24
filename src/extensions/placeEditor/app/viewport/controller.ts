@@ -778,7 +778,13 @@ export class ViewportController {
 	 * until then a material is drawn in its own pattern.
 	 */
 	private loadLooks(view: ViewRenderer, place: PlaceScene): void {
-		for (const layer of layersUsed(place)) {
+		const used = layersUsed(place);
+		// The view's array holds the place's materials alone; made again, it is empty.
+		if (view.setLookLayers?.(used)) {
+			const had = this.given.get(view);
+			if (had) for (const key of [...had.keys()]) if (key.startsWith("look:")) had.delete(key);
+		}
+		for (const layer of used) {
 			const key = `look:${layer}`;
 			let levels = this.looks.get(layer);
 			this.tally.want(key, !levels);

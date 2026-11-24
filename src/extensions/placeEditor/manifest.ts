@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.41.0",
+	version: "0.41.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.41.1",
+			roswaal: "1.1.0-canary.67",
+			date: "2026-11-24",
+			text: "Material textures on use: setLookLayers sizes the array to the place's (grow only, remade empty and given again); materialBlock writes each texture's slot.",
+		},
 		{
 			version: "0.41.0",
 			roswaal: "1.1.0-canary.66",

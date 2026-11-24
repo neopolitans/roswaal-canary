@@ -73,3 +73,22 @@ describe("The material table", () => {
 			expect(source, t.material).toContain(`./textures/${t.material}.`);
 	});
 });
+
+describe("the material table's texture slots", () => {
+	it("names each loaded texture by its slot in the view's array, and none for one not loaded", () => {
+		const brick = MATERIAL_TEXTURES.findIndex((t) => t.material === "Brick");
+		const wood = MATERIAL_TEXTURES.findIndex((t) => t.material === "Wood");
+		expect(brick).toBeGreaterThanOrEqual(0);
+		expect(wood).toBeGreaterThanOrEqual(0);
+		// The array holds Wood then Brick, Brick alone loaded so far.
+		const slots = new Map([
+			[wood, 0],
+			[brick, 1],
+		]);
+		const block = materialBlock(new Set([brick]), (l) => slots.get(l) ?? 0);
+		expect(block[rowOf("Brick") + 7]).toBe(2);
+		expect(block[rowOf("Wood") + 7]).toBe(0);
+		// Without slots, the layer itself, as before.
+		expect(materialBlock(new Set([brick]))[rowOf("Brick") + 7]).toBe(brick + 1);
+	});
+});

@@ -19,8 +19,16 @@ import type { NotAsked } from "./assetProgress.js";
 /** Roblox's asset types for what a Decal or Texture can name. */
 const IMAGE_TYPE = 1;
 const DECAL_TYPE = 13;
-/** As many as the daemon takes in one request. */
-const BATCH = 64;
+/**
+ * Downloads asked for in one request: small, so each lands and draws while
+ * the rest download. The host takes up to 64.
+ */
+const BATCH = 16;
+/** Kept copies asked about in one request: nothing is downloaded, so many at once. */
+const HELD_BATCH = 1024;
+
+/** Where a stage of `ensure` came from: kept already, or downloaded just now. */
+export type Landed = "held" | "downloaded";
 
 /** The image a Decal asset's model names, from its bytes as text. */
 export function decalImageOf(bytes: Uint8Array): string | undefined {
@@ -69,27 +77,56 @@ export function onDownloadFailures(listener: () => void): () => void {
 }
 
 /**
- * Downloads `ids` through the host, in batches; answers with those that are
- * here. A batch the host refuses as a whole fails its own ids, not the rest.
+ * Makes sure `ids` are here, and answers with those that are. Kept copies
+ * first, asking Roblox nothing, so they draw at once; then the rest are
+ * downloaded in small batches. `landed` hears each stage as it comes, so a
+ * loader draws as assets arrive rather than once all have. A batch the host
+ * refuses as a whole fails its own ids, not the rest.
  */
-export async function ensure(ids: string[]): Promise<Set<string>> {
+export async function ensure(
+	ids: string[],
+	landed?: (ready: string[], from: Landed) => Promise<void>,
+): Promise<Set<string>> {
 	const ready = new Set<string>();
-	for (let at = 0; at < ids.length; at += BATCH) {
-		const batch = ids.slice(at, at + BATCH);
+	const settle = async (got: string[], from: Landed) => {
+		for (const id of got) {
+			ready.add(id);
+			failures.delete(id);
+		}
+		if (got.length > 0) await landed?.(got, from);
+	};
+
+	// What is kept already, and Roblox's own, need no download.
+	const known = new Set<string>();
+	for (let at = 0; at < ids.length; at += HELD_BATCH) {
+		try {
+			const { assets } = await robloxApi.heldAssets(ids.slice(at, at + HELD_BATCH));
+			const here: string[] = [];
+			for (const [id, outcome] of Object.entries(assets)) {
+				known.add(id);
+				if (outcome.state === "ready") here.push(id);
+			}
+			await settle(here, "held");
+		} catch {
+			// A host without the question: every id is asked for below, as before.
+		}
+	}
+
+	const missing = ids.filter((id) => !known.has(id));
+	for (let at = 0; at < missing.length; at += BATCH) {
+		const batch = missing.slice(at, at + BATCH);
+		const got: string[] = [];
 		try {
 			const { assets } = await robloxApi.fetchAssets(batch);
 			for (const [id, outcome] of Object.entries(assets)) {
-				if (outcome.state === "ready") {
-					ready.add(id);
-					failures.delete(id);
-				} else if (outcome.state === "failed") {
-					failures.set(id, generalReason(outcome.reason));
-				}
+				if (outcome.state === "ready") got.push(id);
+				else if (outcome.state === "failed") failures.set(id, generalReason(outcome.reason));
 			}
 		} catch (err) {
 			const reason = generalReason(err instanceof Error ? err.message : String(err));
 			for (const id of batch) failures.set(id, reason);
 		}
+		await settle(got, "downloaded");
 	}
 	noteFailures();
 	if (failureList.length > 0)
@@ -132,7 +169,6 @@ export async function loadImages(
 	const why = await notAsked();
 	if (why) return why;
 	const unique = [...new Set(roblox)];
-	const ready = await ensure(unique);
 
 	const draw = async (asked: string, bytes: Uint8Array) => {
 		try {
@@ -151,26 +187,27 @@ export async function loadImages(
 	// An image is drawn as it arrives; a Decal asset once the image it names has.
 	const decals = new Map<string, string[]>();
 	const held = new Map<string, Uint8Array>();
-	for (const id of unique) {
-		if (!ready.has(id)) continue;
-		const got = await bytesOf(id);
-		if (!got) continue;
-		if (got.assetTypeId === DECAL_TYPE) {
-			const image = decalImageOf(got.bytes);
-			if (image) decals.set(image, [...(decals.get(image) ?? []), id]);
-		} else if (got.assetTypeId === undefined || got.assetTypeId === IMAGE_TYPE) {
-			held.set(id, got.bytes);
-			await draw(id, got.bytes);
+	await ensure(unique, async (ready) => {
+		for (const id of ready) {
+			const got = await bytesOf(id);
+			if (!got) continue;
+			if (got.assetTypeId === DECAL_TYPE) {
+				const image = decalImageOf(got.bytes);
+				if (image) decals.set(image, [...(decals.get(image) ?? []), id]);
+			} else if (got.assetTypeId === undefined || got.assetTypeId === IMAGE_TYPE) {
+				held.set(id, got.bytes);
+				await draw(id, got.bytes);
+			}
 		}
-	}
+	});
 	const inner = [...decals.keys()].filter((id) => !held.has(id));
 	if (inner.length > 0) {
-		const innerReady = await ensure(inner);
-		for (const id of inner) {
-			if (!innerReady.has(id)) continue;
-			const got = await bytesOf(id);
-			if (got) held.set(id, got.bytes);
-		}
+		await ensure(inner, async (ready) => {
+			for (const id of ready) {
+				const got = await bytesOf(id);
+				if (got) held.set(id, got.bytes);
+			}
+		});
 	}
 	for (const [image, asked] of decals) {
 		const bytes = held.get(image);

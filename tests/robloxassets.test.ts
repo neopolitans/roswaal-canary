@@ -394,3 +394,29 @@ describe("a request the browser stops", () => {
 		expect(JSON.stringify(reason)).not.toContain("secret");
 	});
 });
+
+describe("asking which assets are kept already", () => {
+	it("answers kept and skipped ones, leaves out the rest, and asks Roblox nothing", async () => {
+		let clock = 1_000_000_000;
+		const roblox = fakeRoblox({ creator: { "52": "1" } });
+		const root = new FakeDir("");
+		const assets = new AssetCache({
+			token: async () => "access-token",
+			shelf: browserShelf(async () => root as unknown as FileSystemDirectoryHandle),
+			fetch: roblox.fetch,
+			now: () => clock,
+		});
+		await assets.fetchAll("/p", ["51", "52"]);
+		const asked = roblox.seen.length;
+		clock += 20 * 24 * 60 * 60_000;
+		expect(await assets.held("/p", ["51", "52", "53", "not-an-id"])).toEqual({
+			"51": { state: "ready", assetTypeId: 4 },
+			"52": { state: "skipped", reason: "roblox-made" },
+		});
+		expect(roblox.seen.length).toBe(asked);
+		// Asking counts as a use: twenty more days and it is still kept.
+		clock += 20 * 24 * 60 * 60_000;
+		expect(await assets.expire("/p")).toBe(1);
+		expect(await assets.summary("/p")).toEqual({ count: 1, bytes: 16 });
+	});
+});

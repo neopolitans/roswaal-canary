@@ -33,6 +33,8 @@ export const ASSET_FOLDER = ".roswaal/assets";
 export const LARGEST_ASSET = 32 * 1024 * 1024;
 /** The most assets one request may ask for. */
 export const ASSET_BUDGET = 64;
+/** The most one request may ask about, when nothing is downloaded. */
+export const HELD_BUDGET = 2048;
 /** An asset unused this long is deleted. */
 export const UNUSED_DAYS = 30;
 /** Roblox's own account: what it made is never downloaded. */
@@ -183,6 +185,34 @@ export class AssetCache {
 				throw new HttpError(502, `${what} could not be reached (${hostOf(url)}): ${err.message}`);
 			throw err;
 		}
+	}
+
+	/**
+	 * Which of `ids` are kept already, asking Roblox nothing: ready, or skipped
+	 * as Roblox's own. One not kept is left out. Counts as a use, as `fetchAll`
+	 * does. The editor asks this first, so what is here draws before anything
+	 * downloads.
+	 */
+	async held(root: string, ids: readonly string[]): Promise<Record<string, AssetOutcome>> {
+		if (ids.length > HELD_BUDGET) {
+			throw new UserError(`At most ${HELD_BUDGET} assets can be asked about at once.`);
+		}
+		const out: Record<string, AssetOutcome> = {};
+		for (const id of new Set(ids)) {
+			if (!isAssetId(id)) continue;
+			const known = await this.shelf.record(root, id);
+			if (!known) continue;
+			if (known.skipped) {
+				out[id] = { state: "skipped", reason: known.skipped };
+				continue;
+			}
+			await this.shelf.keep(root, { ...known, used: this.now() });
+			out[id] = {
+				state: "ready",
+				...(known.assetTypeId !== undefined ? { assetTypeId: known.assetTypeId } : {}),
+			};
+		}
+		return out;
 	}
 
 	private fetchShared(root: string, id: string): Promise<AssetOutcome> {

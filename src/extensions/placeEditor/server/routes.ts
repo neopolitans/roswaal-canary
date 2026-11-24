@@ -25,6 +25,7 @@ import type { AssetOutcome } from "./roblox/assets.js";
 /** The downloads' side of Sign in with Roblox, as the routes use it. */
 export interface RobloxAssets {
 	fetchAll(root: string, ids: readonly string[]): Promise<Record<string, AssetOutcome>>;
+	held(root: string, ids: readonly string[]): Promise<Record<string, AssetOutcome>>;
 	summary(root: string): Promise<{ count: number; bytes: number }>;
 	clear(root: string): Promise<void>;
 	read(root: string, id: string): Promise<{ assetTypeId?: number; bytes: Uint8Array } | null>;
@@ -184,6 +185,21 @@ export function placeEditorRoutes(
 			if (!status.signedIn) throw new HttpError(409, "Sign in with Roblox first.");
 			return {
 				assets: await ability("robloxAssets").fetchAll(ctx.project().root, ids as string[]),
+			};
+		},
+
+		/**
+		 * Which of these the open project has kept already, asking Roblox
+		 * nothing; one not kept is left out. The editor draws these first and
+		 * asks POST /roblox/assets for the rest.
+		 */
+		"POST /roblox/assets/held": async (req) => {
+			const { ids } = fields<{ ids: unknown }>(req);
+			if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+				throw new UserError("Pass `ids`, a list of asset ids as strings.");
+			}
+			return {
+				assets: await ability("robloxAssets").held(ctx.project().root, ids as string[]),
 			};
 		},
 

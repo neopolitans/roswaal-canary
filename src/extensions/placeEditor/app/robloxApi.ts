@@ -36,6 +36,14 @@ export const robloxApi = {
 				| { state: "failed"; reason: string }
 			>;
 		}>("/api/roblox/assets", { ids }),
+	/** Which of these are kept already, asking Roblox nothing: one not kept is left out. */
+	heldAssets: (ids: string[]) =>
+		post<{
+			assets: Record<
+				string,
+				{ state: "ready"; assetTypeId?: number } | { state: "skipped"; reason: string }
+			>;
+		}>("/api/roblox/assets/held", { ids }),
 	/** Deletes the open project's downloaded assets: on the website, this browser's. */
 	clearAssets: () => post<{ ok: boolean }>("/api/roblox/assets/clear", {}),
 	/** One downloaded asset's bytes, base64, for the viewer: never fetched from Roblox here. */

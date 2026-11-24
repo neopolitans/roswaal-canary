@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.31.3",
+	version: "0.32.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.32.0",
+			roswaal: "1.1.0-canary.54",
+			date: "2026-11-24",
+			text: "Kept assets first: POST /roblox/assets/held answers what is kept without asking Roblox, the loaders draw those, then download the rest 16 at a time, each batch drawn as it lands; meshes reach the view once kept ones are read.",
+		},
 		{
 			version: "0.31.3",
 			roswaal: "1.1.0-canary.53",

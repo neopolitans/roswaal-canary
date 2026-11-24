@@ -996,6 +996,9 @@ export class ViewportController {
 	/** Meshes read, kept for the session by asset id; null for one that did not arrive or read. */
 	private meshCache = new Map<string, Promise<FileMesh | null>>();
 
+	/** The meshes read so far, by asset id, for handing the view what is here before the rest download. */
+	private meshesRead = new Map<string, FileMesh>();
+
 	/**
 	 * The meshes a place's MeshParts and FileMeshes name, into the view once
 	 * Sign in with Roblox has them, each made for the rows that draw it. The
@@ -1021,7 +1024,15 @@ export class ViewportController {
 				else this.tally.fail(`mesh:${asset}`);
 			});
 		if (fresh.length > 0) {
-			void loadMeshes(fresh, (asset, mesh) => settled.get(asset)?.(mesh))
+			void loadMeshes(
+				fresh,
+				(asset, mesh) => {
+					this.meshesRead.set(asset, mesh);
+					settled.get(asset)?.(mesh);
+				},
+				// The kept meshes into the view now, not once every download is done.
+				() => give(uses.map((use) => (use.made ? null : (this.meshesRead.get(use.asset) ?? null)))),
+			)
 				.then((why) => {
 					if (why) for (const asset of fresh) this.tally.notAsked(`mesh:${asset}`, why);
 				})
@@ -1042,35 +1053,47 @@ export class ViewportController {
 		uses.forEach((use, slot) => {
 			if (use.made) here.set(slot, madeGeometry(use.made));
 		});
+		const give = (meshes: readonly (FileMesh | null | false | undefined)[]) =>
+			this.giveMeshes(view, place, load, here, meshes);
 		if (here.size > 0) view.setMeshes(here);
 		this.rankMeshes(place, here);
 		const reading = uses.map((use) => !use.made && this.meshCache.get(use.asset));
-		void Promise.all(reading).then((meshes) => {
-			// A later load stands: a drag or an edit since leaves this one's meshes to draw.
-			if (this.view !== view || this.meshLoads !== load) return;
-			const made = new Map(here);
-			meshes.forEach((mesh, slot) => {
-				if (mesh) made.set(slot, meshGeometry(mesh, uses[slot]));
-			});
-			// Nothing downloaded: the view has all there is.
-			if (made.size === here.size) return;
-			view.setMeshes(made);
-			for (const slot of made.keys())
-				if (!uses[slot].made) this.tally.give(`mesh:${uses[slot].asset}`);
-			this.rankMeshes(place, made);
-			const read = (slot: number) => made.has(slot) && !uses[slot].made;
-			const drawn = (rows: { data: Float32Array; count: number }) =>
-				[...splitByMesh(rows, read).meshes.values()].reduce((n, r) => n + r.count, 0);
-			const summary = this.state.summary;
-			if (summary)
-				this.set({
-					summary: {
-						...summary,
-						meshesDrawn: drawn(place.kinds.mesh) + drawn(place.translucent.mesh),
-					},
-				});
-			this.redraw();
+		void Promise.all(reading).then(give);
+	}
+
+	/** Hands the view every mesh in `meshes` (by slot) and the made ones: once kept ones are read, and when all have settled. */
+	private giveMeshes(
+		view: ViewRenderer,
+		place: PlaceScene,
+		load: number,
+		here: Map<number, MeshGeometry>,
+		meshes: readonly (FileMesh | null | false | undefined)[],
+	): void {
+		const uses = place.meshes ?? [];
+		// A later load stands: a drag or an edit since leaves this one's meshes to draw.
+		if (this.view !== view || this.meshLoads !== load) return;
+		const made = new Map(here);
+		meshes.forEach((mesh, slot) => {
+			if (mesh) made.set(slot, meshGeometry(mesh, uses[slot]));
 		});
+		// Nothing downloaded: the view has all there is.
+		if (made.size === here.size) return;
+		view.setMeshes(made);
+		for (const slot of made.keys())
+			if (!uses[slot].made) this.tally.give(`mesh:${uses[slot].asset}`);
+		this.rankMeshes(place, made);
+		const read = (slot: number) => made.has(slot) && !uses[slot].made;
+		const drawn = (rows: { data: Float32Array; count: number }) =>
+			[...splitByMesh(rows, read).meshes.values()].reduce((n, r) => n + r.count, 0);
+		const summary = this.state.summary;
+		if (summary)
+			this.set({
+				summary: {
+					...summary,
+					meshesDrawn: drawn(place.kinds.mesh) + drawn(place.translucent.mesh),
+				},
+			});
+		this.redraw();
 	}
 
 	/** The Mesh Debug panel's lists, from the meshes the view has been given: see `heaviest.ts`. */

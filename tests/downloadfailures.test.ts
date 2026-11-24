@@ -8,7 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 
 const fetchAssets = vi.fn();
 vi.mock("../src/extensions/placeEditor/app/robloxApi.js", () => ({
-	robloxApi: { fetchAssets: (ids: string[]) => fetchAssets(ids) },
+	robloxApi: {
+		heldAssets: async () => ({ assets: {} }),
+		fetchAssets: (ids: string[]) => fetchAssets(ids),
+	},
 }));
 
 const { downloadFailures, ensure, generalReason } = await import(
@@ -29,7 +32,7 @@ describe("why downloads failed", () => {
 
 	it("groups reasons commonest first, and a refused batch fails only its own ids", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		const ids = Array.from({ length: 70 }, (_, i) => String(1000 + i));
+		const ids = Array.from({ length: 20 }, (_, i) => String(1000 + i));
 		fetchAssets.mockImplementationOnce(async (batch: string[]) => ({
 			assets: Object.fromEntries(
 				batch.map((id, i) => [
@@ -46,8 +49,8 @@ describe("why downloads failed", () => {
 		const ready = await ensure(ids);
 		expect([...ready]).toEqual(["1000", "1001"]);
 		expect(downloadFailures()).toEqual([
-			{ reason: "Roblox would not hand over an asset (429).", count: 62, example: "1002" },
-			{ reason: "Sign in with Roblox first.", count: 6, example: "1064" },
+			{ reason: "Roblox would not hand over an asset (429).", count: 14, example: "1002" },
+			{ reason: "Sign in with Roblox first.", count: 4, example: "1016" },
 		]);
 		expect(warn).toHaveBeenCalledOnce();
 		warn.mockRestore();

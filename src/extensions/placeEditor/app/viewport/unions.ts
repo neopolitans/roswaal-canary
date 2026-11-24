@@ -29,17 +29,18 @@ export async function loadUnionModels(
 	// A few levels at most: a union made of unions made of unions.
 	for (let depth = 0; wanted.length > 0 && depth < 8; depth++) {
 		for (const id of wanted) seen.add(id);
-		const ready = await ensure(wanted);
 		const inner: string[] = [];
-		for (const id of wanted) {
-			if (!ready.has(id)) continue;
-			const got = await bytesOf(id);
-			if (!got || (got.assetTypeId !== undefined && got.assetTypeId !== SOLID_MODEL_TYPE)) continue;
-			const roots = childDataOf(got.bytes);
-			if (!roots) continue;
-			show(id, roots);
-			inner.push(...nestedUnionAssets(roots));
-		}
+		await ensure(wanted, async (ready) => {
+			for (const id of ready) {
+				const got = await bytesOf(id);
+				if (!got || (got.assetTypeId !== undefined && got.assetTypeId !== SOLID_MODEL_TYPE))
+					continue;
+				const roots = childDataOf(got.bytes);
+				if (!roots) continue;
+				show(id, roots);
+				inner.push(...nestedUnionAssets(roots));
+			}
+		});
 		wanted = [...new Set(inner)].filter((id) => !seen.has(id));
 	}
 	return null;

@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.54",
+		date: "2026-11-24",
+		headline: "Assets kept already draw first; only the missing ones download.",
+		changed: [
+			"**A place draws the meshes and images it already has before downloading any.** Roswaal asks which are kept, without asking Roblox, and draws those at once; only the rest download.",
+			"**Downloads arrive in small batches, each drawn as it lands**, rather than once all have.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.53",
 		date: "2026-11-24",
 		headline: "A download that never got an answer says which step and which host.",

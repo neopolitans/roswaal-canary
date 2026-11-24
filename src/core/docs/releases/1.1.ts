@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.46",
+		date: "2026-11-24",
+		headline: 'No false "Roswaal stopped while starting" when coming from the docs.',
+		fixed: [
+			'**Opening the editor from the docs no longer flashes "Roswaal stopped while starting".** The browser sometimes gives up on the crossfade between the pages and says so, which the start-up check took for a failure while the editor was still opening.',
+		],
+		affects: ["editor", "designer"],
+	},
+	{
 		version: "1.1.0-canary.45",
 		date: "2026-11-24",
 		headline: "Fewer and smaller hitches while the camera flies.",

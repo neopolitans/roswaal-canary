@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.53",
+		date: "2026-11-24",
+		headline: "A download that never got an answer says which step and which host.",
+		fixed: [
+			'**A download the browser or the network stopped names the step and the host**, such as "The download could not be reached (https://…)", where it said only "Failed to fetch". One that timed out says so.',
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.52",
 		date: "2026-11-24",
 		headline: "Meshes and images download on the website, as canary.50 meant.",

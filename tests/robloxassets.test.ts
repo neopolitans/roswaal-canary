@@ -370,3 +370,27 @@ describe("the browser's own fetch", () => {
 		}
 	});
 });
+
+describe("a request the browser stops", () => {
+	it("says which step and which host, not only Failed to fetch", async () => {
+		const roblox = fakeRoblox({
+			location: (id) => `https://contentdelivery.roblox.com/v1/${id}?sig=secret`,
+		});
+		const stopping = (async (input: string | URL, init?: RequestInit) => {
+			if (String(input).includes("contentdelivery")) throw new TypeError("Failed to fetch");
+			return roblox.fetch(input, init);
+		}) as typeof fetch;
+		const assets = new AssetCache({
+			token: async () => "access-token",
+			shelf: browserShelf(async () => new FakeDir("") as unknown as FileSystemDirectoryHandle),
+			fetch: stopping,
+		});
+		const reason = (await assets.fetchAll("/p", ["41"]))["41"];
+		expect(reason).toEqual({
+			state: "failed",
+			reason:
+				"The download could not be reached (https://contentdelivery.roblox.com): Failed to fetch",
+		});
+		expect(JSON.stringify(reason)).not.toContain("secret");
+	});
+});

@@ -167,6 +167,24 @@ export class AssetCache {
 		return out;
 	}
 
+	/**
+	 * One request, saying which step and which host when it never got an
+	 * answer. A browser says only "Failed to fetch" for a request it stopped
+	 * (its security policy, a missing CORS header, the network), which names
+	 * neither. The host alone: a download address is a signed link.
+	 */
+	private async reach(what: string, url: string, init: RequestInit): Promise<Response> {
+		try {
+			return await this.fetch(url, init);
+		} catch (err) {
+			if (err instanceof DOMException && err.name === "TimeoutError")
+				throw new HttpError(504, `${what} did not answer in time (${hostOf(url)}).`);
+			if (err instanceof TypeError)
+				throw new HttpError(502, `${what} could not be reached (${hostOf(url)}): ${err.message}`);
+			throw err;
+		}
+	}
+
 	private fetchShared(root: string, id: string): Promise<AssetOutcome> {
 		const key = `${root}\0${id}`;
 		const under = this.pending.get(key);
@@ -187,7 +205,7 @@ export class AssetCache {
 
 		const bearer = { Authorization: `Bearer ${await this.token()}` };
 		// Who made it, first: Roblox's own assets are not downloaded.
-		const info = await this.fetch(`${ASSETS_API}${id}`, {
+		const info = await this.reach("Roblox's Assets API", `${ASSETS_API}${id}`, {
 			headers: bearer,
 			signal: AbortSignal.timeout(REQUEST_MS),
 		});
@@ -209,7 +227,7 @@ export class AssetCache {
 			return { state: "skipped", reason: "roblox-made" };
 		}
 
-		const delivery = await this.fetch(`${DELIVERY_API}${id}`, {
+		const delivery = await this.reach("Roblox's asset delivery", `${DELIVERY_API}${id}`, {
 			headers: bearer,
 			signal: AbortSignal.timeout(REQUEST_MS),
 		});
@@ -227,7 +245,9 @@ export class AssetCache {
 			);
 		}
 		// The CDN gets no token, and wherever it redirects must be Roblox's too.
-		const download = await this.fetch(location, { signal: AbortSignal.timeout(REQUEST_MS) });
+		const download = await this.reach("The download", location, {
+			signal: AbortSignal.timeout(REQUEST_MS),
+		});
 		if (download.url && !isRobloxCdn(download.url)) {
 			await download.body?.cancel().catch(() => undefined);
 			throw new HttpError(502, `Asset ${id} was redirected away from Roblox.`);

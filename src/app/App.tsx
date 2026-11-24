@@ -478,7 +478,9 @@ export function App() {
 				postEffects: sceneView.postEffects,
 				editable: prefs.modifyDataModel,
 				frameRate:
-					sceneView.frameRate === "vsync" || sceneView.frameRate === "unlimited"
+					sceneView.frameRate === "vsync" ||
+					sceneView.frameRate === "unlimited" ||
+					sceneView.frameRate === "steady"
 						? sceneView.frameRate
 						: Number(sceneView.frameRate),
 				altClickSteps: sceneView.altClickSteps,

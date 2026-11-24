@@ -265,7 +265,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Frame rate",
-						"The most the 3D view is drawn a second while it moves: 24 to 240, **VSync** to match the display, the default, or **Unlimited**. It is drawn only when something changes either way. The place's Properties has it too.",
+						"The most the 3D view is drawn a second while it moves: 24 to 240, **VSync** to match the display, the default, **Steady**, VSync at half the display's rate while frames cannot keep up, or **Unlimited**. It is drawn only when something changes either way. The place's Properties has it too.",
 					],
 					[
 						"Render scale",

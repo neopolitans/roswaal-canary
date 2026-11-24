@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.59",
+		date: "2026-11-24",
+		headline: "Steady frame rate: VSync at half the display's rate while frames cannot keep up.",
+		added: [
+			"**Frame rate: Steady.** VSync, halved while frames miss the display's refresh, so a view the GPU draws at 40 a second shows a smooth 30 rather than stuttering between 60 and 30. It comes back to full rate once frames fit with room to spare.",
+		],
+		fixed: [
+			"**A frame rate the display's refresh does not divide keeps its average**: 24 on a 60 Hz display draws 24 a second, two refreshes and three in turn, where it drew 20.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.58",
 		date: "2026-11-24",
 		headline: "The Performance panel estimates the GPU memory the view holds.",

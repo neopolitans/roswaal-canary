@@ -36,6 +36,7 @@ export const VIEWPORT_FRAME_RATES = [
 	{ value: "180", label: "180" },
 	{ value: "240", label: "240" },
 	{ value: "vsync", label: "VSync" },
+	{ value: "steady", label: "Steady" },
 	{ value: "unlimited", label: "Unlimited" },
 ] as const;
 export type ViewportFrameRate = (typeof VIEWPORT_FRAME_RATES)[number]["value"];
@@ -166,7 +167,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "frameRate",
 				legacy: "viewportFrameRate",
 				title: "Frame rate",
-				help: "The most the view is drawn a second while it moves. VSync matches the display; Unlimited draws as fast as it can. The view is drawn only when something changes.",
+				help: "The most the view is drawn a second while it moves. VSync matches the display; Steady is VSync at half the display's rate while frames cannot keep up with it, smooth where VSync stutters; Unlimited draws as fast as it can, which a variable-refresh display can follow. The view is drawn only when something changes.",
 				type: "choice",
 				default: "vsync",
 				choices: VIEWPORT_FRAME_RATES,

@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.34.0",
+	version: "0.35.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.35.0",
+			roswaal: "1.1.0-canary.59",
+			date: "2026-11-24",
+			text: "pacing.ts: FrameCap keeps a cap's average (24 on 60 Hz was 20); Frame rate Steady halves while a quarter of frames miss a refresh, back on the GPU's times (WebGPU) or a doubling retry (WebGL2).",
+		},
 		{
 			version: "0.34.0",
 			roswaal: "1.1.0-canary.58",

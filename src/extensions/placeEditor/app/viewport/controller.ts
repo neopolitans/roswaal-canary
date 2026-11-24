@@ -63,6 +63,7 @@ import {
 	type ViewShot,
 } from "./marquee.js";
 import { loadMeshes } from "./meshes.js";
+import { FrameCap, SteadyVsync } from "./pacing.js";
 import {
 	type LevelRow,
 	type MovingRow,
@@ -149,7 +150,7 @@ export interface ViewportOptions {
 	/** Modify DataModel Instances: the editing tools are offered only with it on. */
 	editable: boolean;
 	/** The most frames a second while it moves; `vsync` the display's, `unlimited` as fast as it goes. */
-	frameRate: number | "vsync" | "unlimited";
+	frameRate: number | "vsync" | "unlimited" | "steady";
 	/** Alt and a click, or a long press, picks one Model further in each time, rather than the part. */
 	altClickSteps: boolean;
 	/**
@@ -2854,8 +2855,10 @@ export class ViewportController {
 	/** Draws at the next frame, once however many things asked. */
 	/** The frame asked for is only the view's own animation's: see redraw. */
 	private stillNext = false;
-	/** When the last frame was drawn, for a frame rate's cap. */
-	private lastDraw = 0;
+	/** A frame rate's cap, keeping its average: see pacing.ts. */
+	private cap = new FrameCap();
+	/** Steady's halving: see pacing.ts. */
+	private steady = new SteadyVsync();
 
 	/**
 	 * The next frame: the display's, or when the rate is Unlimited, as soon as
@@ -2893,15 +2896,27 @@ export class ViewportController {
 				this.pending = false;
 				return;
 			}
-			// Capped: not yet this frame's turn, so the next one is asked again.
+			// Capped, or Steady halved: not yet this frame's turn, so the next one is asked again.
 			const rate = this.options.frameRate;
-			if (typeof rate === "number" && now - this.lastDraw < 1000 / rate - 1) {
+			if (
+				(typeof rate === "number" && !this.cap.allows(now, rate)) ||
+				(rate === "steady" && !this.steady.allows(now))
+			) {
 				this.nextFrame(draw);
 				return;
 			}
-			this.lastDraw = now;
 			this.pending = false;
+			const started = performance.now();
 			this.drawOnce(now);
+			if (rate === "steady") {
+				// WebGPU says when the GPU is done with the frame: how much room is left.
+				const timed = this.view.backend === "WebGPU";
+				this.steady.drawn(now, timed);
+				if (timed) {
+					const steady = this.steady;
+					void this.view.settled().then(() => steady.worked(performance.now() - started));
+				}
+			}
 			if (rate === "unlimited") this.inFlight = [this.inFlight[1], this.view.settled()];
 			this.countFrame(now);
 			this.showRotation();

@@ -52,6 +52,11 @@ export function settingsPage(): DocPage {
 						"Where graphs and Luau live, how a graph compiles, indentation, where Wally's packages are kept synced, scripts with children, and Studio betas the Luau can use",
 					],
 					["**Node packs**", "`roswaal.json`", "The directories scanned for node packs"],
+					[
+						"**Roblox account**",
+						"This computer",
+						"Sign in with Roblox, for what Roswaal fetches from Roblox: today the meshes and images the Place Editor draws, through `roswaal serve`",
+					],
 					["**Canvas**", "This browser", "The grid, wires, node corners, and what scrolling does"],
 					[
 						"**Nodes**",
@@ -73,12 +78,7 @@ export function settingsPage(): DocPage {
 					[
 						"**Scene view**",
 						"This browser",
-						"Under Place Editor. How a place is drawn in 3D: the renderer, the selection outline, Alt-click, Glass and post effects",
-					],
-					[
-						"**Roblox account**",
-						"This computer",
-						"Under Place Editor. Sign in with Roblox and what it downloaded, through `roswaal serve`",
+						"Under Place Editor. How a place is drawn in 3D: the renderer, the selection outline, Alt-click, Glass and post effects, the shaders, the benchmark, and what Sign in with Roblox downloaded into the project",
 					],
 				],
 			},
@@ -269,7 +269,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Render scale",
-						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19); **Native**, every pixel the screen has, twice as many each way on a Retina screen; or **150%**, **100%**, **75%** or **50%**. A share past the screen's own pixels draws Native. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
+						"How many pixels the place is drawn at, across and down, as a share of the page's own: **Automatic**, the default, is the quality level's (50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19); **Native**, every pixel the screen has, with what that comes to on your screen beside it (200% on a Retina screen, 100% on an ordinary one); or **150%**, **100%**, **75%** or **50%**. A share past the screen's own pixels draws Native, and says so. Fewer is faster where filling pixels is the cost, as it is on a tablet.",
 					],
 					[
 						"Shaders",

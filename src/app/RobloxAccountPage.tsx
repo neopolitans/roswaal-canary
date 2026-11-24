@@ -1,19 +1,18 @@
 /**
- * Settings › Roblox account: Sign in with Roblox and what it downloaded. A
- * page of the Place Editor's own, because signing in and clearing downloads
- * are actions rather than settings.
+ * Settings › Roblox account: Sign in with Roblox. Roswaal's own, first under
+ * This browser, so whatever fetches from Roblox can use it: today the Place
+ * Editor's meshes and images, whose downloads it lists on its Scene view page.
  *
  * Before Roblox's own page, what is asked for, where it is kept, how to
  * remove it, and a word for anyone under 18 -- the screen the sign-in research
  * asked for. The sign-in itself is the daemon's; this never sees a token.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
-import { pageHref } from "../../../app/pages.js";
-import { Group, Row } from "../../../app/settingsParts.jsx";
-import { robloxApi } from "../app/robloxApi.js";
+import { pageHref } from "./pages.js";
 import { signOutOfRoblox, startRobloxSignIn, useRobloxStatus } from "./robloxAccount.js";
+import { Group, Row } from "./settingsParts.jsx";
 
 export function RobloxAccountPage() {
 	const status = useRobloxStatus();
@@ -47,22 +46,19 @@ export function RobloxAccountPage() {
 	return (
 		<Group title="Sign in with Roblox">
 			{status.signedIn ? (
-				<>
-					<Row
-						label={`Signed in as Roblox user ${status.userId ?? ""}`}
-						help="Signing out ends the sign-in on Roblox and deletes what it downloaded."
+				<Row
+					label={`Signed in as Roblox user ${status.userId ?? ""}`}
+					help="Signing out ends the sign-in on Roblox and deletes everything downloaded with it."
+				>
+					<button
+						type="button"
+						className="tb"
+						disabled={busy}
+						onClick={() => void run(signOutOfRoblox)}
 					>
-						<button
-							type="button"
-							className="tb"
-							disabled={busy}
-							onClick={() => void run(signOutOfRoblox)}
-						>
-							Sign out
-						</button>
-					</Row>
-					<DownloadedAssetsRow />
-				</>
+						Sign out
+					</button>
+				</Row>
 			) : explaining ? (
 				<div className="setting roblox-consent">
 					<div className="setting-label">
@@ -121,7 +117,7 @@ export function RobloxAccountPage() {
 					help={
 						status.signingIn
 							? "Finish signing in on Roblox's page, in the tab that opened."
-							: "Optional. Draws the meshes and images your places use from the Creator Marketplace. Everything else works without it."
+							: "Optional. Lets Roswaal fetch what your places use from Roblox: today, the meshes and images the Place Editor draws. Everything else works without it."
 					}
 				>
 					<button type="button" className="tb" onClick={() => setExplaining(true)}>
@@ -131,51 +127,5 @@ export function RobloxAccountPage() {
 			)}
 			{(error ?? status.failed) && <p className="settings-note">{error ?? status.failed}</p>}
 		</Group>
-	);
-}
-
-/**
- * What the open project holds from Sign in with Roblox, and a way to delete it.
- * Unused assets go by themselves after 30 days.
- */
-function DownloadedAssetsRow() {
-	const [held, setHeld] = useState<{ count: number; bytes: number } | null>(null);
-	const [busy, setBusy] = useState(false);
-	const load = useCallback(() => {
-		robloxApi.assets().then(
-			(answer) => setHeld(answer.available ? answer : null),
-			() => setHeld(null),
-		);
-	}, []);
-	useEffect(load, [load]);
-	if (!held) return null;
-	const size =
-		held.bytes < 1024 * 1024
-			? `${Math.ceil(held.bytes / 1024)} KB`
-			: `${(held.bytes / 1024 / 1024).toFixed(1)} MB`;
-	return (
-		<Row
-			label="Downloaded assets"
-			help={
-				held.count === 0
-					? "None in this project. Any not used for 30 days are deleted by themselves."
-					: `${held.count} in this project, ${size}, out of Git. Any not used for 30 days are deleted by themselves.`
-			}
-		>
-			<button
-				type="button"
-				className="tb"
-				disabled={busy || held.count === 0}
-				onClick={() => {
-					setBusy(true);
-					robloxApi
-						.clearAssets()
-						.then(load, load)
-						.finally(() => setBusy(false));
-				}}
-			>
-				Clear
-			</button>
-		</Row>
 	);
 }

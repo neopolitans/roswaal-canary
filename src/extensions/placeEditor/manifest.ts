@@ -1,8 +1,6 @@
 /** The Place Editor: a place drawn in 3D, in a tab of its own. */
 
 import type { ExtensionManifest } from "../manifest.js";
-import type { RobloxStatus } from "./app/robloxApi.js";
-import { setRobloxStatus } from "./settings/robloxAccount.js";
 import { SCENE_VIEW } from "./settings.js";
 
 export type PlaceEditorModule = typeof import("./app/placeEditorModule.js");
@@ -12,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.29.0",
+	version: "0.30.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,15 +39,14 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 			component: () =>
 				import("./settings/SceneViewSections.jsx").then((m) => ({ default: m.SceneViewSections })),
 		},
-		{
-			id: "roblox",
-			title: "Roblox account",
-			note: "Fetches the meshes and images a place uses. Part of the Place Editor; the sign-in stays on this computer.",
-			component: () =>
-				import("./settings/RobloxAccountPage.jsx").then((m) => ({ default: m.RobloxAccountPage })),
-		},
 	],
 	releases: [
+		{
+			version: "0.30.0",
+			roswaal: "1.1.0-canary.47",
+			date: "2026-11-24",
+			text: "Roblox account moved out to Roswaal's own Settings page; Downloaded assets on Scene view; Render scale's labels say what Native is on this screen.",
+		},
 		{
 			version: "0.29.0",
 			roswaal: "1.1.0-canary.45",
@@ -291,8 +288,5 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 			text: "The Place Editor is an extension, with its own version. Everything before it is in Roswaal's notes up to 0.265.0.",
 		},
 	],
-	events: {
-		roblox: (data) => setRobloxStatus(data as Omit<RobloxStatus, "available">),
-	},
 	load: () => import("./app/placeEditorModule.js"),
 };

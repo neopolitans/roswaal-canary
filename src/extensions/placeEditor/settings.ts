@@ -68,6 +68,27 @@ export const VIEWPORT_RENDER_SCALES = [
 ] as const;
 export type ViewportRenderScale = (typeof VIEWPORT_RENDER_SCALES)[number]["value"];
 
+/**
+ * Render scale's labels on a screen of `ratio` device pixels to the page's:
+ * Native with what it comes to here (200% on a Retina screen, 100% on an
+ * ordinary one; at most 200%, as the view draws no more), and a share past
+ * it marked, as it draws Native. "Retina" only where `apple` says the screen
+ * is Apple's, whose word it is.
+ */
+export function renderScaleLabels(ratio: number, apple: boolean): Record<string, string> {
+	const native = Math.min(2, ratio > 0 ? ratio : 1);
+	const percent = Math.round(native * 100);
+	const out: Record<string, string> = {
+		native: `Native (${percent}%${apple && native >= 2 ? ", Retina" : ""})`,
+	};
+	for (const choice of VIEWPORT_RENDER_SCALES) {
+		const share = Number(choice.value) / 100;
+		if (Number.isFinite(share) && share > native + 1e-6)
+			out[choice.value] = `${choice.label} (draws Native here)`;
+	}
+	return out;
+}
+
 /** Upscaling: the frame brought up to the screen's own pixels by the renderer, or stretched by the browser. */
 export const VIEWPORT_UPSCALES = [
 	{ value: "off", label: "Off" },
@@ -153,10 +174,15 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "renderScale",
 				title: "Render scale",
-				help: "How many pixels the place is drawn at, across and down, as a share of the page's own: a Retina screen has twice as many each way, which Native draws. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19",
+				help: "How many pixels the place is drawn at, across and down, as a share of the page's own. Native is every pixel your screen has: the number beside it is what that comes to on this screen, 200% on a Retina screen and 100% on an ordinary one. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,
+				labels: () =>
+					renderScaleLabels(
+						typeof devicePixelRatio === "number" ? devicePixelRatio : 1,
+						typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent),
+					),
 			},
 			{
 				key: "upscale",

@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.47",
+		date: "2026-11-24",
+		headline: "The Roblox account is Roswaal's own, and Render scale says what Native is here.",
+		changed: [
+			"**Settings › Roblox account is first under This browser**, Roswaal's own rather than the Place Editor's, so whatever fetches from Roblox can use it. What it downloaded for the Place Editor is listed on Scene view.",
+			"**Render scale says what Native comes to on your screen**: Native (200%) on a Retina screen, Native (100%) on an ordinary one. A share your screen cannot reach says it draws Native.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.46",
 		date: "2026-11-24",
 		headline: 'No false "Roswaal stopped while starting" when coming from the docs.',

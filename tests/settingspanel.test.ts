@@ -14,6 +14,8 @@ describe("the pages Settings offers", () => {
 		expect(titles(settingsPages("editor", true))).toEqual([
 			"Compiling",
 			"Node packs",
+			// Roswaal's own, first of the browser's, for whatever fetches from Roblox.
+			"Roblox account",
 			"Canvas",
 			"Nodes",
 			"Workspace",

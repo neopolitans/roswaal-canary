@@ -39,7 +39,16 @@ export type SettingDecl = {
 			on: string;
 			off: string;
 	  }
-	| { type: "choice"; default: string; choices: readonly SettingChoice[] }
+	| {
+			type: "choice";
+			default: string;
+			choices: readonly SettingChoice[];
+			/**
+			 * Labels worked out when Settings draws, by choice value, in place of
+			 * those in `choices`: what a choice comes to on this screen, say.
+			 */
+			labels?: () => Readonly<Record<string, string>>;
+	  }
 );
 
 /** Settings that belong together, under a small heading. */

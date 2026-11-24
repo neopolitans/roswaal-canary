@@ -1,30 +1,20 @@
 /**
- * Sign in with Roblox, as the editor asks the daemon for it: see
- * `../server/routes.ts`. Never a token: the sign-in is the daemon's.
+ * What the Place Editor downloads through Sign in with Roblox, as the editor
+ * asks the host for it: see `../server/routes.ts`. The sign-in itself is
+ * Roswaal's own (`app/robloxAccount.ts`). Never a token.
  */
 
 import { apiRequest } from "../../../app/api.js";
+import { type RobloxStatus, robloxAccountApi } from "../../../app/robloxAccount.js";
 
-/** Sign in with Roblox as the daemon tells it. See `../server/roblox/signin.ts`. */
-export interface RobloxStatus {
-	/** Whether this copy of Roswaal offers it: the daemon does, the website does not. */
-	available: boolean;
-	signedIn?: boolean;
-	userId?: string;
-	signingIn?: boolean;
-	failed?: string;
-}
+export type { RobloxStatus };
 
 const post = <T>(url: string, body: unknown) =>
 	apiRequest<T>(url, { method: "POST", body: JSON.stringify(body) });
 
 export const robloxApi = {
 	/** Whether it is offered here, and who is signed in. */
-	status: () => apiRequest<RobloxStatus>("/api/roblox"),
-	/** Starts a sign-in; the address is Roblox's own sign-in page. */
-	signIn: () => post<{ url: string }>("/api/roblox/signin", {}),
-	/** Revokes the sign-in and deletes it and what it downloaded. */
-	signOut: () => post<{ ok: boolean }>("/api/roblox/signout", {}),
+	status: robloxAccountApi.status,
 	/** How many assets the open project holds from Sign in with Roblox, and their size. */
 	assets: () =>
 		apiRequest<{ available: boolean; count: number; bytes: number }>("/api/roblox/assets"),

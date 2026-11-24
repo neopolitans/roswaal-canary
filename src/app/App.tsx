@@ -148,6 +148,7 @@ import { setProjectAliases } from "./projectAliases.js";
 import { setProjectFunctions, setProjectTypes } from "./projectTypes.js";
 import { RefactorPanel } from "./RefactorPanel.jsx";
 import { forget, lastProject, remember } from "./recents.js";
+import { setRobloxStatus } from "./robloxAccount.js";
 import { previewSelection } from "./SelectionPreview.jsx";
 import { SourceView } from "./SourceView.jsx";
 import { type MapProblem, StatusPanel } from "./StatusPanel.jsx";
@@ -1508,8 +1509,12 @@ export function App() {
 			});
 		});
 
-		// The extensions' own events: Sign in with Roblox started, finished or
-		// ended, for one, which says who and never a token.
+		// Sign in with Roblox started, finished or ended: Roswaal's own, which
+		// says who and never a token.
+		stream.addEventListener("roblox", (event) => {
+			setRobloxStatus(JSON.parse((event as MessageEvent).data));
+		});
+		// The extensions' own events.
 		for (const extension of EXTENSIONS) {
 			for (const [name, handle] of Object.entries(extension.events ?? {})) {
 				stream.addEventListener(name, (event) => {

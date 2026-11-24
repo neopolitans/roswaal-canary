@@ -62,6 +62,7 @@ import {
 	WHEEL_CHOICES,
 	WIRE_STYLES,
 } from "./preferences.js";
+import { RobloxAccountPage } from "./RobloxAccountPage.jsx";
 import { Group, matches, Row, Search, Toggle } from "./settingsParts.jsx";
 import { BUILTIN_THEMES } from "./theme.js";
 
@@ -73,6 +74,7 @@ type Keeper = "project" | "browser" | "about";
 const PAGES = [
 	{ id: "compiling", title: "Compiling", keeper: "project" },
 	{ id: "packs", title: "Node packs", keeper: "project" },
+	{ id: "roblox", title: "Roblox account", keeper: "browser" },
 	{ id: "canvas", title: "Canvas", keeper: "browser" },
 	{ id: "nodes", title: "Nodes", keeper: "browser" },
 	{ id: "workspace", title: "Workspace", keeper: "browser" },
@@ -179,6 +181,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
 				) : null;
 			case "packs":
 				return config && onConfig ? <NodePackSettings config={config} onConfig={onConfig} /> : null;
+			case "roblox":
+				return <RobloxAccountPage />;
 			case "canvas":
 				return <CanvasSettings {...props} />;
 			case "nodes":
@@ -1709,12 +1713,16 @@ function DeclaredSetting({
 	onChange: (value: SettingValue) => void;
 	onReset: () => void;
 }) {
+	// What a choice comes to here, where the extension works that out as Settings draws.
+	const shown = decl.type === "choice" ? (decl.labels?.() ?? {}) : {};
+	const labelOf = (choice: { value: string; label: string }) => shown[choice.value] ?? choice.label;
 	const resetTo =
 		decl.type === "boolean"
 			? decl.default
 				? decl.on
 				: decl.off
-			: (decl.choices.find((choice) => choice.value === decl.default)?.label ?? decl.default);
+			: (decl.choices.map(labelOf).at(decl.choices.findIndex((c) => c.value === decl.default)) ??
+				decl.default);
 	return (
 		<Row
 			label={decl.title}
@@ -1738,7 +1746,7 @@ function DeclaredSetting({
 							className={value === choice.value ? "on" : ""}
 							onClick={() => onChange(choice.value)}
 						>
-							{choice.label}
+							{labelOf(choice)}
 						</button>
 					))}
 				</div>
@@ -1751,7 +1759,7 @@ function DeclaredSetting({
 				>
 					{decl.choices.map((choice) => (
 						<option key={choice.value} value={choice.value}>
-							{choice.label}
+							{labelOf(choice)}
 						</option>
 					))}
 				</select>

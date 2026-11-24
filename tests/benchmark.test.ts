@@ -186,6 +186,11 @@ describe("a benchmark's scores", () => {
 		expect(fx).toContain(
 			"CPU: effects 7.40 ms (step 0.60 ms · sort 2.10 ms · quads 3.90 ms · upload 0.80 ms) · culling",
 		);
+		expect(
+			benchmarkReport({ ...result, renderer: "WebGL2", fellBack: "OperationError: no device" }),
+		).toContain(
+			"WebGPU did not start (OperationError: no device), so this run was drawn by WebGL2",
+		);
 		const off = benchmarkReport({ ...result, switchedOff: ["Occlusion culling"] });
 		expect(off).toContain("Switched off in the Rendering panel: Occlusion culling");
 	});

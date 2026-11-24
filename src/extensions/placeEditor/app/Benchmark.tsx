@@ -190,6 +190,12 @@ export function Benchmark({
 						{score(total.gpu)} <small>by the GPU's time</small> · {score(total.waited)}{" "}
 						<small>by the waited frame</small>
 					</span>
+					{result.fellBack && (
+						<span>
+							Drawn by WebGL2: WebGPU did not start ({result.fellBack}). These times do not compare
+							with WebGPU's.
+						</span>
+					)}
 					<div className="benchmark-actions">
 						<button type="button" className="tb primary" onClick={() => void copy()}>
 							{copied === "yes" ? "Copied" : "Copy report"}

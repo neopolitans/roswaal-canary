@@ -1823,6 +1823,8 @@ export class ViewportController {
 	}
 
 	private starting = false;
+	/** Why WebGPU did not start, where the view fell back to WebGL2. */
+	private fellBackWhy: string | null = null;
 	/** The renderer starting, and the share of its shaders compiled, for the readout. */
 	private startup: {
 		backend: ViewRenderer["backend"];
@@ -1904,6 +1906,8 @@ export class ViewportController {
 			} catch (err) {
 				if (gl2) throw err;
 				fellBack = true;
+				// Kept for a benchmark's report: a run drawn by WebGL2 is not one by WebGPU.
+				this.fellBackWhy = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 				view = new WebGl2View(samples, map);
 				await this.initView(view, make(), place);
 			}
@@ -2415,6 +2419,7 @@ export class ViewportController {
 			release: RELEASES[0]?.version ?? "",
 			date: new Date().toISOString(),
 			renderer: this.view.backend,
+			...(this.state.fellBack ? { fellBack: this.fellBackWhy ?? "no reason given" } : {}),
 			gpu: facts.gpu,
 			gpuTimers: facts.timers,
 			pixelRatio: devicePixelRatio || 1,

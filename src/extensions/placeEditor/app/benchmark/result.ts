@@ -164,6 +164,8 @@ export interface BenchmarkResult {
 	release: string;
 	date: string;
 	renderer: string;
+	/** Why WebGPU did not start, where the run fell back to WebGL2. */
+	fellBack?: string;
 	gpu: string;
 	gpuTimers: boolean;
 	pixelRatio: number;
@@ -225,6 +227,10 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	lines.push(
 		`Renderer: ${result.renderer} · GPU: ${result.gpu} · GPU timers: ${result.gpuTimers ? "yes" : "no"} · Pixel ratio ${Number(result.pixelRatio.toFixed(2))}`,
 	);
+	if (result.fellBack)
+		lines.push(
+			`WebGPU did not start (${result.fellBack}), so this run was drawn by WebGL2: its times do not compare with WebGPU's.`,
+		);
 	lines.push(`Browser: ${result.userAgent}`);
 	if (result.switchedOff?.length)
 		lines.push(`Switched off in the Rendering panel: ${result.switchedOff.join(", ")}`);

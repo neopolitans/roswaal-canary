@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.40",
+		date: "2026-11-24",
+		headline: "A benchmark run says when it was drawn by WebGL2 instead of WebGPU.",
+		added: [
+			"**A benchmark run drawn by WebGL2 because WebGPU did not start says so**, with the reason, on its end screen and in its report. Its times do not compare with a WebGPU run's.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.39",
 		date: "2026-11-24",
 		headline: "Profiles and benchmark runs say when a place's meshes were not drawn.",

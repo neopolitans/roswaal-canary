@@ -47,12 +47,21 @@ export interface EffectSteps {
 
 export interface ViewRenderer {
 	readonly backend: "WebGPU" | "WebGL2";
-	/** Samples a pixel, and each sun shadow map's side: fixed for the view's life. */
+	/** Samples a pixel: fixed for the view's life. */
 	readonly samples: number;
+	/** Each sun shadow map's side, in texels: see setShadowMap. */
 	readonly shadowMap: number;
-	/** The antialiasing asked for when the view was made, and those it can draw: see antialias.ts. */
+	/** The antialiasing asked for, and those it can draw: see antialias.ts. */
 	readonly antialias: AntialiasMode;
 	antialiasModes(): AntialiasMode[];
+	/**
+	 * Antialiasing switched in place, the view and all it holds kept, where the
+	 * samples a pixel stay as they are (none, FXAA, SMAA and TAA all draw one).
+	 * False where they would change: only a view built again does that.
+	 */
+	setAntialias(mode: AntialiasMode): boolean;
+	/** Each sun shadow map's side, made again in place: the cascades are drawn afresh. */
+	setShadowMap(size: number): void;
 	/** `progress` hears the share of the shaders compiled, 0 to 1, as they are. */
 	init(
 		canvas: HTMLCanvasElement,

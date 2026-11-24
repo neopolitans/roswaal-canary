@@ -43,6 +43,12 @@ export const ROBLOX_USER_ID = "1";
 const ASSETS_API = "https://apis.roblox.com/assets/v1/assets/";
 const DELIVERY_API = "https://apis.roblox.com/asset-delivery-api/v1/assetId/";
 const REQUEST_MS = 20_000;
+/** Calls to Roblox under way at once, from every loader together. */
+export const IN_FLIGHT = 4;
+/** Times one call is tried again after Roblox says to slow down. */
+export const RETRIES = 3;
+/** The longest Roswaal waits before trying again, whatever Roblox says. */
+export const LONGEST_WAIT_MS = 30_000;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** What is known about one asset. */
@@ -125,6 +131,20 @@ export interface AssetCacheOptions {
 	shelf: AssetShelf;
 	fetch?: typeof fetch;
 	now?: () => number;
+	/** Waits `ms`: a test's own clock passes one that does not. */
+	sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * How long a `Retry-After` header asks to wait, in milliseconds: seconds, or
+ * an HTTP date. Null where there is none or it cannot be read.
+ */
+export function retryAfterMs(header: string | null, now: number): number | null {
+	if (!header) return null;
+	const text = header.trim();
+	if (/^\d+$/.test(text)) return Number(text) * 1000;
+	const at = Date.parse(text);
+	return Number.isNaN(at) ? null : Math.max(0, at - now);
 }
 
 export class AssetCache {
@@ -142,6 +162,7 @@ export class AssetCache {
 		// ("Illegal invocation"), where Node does not mind.
 		this.fetch = options.fetch ?? ((input, init) => fetch(input, init));
 		this.now = options.now ?? Date.now;
+		this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 	}
 
 	get kept(): "project" | "browser" {
@@ -175,15 +196,54 @@ export class AssetCache {
 	 * (its security policy, a missing CORS header, the network), which names
 	 * neither. The host alone: a download address is a signed link.
 	 */
-	private async reach(what: string, url: string, init: RequestInit): Promise<Response> {
+	private async reach(what: string, url: string, headers?: HeadersInit): Promise<Response> {
+		for (let attempt = 0; ; attempt++) {
+			const response = await this.paced(async () => {
+				try {
+					return await this.fetch(url, {
+						...(headers ? { headers } : {}),
+						signal: AbortSignal.timeout(REQUEST_MS),
+					});
+				} catch (err) {
+					if (err instanceof DOMException && err.name === "TimeoutError")
+						throw new HttpError(504, `${what} did not answer in time (${hostOf(url)}).`);
+					if (err instanceof TypeError)
+						throw new HttpError(
+							502,
+							`${what} could not be reached (${hostOf(url)}): ${err.message}`,
+						);
+					throw err;
+				}
+			});
+			// Too many requests, or too busy: every call waits as long as Roblox
+			// asks (or longer each time it does not say), then this one again.
+			if ((response.status !== 429 && response.status !== 503) || attempt >= RETRIES)
+				return response;
+			const asked = retryAfterMs(response.headers.get("Retry-After"), this.now());
+			const wait = Math.min(LONGEST_WAIT_MS, asked ?? 1000 * 2 ** attempt);
+			this.pausedUntil = Math.max(this.pausedUntil, this.now() + wait);
+			await response.body?.cancel().catch(() => undefined);
+		}
+	}
+
+	private readonly sleep: (ms: number) => Promise<void>;
+	/** When Roblox last asked to slow down, the time every call waits for. */
+	private pausedUntil = 0;
+	private slotsFree = IN_FLIGHT;
+	private readonly slotQueue: (() => void)[] = [];
+
+	/** `call` once Roblox has not asked to wait and one of `IN_FLIGHT` calls is free. */
+	private async paced<T>(call: () => Promise<T>): Promise<T> {
+		for (let left = this.pausedUntil - this.now(); left > 0; left = this.pausedUntil - this.now())
+			await this.sleep(left);
+		if (this.slotsFree > 0) this.slotsFree--;
+		else await new Promise<void>((resolve) => this.slotQueue.push(resolve));
 		try {
-			return await this.fetch(url, init);
-		} catch (err) {
-			if (err instanceof DOMException && err.name === "TimeoutError")
-				throw new HttpError(504, `${what} did not answer in time (${hostOf(url)}).`);
-			if (err instanceof TypeError)
-				throw new HttpError(502, `${what} could not be reached (${hostOf(url)}): ${err.message}`);
-			throw err;
+			return await call();
+		} finally {
+			const next = this.slotQueue.shift();
+			if (next) next();
+			else this.slotsFree++;
 		}
 	}
 
@@ -235,10 +295,7 @@ export class AssetCache {
 
 		const bearer = { Authorization: `Bearer ${await this.token()}` };
 		// Who made it, first: Roblox's own assets are not downloaded.
-		const info = await this.reach("Roblox's Assets API", `${ASSETS_API}${id}`, {
-			headers: bearer,
-			signal: AbortSignal.timeout(REQUEST_MS),
-		});
+		const info = await this.reach("Roblox's Assets API", `${ASSETS_API}${id}`, bearer);
 		if (!info.ok)
 			throw new HttpError(502, `Roblox would not say what asset ${id} is (${info.status}).`);
 		const about = (await info.json()) as {
@@ -257,10 +314,7 @@ export class AssetCache {
 			return { state: "skipped", reason: "roblox-made" };
 		}
 
-		const delivery = await this.reach("Roblox's asset delivery", `${DELIVERY_API}${id}`, {
-			headers: bearer,
-			signal: AbortSignal.timeout(REQUEST_MS),
-		});
+		const delivery = await this.reach("Roblox's asset delivery", `${DELIVERY_API}${id}`, bearer);
 		if (!delivery.ok)
 			throw new HttpError(502, `Roblox would not hand over asset ${id} (${delivery.status}).`);
 		const { location, assetTypeId } = (await delivery.json()) as {
@@ -275,9 +329,7 @@ export class AssetCache {
 			);
 		}
 		// The CDN gets no token, and wherever it redirects must be Roblox's too.
-		const download = await this.reach("The download", location, {
-			signal: AbortSignal.timeout(REQUEST_MS),
-		});
+		const download = await this.reach("The download", location);
 		if (download.url && !isRobloxCdn(download.url)) {
 			await download.body?.cancel().catch(() => undefined);
 			throw new HttpError(502, `Asset ${id} was redirected away from Roblox.`);

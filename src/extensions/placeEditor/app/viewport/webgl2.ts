@@ -1176,11 +1176,46 @@ export class WebGl2View implements ViewRenderer {
 	 * The antialiasing asked for (see antialias.ts), and each sun shadow
 	 * map's side, in texels, as the quality level sets them.
 	 */
-	constructor(
-		readonly antialias: AntialiasMode = "msaa4",
-		readonly shadowMap: number = CASCADE_MAP,
-	) {
+	constructor(antialias: AntialiasMode = "msaa4", shadowMap: number = CASCADE_MAP) {
+		this.asked = antialias;
+		this.mapSide = shadowMap;
 		this.samples = antialiasInfo(antialias).samples;
+	}
+
+	/** The antialiasing drawn, which setAntialias may change. */
+	private asked: AntialiasMode;
+	/** Each sun shadow map's side, which setShadowMap may change. */
+	private mapSide: number;
+
+	get antialias(): AntialiasMode {
+		return this.asked;
+	}
+
+	get shadowMap(): number {
+		return this.mapSide;
+	}
+
+	/** In place where the samples stay: MSAA's 4x is the canvas's own, made with the context. */
+	setAntialias(mode: AntialiasMode): boolean {
+		if (antialiasInfo(mode).samples !== this.samples) return false;
+		if (mode === this.asked) return true;
+		this.asked = mode;
+		if (this.gl) {
+			this.makeAntialias();
+			this.makeAaTargets();
+			this.onRedraw?.();
+		}
+		return true;
+	}
+
+	setShadowMap(size: number): void {
+		if (size === this.mapSide) return;
+		this.mapSide = size;
+		if (!this.gl || !this.sunMaps) return;
+		this.gl.deleteTexture(this.sunMaps);
+		this.makeCascades();
+		this.cascadeLast = new Float32Array(CASCADE_BLOCK);
+		this.onRedraw?.();
 	}
 
 	/** The modes this renderer draws: MSAA as far as the GPU's MAX_SAMPLES. */
@@ -1528,7 +1563,6 @@ export class WebGl2View implements ViewRenderer {
 	private makeAaTargets(): void {
 		const gl = this.gl;
 		const pass = antialiasInfo(this.antialias).pass;
-		if (pass === "none") return;
 		for (const t of [
 			this.aaColour,
 			this.aaEdges?.tex,
@@ -1544,6 +1578,13 @@ export class WebGl2View implements ViewRenderer {
 		])
 			if (f) gl.deleteFramebuffer(f);
 		if (this.aaDepth) gl.deleteRenderbuffer(this.aaDepth);
+		this.aaColour = null;
+		this.aaFbo = null;
+		this.aaDepth = null;
+		this.aaEdges = null;
+		this.aaWeights = null;
+		this.aaHistory = [];
+		if (pass === "none") return;
 		const texture = (internal: number, filter: number) => {
 			const tex = gl.createTexture()!;
 			gl.activeTexture(gl.TEXTURE16);

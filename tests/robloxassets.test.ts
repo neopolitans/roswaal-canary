@@ -14,8 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ASSET_FOLDER,
 	AssetCache,
+	IN_FLIGHT,
 	isRobloxCdn,
 	LARGEST_ASSET,
+	retryAfterMs,
 } from "../src/extensions/placeEditor/server/roblox/assets.js";
 import {
 	BROWSER_ASSET_FOLDER,
@@ -418,5 +420,93 @@ describe("asking which assets are kept already", () => {
 		clock += 20 * 24 * 60 * 60_000;
 		expect(await assets.expire("/p")).toBe(1);
 		expect(await assets.summary("/p")).toEqual({ count: 1, bytes: 16 });
+	});
+});
+
+describe("pacing calls to Roblox", () => {
+	const shelf = () =>
+		browserShelf(async () => new FakeDir("") as unknown as FileSystemDirectoryHandle);
+
+	it("reads Retry-After as seconds or a date", () => {
+		expect(retryAfterMs("2", 0)).toBe(2000);
+		expect(retryAfterMs("Thu, 01 Jan 1970 00:00:05 GMT", 1000)).toBe(4000);
+		expect(retryAfterMs("soon", 0)).toBeNull();
+		expect(retryAfterMs(null, 0)).toBeNull();
+	});
+
+	it("waits as long as Roblox asks after a 429, then tries again", async () => {
+		const roblox = fakeRoblox({});
+		let clock = 1_000_000;
+		const waits: number[] = [];
+		let refused = 0;
+		const busy = (async (input: string | URL, init?: RequestInit) => {
+			if (String(input).includes("asset-delivery") && refused < 1) {
+				refused++;
+				return new Response("slow down", { status: 429, headers: { "Retry-After": "3" } });
+			}
+			return roblox.fetch(input, init);
+		}) as typeof fetch;
+		const assets = new AssetCache({
+			token: async () => "access-token",
+			shelf: shelf(),
+			fetch: busy,
+			now: () => clock,
+			sleep: async (ms) => {
+				waits.push(ms);
+				clock += ms;
+			},
+		});
+		expect(await assets.fetchAll("/p", ["61"])).toEqual({
+			"61": { state: "ready", assetTypeId: 4 },
+		});
+		expect(waits).toEqual([3000]);
+	});
+
+	it("gives up after three tries, saying Roblox's answer, and never waits past 30 s", async () => {
+		let clock = 0;
+		const waits: number[] = [];
+		const always = (async (input: string | URL) =>
+			String(input).includes("/assets/v1/")
+				? new Response("", { status: 429, headers: { "Retry-After": "600" } })
+				: new Response("", { status: 500 })) as typeof fetch;
+		const assets = new AssetCache({
+			token: async () => "access-token",
+			shelf: shelf(),
+			fetch: always,
+			now: () => clock,
+			sleep: async (ms) => {
+				waits.push(ms);
+				clock += ms;
+			},
+		});
+		const out = await assets.fetchAll("/p", ["62"]);
+		expect(out["62"]).toEqual({
+			state: "failed",
+			reason: "Roblox would not say what asset 62 is (429).",
+		});
+		expect(waits).toEqual([30_000, 30_000, 30_000]);
+	});
+
+	it("has at most four calls to Roblox under way, from every request together", async () => {
+		const roblox = fakeRoblox({});
+		let now = 0;
+		let most = 0;
+		const slow = (async (input: string | URL, init?: RequestInit) => {
+			now++;
+			most = Math.max(most, now);
+			await new Promise((resolve) => setTimeout(resolve, 2));
+			now--;
+			return roblox.fetch(input, init);
+		}) as typeof fetch;
+		const assets = new AssetCache({
+			token: async () => "access-token",
+			shelf: shelf(),
+			fetch: slow,
+		});
+		await Promise.all(
+			["71", "72", "73", "74", "75", "76", "77", "78"].map((id) => assets.fetchAll("/p", [id])),
+		);
+		expect(most).toBe(IN_FLIGHT);
+		expect(IN_FLIGHT).toBe(4);
 	});
 });

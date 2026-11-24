@@ -741,7 +741,13 @@ export class ViewportController {
 			return;
 		}
 		if (!this.view) return;
-		if (was.renderer !== options.renderer || this.view.antialias !== this.antialiasMode()) {
+		// Antialiasing switches in place where the samples a pixel stay; only
+		// another renderer, or another sample count, builds the view again.
+		const aa = this.antialiasMode();
+		if (
+			was.renderer !== options.renderer ||
+			(this.view.antialias !== aa && !this.view.setAntialias(aa))
+		) {
 			void this.restartView();
 			return;
 		}
@@ -2758,10 +2764,14 @@ export class ViewportController {
 			});
 		const view = this.view;
 		if (!view) return;
-		if (view.antialias !== this.antialiasMode() || view.shadowMap !== q.shadowMap) {
+		// The level's antialiasing and shadow map size, in place where they can
+		// be: a view built again sends every asset to the GPU once more.
+		const aa = this.antialiasMode();
+		if (view.antialias !== aa && !view.setAntialias(aa)) {
 			await this.restartView();
 			return;
 		}
+		view.setShadowMap(q.shadowMap);
 		view.setQuality(viewQuality(q));
 		this.fit();
 		this.redraw();

@@ -1386,12 +1386,62 @@ export class WebGpuView implements ViewRenderer {
 	 * other WebGPU has), and each sun shadow map's side, in texels, as the
 	 * quality level sets them.
 	 */
-	constructor(
-		readonly antialias: AntialiasMode = "msaa4",
-		readonly shadowMap: number = CASCADE_MAP,
-	) {
+	constructor(antialias: AntialiasMode = "msaa4", shadowMap: number = CASCADE_MAP) {
+		this.asked = antialias;
+		this.mapSide = shadowMap;
 		this.aaMode = antialiasFor(antialias, "WebGPU", SAMPLES);
 		this.samples = antialiasInfo(this.aaMode).samples;
+	}
+
+	/** The antialiasing asked for, which setAntialias may change. */
+	private asked: AntialiasMode;
+	/** Each sun shadow map's side, which setShadowMap may change. */
+	private mapSide: number;
+
+	get antialias(): AntialiasMode {
+		return this.asked;
+	}
+
+	get shadowMap(): number {
+		return this.mapSide;
+	}
+
+	setAntialias(mode: AntialiasMode): boolean {
+		const next = antialiasFor(mode, "WebGPU", SAMPLES);
+		if (antialiasInfo(next).samples !== this.samples) return false;
+		this.asked = mode;
+		if (next === this.aaMode) return true;
+		if (!this.device) {
+			this.aaMode = next;
+			return true;
+		}
+		// The new mode's pipelines first, the old mode drawing until they are
+		// compiled, as a view built afresh waits for its own before a frame.
+		const switching = ++this.aaSwitches;
+		this.makeAntialias(next, false);
+		void this.compiled().then(() => {
+			if (switching !== this.aaSwitches || this.destroyed) return;
+			this.aaMode = next;
+			this.makeAaTargets();
+			this.onRedraw?.();
+		});
+		return true;
+	}
+
+	/** Each setAntialias counted, so only the last one's pipelines are switched to. */
+	private aaSwitches = 0;
+
+	setShadowMap(size: number): void {
+		if (size === this.mapSide) return;
+		this.mapSide = size;
+		if (!this.device || !this.sunMaps) return;
+		this.sunMaps.destroy();
+		this.makeSunMaps();
+		this.rebind();
+		// A near sky refill under way holds a group made with the old maps.
+		this.nearFill = null;
+		this.cascadeLast = new Float32Array(CASCADE_BLOCK);
+		this.onRedraw?.();
 	}
 
 	/** The antialiasing drawn. */
@@ -4450,13 +4500,18 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private jitter: [number, number] = [0, 0];
 	private taaWeight = 1;
 
-	/** The passes' pipelines, and SMAA's tables once they are unpacked. */
-	private makeAntialias(): void {
-		const pass = antialiasInfo(this.aaMode).pass;
-		if (pass === "none") return;
+	/** The sun's cascades, one layer each, `shadowMap` texels a side. */
+	private makeSunMaps(): void {
+		this.sunMaps = this.device.createTexture({
+			size: [this.mapSide, this.mapSide, SUN_CASCADES.length],
+			format: "depth32float",
+			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+		});
+	}
+
+	/** What every pass shares: the layout, the uniform, the samplers, a blank texture. */
+	private makeAaShared(tex: { readonly texture: object }): void {
 		const d = this.device;
-		const module = d.createShaderModule({ code: AA_WGSL });
-		const tex = { texture: {} } as const;
 		this.aaLayout = d.createBindGroupLayout({
 			entries: [
 				{ binding: 0, visibility: STAGE.FRAGMENT, buffer: {} },
@@ -4478,7 +4533,23 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			format: "rgba8unorm",
 			usage: TEXTURE.TEXTURE_BINDING,
 		});
-		const layout = d.createPipelineLayout({ bindGroupLayouts: [this.aaLayout] });
+	}
+
+	/**
+	 * The passes' pipelines for `mode`, and SMAA's tables once they are
+	 * unpacked; then its targets, unless `targets` is false (setAntialias
+	 * makes them once the pipelines are compiled). The layout, uniform and
+	 * samplers every pass shares are made once, so a mode still drawing keeps
+	 * working while another's pipelines compile.
+	 */
+	private makeAntialias(mode: AntialiasMode = this.aaMode, targets = true): void {
+		const pass = antialiasInfo(mode).pass;
+		if (pass === "none") return;
+		const d = this.device;
+		const module = d.createShaderModule({ code: AA_WGSL });
+		const tex = { texture: {} } as const;
+		if (!this.aaLayout) this.makeAaShared(tex);
+		const layout = d.createPipelineLayout({ bindGroupLayouts: [this.aaLayout!] });
 		const make = (entry: string, format: GPUTextureFormat, key: keyof WebGpuView["aaPipes"]) =>
 			this.pipeline((p) => (this.aaPipes[key] = p), {
 				layout,
@@ -4515,14 +4586,18 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			});
 		}
 		if (pass === "taa") make("fsTaa", "rgba16float", "taa");
-		this.makeAaTargets();
+		if (targets) this.makeAaTargets();
 	}
 
-	/** The passes' targets, the canvas's size. */
+	/** The passes' targets, the canvas's size; none, with no pass. */
 	private makeAaTargets(): void {
 		const pass = antialiasInfo(this.aaMode).pass;
-		if (pass === "none" || !this.aaLayout) return;
 		for (const t of [this.aaColour, this.aaEdges, this.aaWeights, ...this.aaHistory]) t?.destroy();
+		this.aaColour = null;
+		this.aaEdges = null;
+		this.aaWeights = null;
+		this.aaHistory = [];
+		if (pass === "none" || !this.aaLayout) return;
 		const d = this.device;
 		const size = [this.width, this.height];
 		const target = (format: GPUTextureFormat) =>
@@ -5309,11 +5384,7 @@ struct VIn { @location(0) pos: vec3f, @location(2) c0: vec3f, @location(3) c1: v
 			primitive: { topology: "triangle-list", cullMode: "none" },
 			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "less" },
 		});
-		this.sunMaps = d.createTexture({
-			size: [this.shadowMap, this.shadowMap, SUN_CASCADES.length],
-			format: "depth32float",
-			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
-		});
+		this.makeSunMaps();
 		this.cascadeUniform = d.createBuffer({
 			size: CASCADE_BLOCK * 4,
 			usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
@@ -5884,9 +5955,13 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 	}
 
 	destroy(): void {
+		this.destroyed = true;
 		this.effects?.destroy();
 		this.device?.destroy();
 	}
+
+	/** Gone: a switch whose pipelines compile after leaves it alone. */
+	private destroyed = false;
 
 	async pick(camera: Camera, cx: number, cy: number): Promise<number> {
 		// The canvas's pixels to the frame's, where it is upscaled.

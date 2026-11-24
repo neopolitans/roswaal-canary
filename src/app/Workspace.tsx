@@ -954,7 +954,22 @@ function useContentHeights(column: RefObject<HTMLDivElement | null>, heads: Pane
 			if (!held.includes(card.dataset.card ?? "")) card.style.maxHeight = "";
 		if (held.length === 0) return;
 
+		// Every box inside the column that has scrolled. Measuring lets each
+		// card grow to all it shows, where nothing overflows, so the browser
+		// puts every scroll box in it back to the top; these are put back after.
+		const scrolled = new Set<Element>();
+		const noteScroll = (event: Event) => {
+			if (event.target instanceof Element) scrolled.add(event.target);
+		};
+		element.addEventListener("scroll", noteScroll, { capture: true, passive: true });
+
 		const measure = () => {
+			const kept: [Element, number, number][] = [];
+			for (const box of scrolled) {
+				if (!box.isConnected) scrolled.delete(box);
+				else if (box.scrollTop !== 0 || box.scrollLeft !== 0)
+					kept.push([box, box.scrollTop, box.scrollLeft]);
+			}
 			const sized = held
 				.map((head) => element.querySelector<HTMLElement>(`:scope > .card[data-card="${head}"]`))
 				.filter((card) => card !== null);
@@ -969,6 +984,10 @@ function useContentHeights(column: RefObject<HTMLDivElement | null>, heads: Pane
 				card.style.flex = flex[i];
 				card.style.maxHeight = `${heights[i]}px`;
 			});
+			for (const [box, top, left] of kept) {
+				box.scrollTop = top;
+				box.scrollLeft = left;
+			}
 		};
 		measure();
 
@@ -1003,6 +1022,7 @@ function useContentHeights(column: RefObject<HTMLDivElement | null>, heads: Pane
 		return () => {
 			watch.disconnect();
 			resize?.disconnect();
+			element.removeEventListener("scroll", noteScroll, { capture: true });
 			cancelAnimationFrame(frame);
 			for (const card of element.querySelectorAll<HTMLElement>(":scope > .card"))
 				card.style.maxHeight = "";

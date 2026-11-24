@@ -9,6 +9,20 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.56",
+		date: "2026-11-24",
+		headline:
+			"Settings change the view without sending every asset to the GPU again; panels keep their scroll; downloads keep Roblox's pace.",
+		fixed: [
+			"**Changing antialiasing between Off, FXAA, SMAA and TAA, or the quality level, keeps the view.** It built the view again, and every mesh and image went to the GPU once more. Only a change to or from MSAA, or of renderer, still does that.",
+			"**Two or more panels open in one column no longer jump back to the top** when anything in them changes, such as Performance's numbers.",
+		],
+		changed: [
+			"**Downloads keep to Roblox's pace**: at most four calls at once, and when Roblox says to slow down, every download waits as long as it asks, up to 30 seconds, then tries again, three times at most.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.55",
 		date: "2026-11-24",
 		headline:

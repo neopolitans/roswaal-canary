@@ -11,6 +11,7 @@
 
 import type { BenchmarkKind } from "../../benchmarkEvent.js";
 import { type AssetGaps, notLoadedText } from "../viewport/assetProgress.js";
+import { type MemoryUse, memoryLine } from "../viewport/gpuMemory.js";
 import {
 	fpsText,
 	type MovingRow,
@@ -52,6 +53,8 @@ export interface BenchmarkStationResult {
 		beams: number;
 		/** Assets the station needed that were not in the view: see notLoadedText. */
 		assets?: AssetGaps;
+		/** GPU memory the view held, estimated: see gpuMemory.ts. */
+		memory?: MemoryUse;
 	};
 }
 
@@ -296,6 +299,7 @@ export function benchmarkReport(result: BenchmarkResult): string {
 			);
 			const notLoaded = notLoadedText(s.counts.assets);
 			if (notLoaded) lines.push(`      ${notLoaded}`);
+			if (s.counts.memory) lines.push(`      ${memoryLine(s.counts.memory)}`);
 			for (const m of s.moving.length > 1 ? s.moving : []) {
 				const total = m.gpu.length > 0 ? `GPU ${msText(m.gpuTotal.median)}` : "";
 				lines.push(`      ${m.label.padEnd(14)} ${msText(m.median)} ${fpsText(m.median)} ${total}`);

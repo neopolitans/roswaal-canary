@@ -18,6 +18,7 @@ import {
 	type SceneMesh,
 } from "../../core/scene.js";
 import type { AntialiasMode } from "./antialias.js";
+import type { MemoryUse } from "./gpuMemory.js";
 import type { Handles } from "./handles.js";
 import { lookAt, type Mat4, multiply } from "./math.js";
 import type { Probe, StageSink } from "./profile.js";
@@ -1406,6 +1407,8 @@ export interface RenderStats {
 	 * them: the sun's and sky's maps, the place, and its glow and effects.
 	 */
 	gpu: { shadows: number; scene: number; post: number } | null;
+	/** GPU memory the view holds, estimated from what it made: see gpuMemory.ts. */
+	memory?: MemoryUse;
 }
 
 /**

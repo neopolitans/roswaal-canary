@@ -2665,6 +2665,7 @@ export class ViewportController {
 			particles: stats?.particles ?? 0,
 			beams: stats?.beams ?? 0,
 			...(missing > 0 ? { assets: gaps } : {}),
+			...(stats?.memory ? { memory: stats.memory } : {}),
 		};
 	}
 
@@ -3285,6 +3286,7 @@ export class ViewportController {
 					depthPath: view.leanDepth ? (view.leanDepth() ? "lean" : "full") : "",
 					quality: startedAt,
 					assets: this.assetGaps(),
+					...(stats.memory ? { memory: stats.memory } : {}),
 					antialias: antialiasInfo(view.antialias).label,
 					camera,
 					draws: stats.draws,

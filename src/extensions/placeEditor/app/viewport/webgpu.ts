@@ -43,6 +43,7 @@ import {
 } from "./culling.js";
 import { EFFECT_SHADER, GpuEffects } from "./effectsGpu.js";
 import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geometry.js";
+import { canvasBytes, GpuMemory, trackWebGpu } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
@@ -1680,8 +1681,12 @@ export class WebGpuView implements ViewRenderer {
 			cpu: this.cpuMs,
 			cpuSteps: { ...this.cpuSteps },
 			gpu: this.gpuTimes,
+			memory: this.memory.use(canvasBytes(this.canvas?.width ?? 0, this.canvas?.height ?? 0)),
 		};
 	}
+
+	/** What the view has made on the GPU: see gpuMemory.ts. */
+	private readonly memory = new GpuMemory();
 
 	/** Each draw's instances and triangles, toward the frame's stats. */
 	private count(draws: Draw[]): void {
@@ -2092,6 +2097,8 @@ export class WebGpuView implements ViewRenderer {
 		this.device = await adapter.requestDevice(
 			features.length > 0 ? { requiredFeatures: features } : undefined,
 		);
+		// Before anything is made, so all of it is counted.
+		trackWebGpu(this.device, this.memory);
 		if (timed) {
 			const n = WebGpuView.STAMPS;
 			this.timing = {

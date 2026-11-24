@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.58",
+		date: "2026-11-24",
+		headline: "The Performance panel estimates the GPU memory the view holds.",
+		added: [
+			"**GPU memory (estimate) in the Performance panel**: the total, and what it is for: frame targets, shadow and sky maps, reflections, images and materials, meshes and parts, other buffers, and the canvas's own. Counted from every texture and buffer the view makes; the browser's own use is not seen, so it is a floor.",
+			"**Benchmark and profile reports give it too**, for each station.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.57",
 		date: "2026-11-24",
 		headline: "Reflections show Decals, Textures and material textures.",

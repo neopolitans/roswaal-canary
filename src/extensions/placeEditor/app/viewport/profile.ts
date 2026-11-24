@@ -21,6 +21,7 @@
  */
 
 import { type AssetGaps, notLoadedText } from "./assetProgress.js";
+import { type MemoryUse, memoryLine } from "./gpuMemory.js";
 import type { EffectSteps } from "./view.js";
 
 /** A frame's stages, in the order they are drawn. Not every renderer has every one. */
@@ -328,6 +329,8 @@ export interface ProfileFacts {
 	quality: string;
 	/** The place's assets not in the view when it was profiled: see notLoadedText. */
 	assets?: AssetGaps;
+	/** GPU memory the view held then, estimated: see gpuMemory.ts. */
+	memory?: MemoryUse;
 	/** The antialiasing drawn then, by name. */
 	antialias: string;
 	/** Where the camera was, so two profiles can be taken from the same spot. */
@@ -511,6 +514,7 @@ export function profileReport(result: ProfileResult): string {
 	);
 	const notLoaded = notLoadedText(facts.assets);
 	if (notLoaded) lines.push(notLoaded);
+	if (facts.memory) lines.push(memoryLine(facts.memory));
 	if (facts.quality) lines.push(`Quality: ${facts.quality}`);
 	if (facts.camera) lines.push(`Camera: ${facts.camera}`);
 	lines.push(`Clock step: ${msText(result.clock)}`);

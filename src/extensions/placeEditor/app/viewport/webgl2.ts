@@ -36,6 +36,7 @@ import {
 } from "./culling.js";
 import { GlEffects } from "./effectsGl.js";
 import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
+import { canvasBytes, GpuMemory, trackWebGl2 } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import { lightGridFor } from "./prepare.js";
@@ -1445,8 +1446,18 @@ export class WebGl2View implements ViewRenderer {
 			particles: fx?.particles ?? 0,
 			cpu: this.cpuMs,
 			gpu: null,
+			memory: this.memory.use(
+				canvasBytes(
+					this.gl?.drawingBufferWidth ?? 0,
+					this.gl?.drawingBufferHeight ?? 0,
+					this.samples === 4 ? 4 : 1,
+				),
+			),
 		};
 	}
+
+	/** What the view has made on the GPU: see gpuMemory.ts. */
+	private readonly memory = new GpuMemory();
 
 	/** The place's Beams and ParticleEmitters: see `effectsGl.ts`. */
 	private effects?: GlEffects;
@@ -2114,6 +2125,8 @@ export class WebGl2View implements ViewRenderer {
 		});
 		if (!gl) throw new Error("no WebGL2");
 		this.gl = gl;
+		// Before anything is made, so all of it is counted.
+		trackWebGl2(gl, this.memory);
 		this.nearer = gl.LESS;
 		this.nearerOrEqual = gl.LEQUAL;
 		const clip = gl.getExtension("EXT_clip_control") as ClipControl | null;

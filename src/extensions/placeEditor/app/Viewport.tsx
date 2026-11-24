@@ -55,6 +55,7 @@ import {
 	graphTop,
 	graphY,
 } from "./viewport/frameGraph.js";
+import { memoryRows } from "./viewport/gpuMemory.js";
 import { type HeavyMesh, shortCount } from "./viewport/heaviest.js";
 import { downloadFailures, onDownloadFailures } from "./viewport/images.js";
 import { prepareScene } from "./viewport/prepare.js";
@@ -1544,6 +1545,7 @@ export function PerformancePanel({ controller }: { controller: ViewportControlle
 								]}
 							/>
 						)}
+						{stats?.memory && <Rows rows={memoryRows(stats.memory)} />}
 					</div>
 					<ProfileSection controller={controller} profiling={profiling} profile={profile} />
 				</div>

@@ -75,6 +75,7 @@ import {
 	CASCADE_BLOCK,
 	CASCADE_MAP,
 	type Camera,
+	CameraHeading,
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
@@ -3493,7 +3494,11 @@ fn at(c: vec2i) -> u32 {
 		}
 		const partsMoved = this.skyDirty;
 		const sunMoved = this.sunDirty;
-		const centre = nearSkyCentre(camera.eye);
+		const centre = nearSkyCentre(
+			camera.eye,
+			this.nearFill?.centre ?? this.nearCentre,
+			this.heading.update(camera.eye),
+		);
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
 		// The place or the sun changed, or nothing drawn yet: every map at once.
 		// The camera moved on alone: the near maps a share a frame (nearFillStep).
@@ -5232,6 +5237,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private sunDirty = true;
 	/** Where the near maps were last drawn round: see nearSkyCentre. */
 	private nearCentre: number[] | null = null;
+	/** The camera's recent way, which the near maps are put ahead along. */
+	private heading = new CameraHeading();
 	private skyKey = -1;
 	private sunKey = "";
 	private lightKey = -1;
@@ -5749,9 +5756,10 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		}
 		const fill = this.nearFill;
 		let at = encoder;
-		if (fill.step < SKY_VIEWS / 2) {
-			const from = fill.step * 2;
-			for (let j = from; j < from + 2; j++) {
+		// One map a frame, then the cells in two: a re-centre spread thin, not a hitch.
+		if (fill.step < SKY_VIEWS) {
+			const from = fill.step;
+			for (let j = from; j < from + 1; j++) {
 				const k = SKY_NEAR_LAYER + j;
 				const { buffer, group } = this.skyViewGroups[k];
 				q.writeBuffer(buffer, 0, fill.block.subarray(k * 16, k * 16 + 16));
@@ -5776,13 +5784,13 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			}
 			at = this.cut(at, "skyMaps");
 			if (passesOf(this.render.features).thinParts) {
-				this.openNearMaps(at, other + from, 2);
+				this.openNearMaps(at, other + from, 1);
 				at = this.cut(at, "skyOpen");
 			}
 			fill.step++;
 			return at;
 		}
-		if (fill.step === SKY_VIEWS / 2) {
+		if (fill.step === SKY_VIEWS) {
 			this.fillCells(at, fill.bind, "own", false);
 			fill.step++;
 			return this.cut(at, "skyCells");

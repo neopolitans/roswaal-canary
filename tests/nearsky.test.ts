@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+	CameraHeading,
 	nearSkyCentre,
 	nearSkyInto,
 	SKY_BLOCK,
 	SKY_LAYERS,
 	SKY_NEAR,
 	SKY_NEAR_LAYER,
-	SKY_NEAR_STEP,
+	SKY_NEAR_LEAD,
+	SKY_NEAR_RECENTRE,
+	SKY_NEAR_SNAP,
 	skyBlock,
 } from "../src/extensions/placeEditor/app/viewport/view.js";
 
@@ -18,9 +21,58 @@ function project(block: Float32Array, layer: number, p: number[]): number[] {
 }
 
 describe("the near sky maps", () => {
-	it("keep their centre to a step, so they are drawn again only once the camera has moved one", () => {
-		expect(nearSkyCentre([10, 30, -20])).toEqual([0, SKY_NEAR_STEP, -0]);
-		expect(nearSkyCentre([100, 5000, 0])).toEqual([96, 4992, 0]);
+	it("stay where they are until the camera is far from their centre, then move ahead of it", () => {
+		// First drawn: round the camera, on the snap's grid.
+		expect(nearSkyCentre([10, 30, -20])).toEqual([8, 32, -16]);
+		const at = [0, 0, 0];
+		// Inside the reach along every axis: kept, the same array.
+		expect(nearSkyCentre([SKY_NEAR_RECENTRE, -40, 30], at, [1, 0, 0])).toBe(at);
+		// Past it: put ahead of the camera along its way, by the lead.
+		const moved = nearSkyCentre([SKY_NEAR_RECENTRE + 1, 0, 0], at, [2, 0, 0]);
+		expect(moved).toEqual([
+			Math.round((SKY_NEAR_RECENTRE + 1 + SKY_NEAR_LEAD) / SKY_NEAR_SNAP) * SKY_NEAR_SNAP,
+			0,
+			0,
+		]);
+		// Not moving: round the camera.
+		expect(nearSkyCentre([200, 0, 0], at, [0, 0, 0])).toEqual([200, 0, 0]);
+	});
+
+	it("leave the camera inside the reach once moved, whichever way it goes", () => {
+		for (const way of [
+			[1, 0, 0],
+			[1, 1, 1],
+			[-3, 0.5, 2],
+			[0, -1, 0],
+		]) {
+			const eye = [123.4, 56.7, -890.1];
+			const centre = nearSkyCentre(eye, [0, 0, 0], way);
+			const off = Math.max(...eye.map((v, a) => Math.abs(v - centre[a])));
+			expect(off).toBeLessThanOrEqual(SKY_NEAR_RECENTRE);
+			// So the next frame keeps it.
+			expect(nearSkyCentre(eye, centre, way)).toBe(centre);
+		}
+	});
+
+	it("go between redraws twice and more the old 48-stud step, full detail kept 80 studs every way", () => {
+		const reach = SKY_NEAR * 0.75 - SKY_NEAR_RECENTRE;
+		expect(reach).toBeGreaterThanOrEqual(80);
+		// Flying straight along x a stud a frame: how far between redraws.
+		const heading = new CameraHeading();
+		let centre: number[] | null = null;
+		const moves: number[] = [];
+		let last = 0;
+		for (let x = 0; x < 2000; x++) {
+			const eye = [x, 10, 0];
+			const next = nearSkyCentre(eye, centre, heading.update(eye));
+			if (next !== centre) {
+				if (centre) moves.push(x - last);
+				last = x;
+				centre = next;
+			}
+		}
+		const typical = moves.slice(1).reduce((s, m) => s + m, 0) / (moves.length - 1);
+		expect(typical).toBeGreaterThan(110);
 	});
 
 	it("follow the whole place's views in the block, with their texel and their box", () => {

@@ -54,6 +54,7 @@ import {
 	CASCADE_BLOCK,
 	CASCADE_MAP,
 	type Camera,
+	CameraHeading,
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
@@ -2857,6 +2858,8 @@ export class WebGl2View implements ViewRenderer {
 	private sunDirty = true;
 	/** Where the near maps were last drawn round: see nearSkyCentre. */
 	private nearCentre: number[] | null = null;
+	/** The camera's recent way, which the near maps are put ahead along. */
+	private heading = new CameraHeading();
 	private skyKey = -1;
 	private sunKey = "";
 	private lightKey = -1;
@@ -3309,7 +3312,7 @@ export class WebGl2View implements ViewRenderer {
 			return;
 		}
 		this.usualDepth(true);
-		const centre = nearSkyCentre(camera.eye);
+		const centre = nearSkyCentre(camera.eye, this.nearCentre, this.heading.update(camera.eye));
 		const nearMoved = !this.nearCentre || centre.some((v, a) => v !== this.nearCentre![a]);
 		const nearDrawn = this.skyDirty || nearMoved;
 		if (this.skyDirty || this.sunDirty || nearMoved) {

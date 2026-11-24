@@ -323,9 +323,9 @@ export const SKY_NEAR_LAYER = SKY_VIEWS + 1;
  */
 export const SKY_BLOCK = 16 * SKY_LAYERS + 12;
 /**
- * The near maps' box round the camera, half its width in studs, and the step
- * its centre keeps to, so they are drawn again only once the camera has moved
- * that far. The whole place's maps, over a place 11,000 studs across, are
+ * The near maps' box round the camera, half its width in studs; they are
+ * drawn again only once the camera has gone far from its centre (see
+ * nearSkyCentre). The whole place's maps, over a place 11,000 studs across, are
  * 11 studs a texel, wider than a wall, and the sky reached into closed rooms.
  */
 export const SKY_NEAR = 192;
@@ -368,7 +368,10 @@ export const SKY_REACH = 116;
 export const SKY_CELL = 4;
 export const SKY_CELLS = [96, 32, 96] as const;
 export const SKY_LEAK = 1;
-export const SKY_NEAR_STEP = 48;
+/** See nearSkyCentre: how far the camera goes from the near maps' centre before they move, how far ahead of it they go, and the grid they keep to. Lead plus a snap stays within the reach. */
+export const SKY_NEAR_RECENTRE = 64;
+export const SKY_NEAR_LEAD = 56;
+export const SKY_NEAR_SNAP = 8;
 /**
  * What hides the sky in the near maps must be this many studs across, seen
  * from it: thinner, as a window's struts or a rail, it is opened out of the
@@ -458,9 +461,52 @@ export function skyBlock(
 	return block;
 }
 
-/** Where the near maps are centred for a camera at `eye`: see SKY_NEAR_STEP. */
-export function nearSkyCentre(eye: readonly number[]): number[] {
-	return eye.map((v) => Math.round(v / SKY_NEAR_STEP) * SKY_NEAR_STEP);
+/**
+ * Where the near maps are centred for a camera at `eye`: where they are, until
+ * the camera is SKY_NEAR_RECENTRE from it along any axis; then SKY_NEAR_LEAD
+ * ahead of the camera along `heading`, its recent way, held to SKY_NEAR_SNAP.
+ * The box's last quarter blends to the whole place's maps, so the camera keeps
+ * full detail for SKY_NEAR * 0.75 - SKY_NEAR_RECENTRE studs every way, and
+ * goes about SKY_NEAR_LEAD + SKY_NEAR_RECENTRE between redraws: on a 48-stud
+ * grid they were drawn again every 48, a few frames' hitch each time.
+ */
+export function nearSkyCentre(
+	eye: readonly number[],
+	current: readonly number[] | null = null,
+	heading: readonly number[] = [0, 0, 0],
+): number[] {
+	if (current) {
+		const off = Math.max(
+			Math.abs(eye[0] - current[0]),
+			Math.abs(eye[1] - current[1]),
+			Math.abs(eye[2] - current[2]),
+		);
+		if (off <= SKY_NEAR_RECENTRE) return current as number[];
+	}
+	const len = Math.hypot(heading[0], heading[1], heading[2]);
+	const lead = len > 1e-6 ? SKY_NEAR_LEAD / len : 0;
+	return eye.map((v, a) => Math.round((v + heading[a] * lead) / SKY_NEAR_SNAP) * SKY_NEAR_SNAP);
+}
+
+/**
+ * The camera's recent way, for nearSkyCentre's lead: its movement frame to
+ * frame, eased so a jitter does not swing it.
+ */
+export class CameraHeading {
+	private last: number[] | null = null;
+	readonly dir = [0, 0, 0];
+
+	/** The camera at `eye` this frame; returns its way. */
+	update(eye: readonly number[]): readonly number[] {
+		const last = this.last;
+		this.last = [...eye];
+		if (!last) return this.dir;
+		const d = [eye[0] - last[0], eye[1] - last[1], eye[2] - last[2]];
+		const step = Math.hypot(d[0], d[1], d[2]);
+		if (step < 1e-6) return this.dir;
+		for (let a = 0; a < 3; a++) this.dir[a] = this.dir[a] * 0.7 + (d[a] / step) * 0.3;
+		return this.dir;
+	}
 }
 
 /**

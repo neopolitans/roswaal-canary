@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.45",
+		date: "2026-11-24",
+		headline: "Fewer and smaller hitches while the camera flies.",
+		changed: [
+			"**The sky's maps round the camera are drawn again less often, and in smaller pieces.** They move once the camera is 64 studs from their middle, to a place ahead of where it is going, about every 120 studs where it was every 48; and WebGPU draws them one map a frame, where it was two.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.44",
 		date: "2026-11-24",
 		headline: "Neon's glow costs less, and an A/B run's status line is right.",

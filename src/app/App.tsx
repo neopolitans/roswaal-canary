@@ -487,8 +487,8 @@ export function App() {
 				renderScale:
 					sceneView.renderScale === "auto" || sceneView.renderScale === undefined
 						? "auto"
-						: sceneView.renderScale === "native"
-							? "native"
+						: sceneView.renderScale === "native" || sceneView.renderScale === "dynamic"
+							? sceneView.renderScale
 							: Number(sceneView.renderScale) / 100,
 				upscale:
 					sceneView.upscale === "still" || sceneView.upscale === "always"

@@ -47,6 +47,7 @@ import {
 	still,
 	turnedBy,
 } from "./drag.js";
+import { DynamicScale } from "./dynamicScale.js";
 import { FRAME_RUN, FrameHistory, frameInterval } from "./frameGraph.js";
 import { rayHit, rayPick } from "./geometry.js";
 import { gizmoCell, lightGizmoLines } from "./gizmos.js";
@@ -63,7 +64,7 @@ import {
 	type ViewShot,
 } from "./marquee.js";
 import { loadMeshes } from "./meshes.js";
-import { FrameCap, SteadyVsync } from "./pacing.js";
+import { FrameCap, RefreshMeter, SteadyVsync } from "./pacing.js";
 import {
 	type LevelRow,
 	type MovingRow,
@@ -158,7 +159,7 @@ export interface ViewportOptions {
 	 * at (CSS pixels: a Retina screen has twice as many each way); "native",
 	 * every pixel the screen has; Automatic, the quality level's.
 	 */
-	renderScale?: number | "native" | "auto";
+	renderScale?: number | "native" | "auto" | "dynamic";
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -755,6 +756,7 @@ export class ViewportController {
 		this.view.setOutline(options.outlineWidth, options.hideBehind);
 		this.view.setGlassHides(options.glassHides);
 		this.view.setPostEffects(options.postEffects);
+		if (was.renderScale !== options.renderScale) this.dynamic.reset();
 		if (was.renderScale !== options.renderScale || was.upscale !== options.upscale) this.fit();
 		this.redraw();
 	}
@@ -2791,6 +2793,8 @@ export class ViewportController {
 	): void {
 		const auto = this.auto;
 		if (!auto || this.state.profiling || this.starting) return;
+		// Dynamic moves first: the level only once it is at either end of its steps.
+		if (this.options.renderScale === "dynamic" && !this.dynamic.atEnd()) return;
 		const render = this.state.render;
 		if (presetLevel(render.preset) !== auto.level) return;
 		if (changedFrom(render.features, this.levelFeatures(this.level())).length > 0) return;
@@ -2808,6 +2812,7 @@ export class ViewportController {
 	private pixelRatio(): number {
 		const native = Math.min(2, devicePixelRatio || 1);
 		const setting = this.options.renderScale ?? "auto";
+		if (setting === "dynamic") return native * this.dynamic.share() * this.resolutionScale;
 		const scale = setting === "auto" ? this.level().scale : setting;
 		return Math.min(native, scale === "native" ? native : scale) * this.resolutionScale;
 	}
@@ -2824,7 +2829,9 @@ export class ViewportController {
 		const h = Math.max(1, Math.round(els.holder.clientHeight * dpr));
 		// Upscaled: the canvas the screen's own pixels, the place drawn at w x h into it.
 		const native = Math.min(2, devicePixelRatio || 1);
-		const mode = this.options.upscale ?? "off";
+		// Dynamic's steps are gathered back up to the screen's pixels while still.
+		const asked = this.options.upscale ?? "off";
+		const mode = asked === "off" && this.options.renderScale === "dynamic" ? "still" : asked;
 		const out =
 			mode !== "off" && view.setUpscale && dpr < native - 1e-3
 				? {
@@ -2855,6 +2862,24 @@ export class ViewportController {
 	/** Draws at the next frame, once however many things asked. */
 	/** The frame asked for is only the view's own animation's: see redraw. */
 	private stillNext = false;
+	/** The display's refresh, seen from the frames drawn: see pacing.ts. */
+	private refresh = new RefreshMeter();
+	/** Render scale Dynamic's step: see dynamicScale.ts. */
+	private dynamic = new DynamicScale();
+
+	/** A moving frame's time for Dynamic, against the time a frame has; sized again when its step changes. */
+	private dynamicFrame(now: number, ms: number, timed: boolean): void {
+		const rate = this.options.frameRate;
+		const refresh = this.refresh.period();
+		const budget =
+			typeof rate === "number"
+				? Math.max(refresh, 1000 / rate)
+				: rate === "steady" && this.steady.halved
+					? refresh * 2
+					: refresh;
+		if (this.dynamic.frame(now, ms, budget, timed)) this.fit();
+	}
+
 	/** A frame rate's cap, keeping its average: see pacing.ts. */
 	private cap = new FrameCap();
 	/** Steady's halving: see pacing.ts. */
@@ -2907,16 +2932,25 @@ export class ViewportController {
 			}
 			this.pending = false;
 			const started = performance.now();
+			// Asked for by the view's own animation alone, the camera still.
+			const still = this.stillNext;
 			this.drawOnce(now);
-			if (rate === "steady") {
-				// WebGPU says when the GPU is done with the frame: how much room is left.
-				const timed = this.view.backend === "WebGPU";
-				this.steady.drawn(now, timed);
-				if (timed) {
-					const steady = this.steady;
-					void this.view.settled().then(() => steady.worked(performance.now() - started));
-				}
+			const gap = this.refresh.drawn(now);
+			// WebGPU says when the GPU is done with the frame: how much room is left.
+			const timed = this.view.backend === "WebGPU";
+			if (rate === "steady") this.steady.drawn(now, timed);
+			const dynamic = this.options.renderScale === "dynamic";
+			// Moving: drawn one after another, for the camera or the place, not a still frame.
+			const moving = !still && gap < this.refresh.period() * 4;
+			if (timed && (rate === "steady" || (dynamic && moving))) {
+				const steady = this.steady;
+				void this.view.settled().then(() => {
+					const ms = performance.now() - started;
+					if (rate === "steady") steady.worked(ms);
+					if (dynamic && moving) this.dynamicFrame(now, ms, true);
+				});
 			}
+			if (!timed && dynamic && moving) this.dynamicFrame(now, gap, false);
 			if (rate === "unlimited") this.inFlight = [this.inFlight[1], this.view.settled()];
 			this.countFrame(now);
 			this.showRotation();
@@ -3085,7 +3119,7 @@ export class ViewportController {
 		// Its size on the page, before the antialiasing sweep replaces the canvas.
 		const box = canvas.getBoundingClientRect();
 		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
-		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)${this.upKey ? `, upscaled ${options.upscale === "always" ? "always" : "when still"} to ${canvas.width}×${canvas.height}` : ""}`;
+		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : options.renderScale === "dynamic" ? "Dynamic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)${this.upKey ? `, upscaled ${options.upscale === "always" ? "always" : "when still"} to ${canvas.width}×${canvas.height}` : ""}`;
 		const steps = RENDER_STEPS.length;
 		// The level and the camera the profile began from, for its head.
 		const startQ = this.state.quality;

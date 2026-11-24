@@ -61,6 +61,7 @@ export type ViewportQuality = "auto" | `${number}`;
  */
 export const VIEWPORT_RENDER_SCALES = [
 	{ value: "auto", label: "Automatic" },
+	{ value: "dynamic", label: "Dynamic" },
 	{ value: "native", label: "Native" },
 	{ value: "150", label: "150%" },
 	{ value: "100", label: "100%" },
@@ -175,7 +176,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "renderScale",
 				title: "Render scale",
-				help: "How many pixels the place is drawn at, across and down, as a share of the page's own. Native is every pixel your screen has: the number beside it is what that comes to on this screen, 200% on a Retina screen and 100% on an ordinary one; browser zoom counts too, so at 110% zoom it is 110% on an ordinary screen. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19",
+				help: "How many pixels the place is drawn at, across and down, as a share of the page's own. Native is every pixel your screen has: the number beside it is what that comes to on this screen, 200% on a Retina screen and 100% on an ordinary one; browser zoom counts too, so at 110% zoom it is 110% on an ordinary screen. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19. Dynamic draws fewer pixels while frames do not fit the display and more once they fit, from Native down to half of it, and on WebGPU gathers a still view back up to Native",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,

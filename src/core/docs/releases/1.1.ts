@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.60",
+		date: "2026-11-24",
+		headline: "Render scale: Dynamic, fewer pixels while frames do not fit and more once they do.",
+		added: [
+			"**Render scale: Dynamic.** While the view moves, the place is drawn at fewer pixels when frames do not fit the display's refresh and at more once they fit with room, from Native down to half of it, in five steps and at most twice a second. A still view keeps its step, and on WebGPU the upscaler gathers it back up to Native, so stopping costs no detail. Upscaling comes on, when still, if it was off.",
+			"**With Automatic quality, Dynamic moves first**: the level changes only once Dynamic is at Native or at its least.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.59",
 		date: "2026-11-24",
 		headline: "Steady frame rate: VSync at half the display's rate while frames cannot keep up.",

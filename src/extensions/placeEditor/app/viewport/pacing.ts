@@ -33,6 +33,30 @@ export class FrameCap {
 	}
 }
 
+/** The display's refresh, from the gaps between frames drawn one after another. */
+export class RefreshMeter {
+	private gaps: number[] = [];
+	private last = 0;
+
+	/** A frame drawn at `now`; the gap to the one before. */
+	drawn(now: number): number {
+		const gap = now - this.last;
+		this.last = now;
+		if (gap > 0 && gap < 200) {
+			this.gaps.push(gap);
+			if (this.gaps.length > 120) this.gaps.shift();
+		}
+		return gap;
+	}
+
+	/** The refresh, in ms: the shortest gaps frames are drawn at. 60 Hz until seen. */
+	period(): number {
+		if (this.gaps.length < 10) return 1000 / 60;
+		const sorted = [...this.gaps].sort((a, b) => a - b);
+		return sorted[Math.floor(sorted.length * 0.1)];
+	}
+}
+
 /** Frames looked at, in a row, to decide that frames do not keep up. */
 const WINDOW = 30;
 /** Of WINDOW, how many missing a refresh halve the rate. */

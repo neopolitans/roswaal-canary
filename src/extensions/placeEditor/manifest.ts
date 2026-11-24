@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.35.0",
+	version: "0.36.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.36.0",
+			roswaal: "1.1.0-canary.60",
+			date: "2026-11-24",
+			text: "Render scale Dynamic (dynamicScale.ts): five steps of Native, down when the typical moving frame passes 92% of its budget, up when the bigger step would take under 80%; WebGPU's GPU times, WebGL2's gaps; RefreshMeter for the budget.",
+		},
 		{
 			version: "0.35.0",
 			roswaal: "1.1.0-canary.59",

@@ -12,7 +12,7 @@
 
 import type { AntialiasMode } from "./antialias.js";
 import { featuresAtLevel, type RenderFeatures } from "./renderFeatures.js";
-import type { ViewQuality } from "./view.js";
+import { GLOW_COARSE_RATIO, type ViewQuality } from "./view.js";
 
 export interface QualityLevel {
 	level: number;
@@ -115,12 +115,14 @@ export function qualityLevel(level: number): QualityLevel {
 }
 
 /** What the view itself is told of a level: see ViewRenderer.setQuality. */
-export function viewQuality(q: QualityLevel): ViewQuality {
+/** `pixelRatio`: the view's pixels a screen point, for the glow's size (see ViewQuality.glowCoarse). */
+export function viewQuality(q: QualityLevel, pixelRatio = 1): ViewQuality {
 	return {
 		distance: q.distance,
 		reach: q.reach,
 		blobWidth: q.blobWidth,
 		glowHalf: q.level <= 12,
+		glowCoarse: pixelRatio >= GLOW_COARSE_RATIO,
 	};
 }
 

@@ -1640,13 +1640,18 @@ export class WebGpuView implements ViewRenderer {
 	private quality: ViewQuality = FULL_QUALITY;
 	setQuality(quality: ViewQuality): void {
 		const was = this.glowHalf();
+		const coarse = this.quality.glowCoarse === true;
 		this.quality = quality;
-		if (this.device && this.glowHalf() !== was) this.makeGlowSource();
+		if (this.device && (this.glowHalf() !== was || (quality.glowCoarse === true) !== coarse))
+			this.makeGlowSource();
 	}
 
-	/** Whether the glow's source is drawn at half the view's size: see ViewQuality.glowHalf. */
+	/**
+	 * Whether the glow's source is drawn at half the view's size: see
+	 * ViewQuality.glowHalf and glowCoarse. One sample a pixel only.
+	 */
 	private glowHalf(): boolean {
-		return this.quality.glowHalf && this.samples === 1;
+		return (this.quality.glowHalf || this.quality.glowCoarse === true) && this.samples === 1;
 	}
 
 	/** The half size glow source's own depth. */
@@ -3404,8 +3409,10 @@ fn at(c: vec2i) -> u32 {
 
 	/** The glow's targets, half the view's size, and what reads them. */
 	private sizeGlow(): void {
-		const w = Math.max(1, Math.round(this.width / 2));
-		const h = Math.max(1, Math.round(this.height / 2));
+		// A quarter of the view where it is drawn at more pixels than the screen has points.
+		const share = this.quality.glowCoarse ? 4 : 2;
+		const w = Math.max(1, Math.round(this.width / share));
+		const h = Math.max(1, Math.round(this.height / share));
 		if (this.glow && this.glow.w === w && this.glow.h === h) return;
 		const d = this.device;
 		for (const t of [this.glow?.a, this.glow?.b, this.glow?.c, this.glow?.d]) t?.destroy();

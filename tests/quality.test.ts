@@ -13,6 +13,7 @@ import {
 	qualityLevel,
 	startLevel,
 	UP_AFTER,
+	viewQuality,
 } from "../src/extensions/placeEditor/app/viewport/quality.js";
 import {
 	changedFrom,
@@ -223,5 +224,15 @@ describe("render distance", () => {
 		expect(boxBeyond([0, 0, 0], [100, -1, -1], [110, 1, 1], 99)).toBe(true);
 		expect(boxBeyond([0, 0, 0], [100, -1, -1], [110, 1, 1], 101)).toBe(false);
 		expect(boxBeyond([0, 0, 0], [-5, -5, -5], [5, 5, 5], 1)).toBe(false);
+	});
+});
+
+describe("the glow sized to the screen", () => {
+	it("is coarse from 1.25 of the view's pixels a screen point, at any level", () => {
+		expect(viewQuality(qualityLevel(21), 1).glowCoarse).toBe(false);
+		expect(viewQuality(qualityLevel(21), 1.2).glowCoarse).toBe(false);
+		expect(viewQuality(qualityLevel(21), 1.5).glowCoarse).toBe(true);
+		expect(viewQuality(qualityLevel(21), 2).glowCoarse).toBe(true);
+		expect(viewQuality(qualityLevel(5)).glowCoarse).toBe(false);
 	});
 });

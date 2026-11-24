@@ -1966,7 +1966,7 @@ export class ViewportController {
 		view.setOutline(this.options.outlineWidth, this.options.hideBehind);
 		view.setGlassHides(this.options.glassHides);
 		view.setPostEffects(this.options.postEffects);
-		view.setQuality(viewQuality(this.level()));
+		view.setQuality(viewQuality(this.level(), this.pixelRatio()));
 		view.setRender(this.withSavings(this.state.render));
 		this.view = view;
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
@@ -2782,7 +2782,7 @@ export class ViewportController {
 			return;
 		}
 		view.setShadowMap(q.shadowMap);
-		view.setQuality(viewQuality(q));
+		view.setQuality(viewQuality(q, this.pixelRatio()));
 		this.fit();
 		this.redraw();
 	}
@@ -2859,6 +2859,8 @@ export class ViewportController {
 		) {
 			canvas.width = cw;
 			canvas.height = ch;
+			// The glow sized for the screen at this scale: see ViewQuality.glowCoarse.
+			view.setQuality(viewQuality(this.level(), dpr));
 			view.resize(w, h);
 			view.setUpscale?.(out, out ? mode : "off");
 			this.drawn = { width: w, height: h };

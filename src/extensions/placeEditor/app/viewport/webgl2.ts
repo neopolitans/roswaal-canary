@@ -1415,7 +1415,13 @@ export class WebGl2View implements ViewRenderer {
 	/** The quality level's render distance and sun shadows. */
 	private quality: ViewQuality = FULL_QUALITY;
 	setQuality(quality: ViewQuality): void {
+		const coarse = this.quality.glowCoarse === true;
 		this.quality = quality;
+		// The glow's targets sized again for the screen: see ViewQuality.glowCoarse.
+		if (this.gl && (quality.glowCoarse === true) !== coarse) {
+			this.glowSize = [0, 0];
+			this.sizeGlow();
+		}
 	}
 
 	/** The Rendering panel's mode and switches: see `RenderSettings`. */
@@ -2679,8 +2685,10 @@ export class WebGl2View implements ViewRenderer {
 	/** The glow's two targets, half the view's size; the first with depth. */
 	private sizeGlow(): void {
 		const gl = this.gl;
-		const w = Math.max(1, Math.round(this.width / 2));
-		const h = Math.max(1, Math.round(this.height / 2));
+		// A quarter of the view where it is drawn at more pixels than the screen has points.
+		const share = this.quality.glowCoarse ? 4 : 2;
+		const w = Math.max(1, Math.round(this.width / share));
+		const h = Math.max(1, Math.round(this.height / share));
 		if (this.glowSize[0] === w && this.glowSize[1] === h) return;
 		this.glowSize = [w, h];
 		// Half floats where the browser can draw into them, so the blur's long

@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.38.0",
+	version: "0.39.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.39.0",
+			roswaal: "1.1.0-canary.63",
+			date: "2026-11-24",
+			text: "ViewQuality.glowCoarse from 1.25 view pixels a screen point: glow source at half the view, blur targets a quarter and an eighth (both renderers).",
+		},
 		{
 			version: "0.38.0",
 			roswaal: "1.1.0-canary.62",

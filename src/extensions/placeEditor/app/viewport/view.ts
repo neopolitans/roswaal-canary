@@ -796,6 +796,14 @@ export interface ViewQuality {
 	 * Neon through a seam glows less.
 	 */
 	glowHalf: boolean;
+	/**
+	 * The view drawn at more pixels than the screen has points
+	 * (GLOW_COARSE_RATIO or more, as at 150% or Native on a Retina screen):
+	 * Neon's glow is found at half the view's size and blurred at a quarter
+	 * and an eighth, so it costs what it does at 100%. Its spread follows the
+	 * targets' size, so it looks the same, a little softer.
+	 */
+	glowCoarse?: boolean;
 }
 export const FULL_QUALITY: ViewQuality = {
 	distance: null,
@@ -803,6 +811,9 @@ export const FULL_QUALITY: ViewQuality = {
 	blobWidth: null,
 	glowHalf: false,
 };
+
+/** Pixels a screen point from which the glow is sized to the screen: see ViewQuality.glowCoarse. */
+export const GLOW_COARSE_RATIO = 1.25;
 
 /**
  * Scene reflections: the place round the camera in a cube, PROBE_SIZE texels

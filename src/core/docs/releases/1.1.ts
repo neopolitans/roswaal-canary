@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.63",
+		date: "2026-11-24",
+		headline: "Neon's glow costs at 150% and Native what it does at 100%.",
+		changed: [
+			"**Neon's glow and bloom are worked out at the screen's own size, not the render scale's**: where the view draws more pixels than the screen has points, as at 150% or Native on a Retina screen, the glow is found at half the view's size and blurred at a quarter and an eighth. It looks the same, a little softer, for about a quarter of the cost.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.62",
 		date: "2026-11-24",
 		headline: "Dynamic optimization, and the Scene view settings in the Rendering panel.",

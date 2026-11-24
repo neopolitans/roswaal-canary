@@ -55,6 +55,8 @@ export interface BenchmarkStationResult {
 		assets?: AssetGaps;
 		/** GPU memory the view held, estimated: see gpuMemory.ts. */
 		memory?: MemoryUse;
+		/** Where Dynamic and Dynamic optimization settled at the end of the station's motion. */
+		dynamic?: { share: number; savings: string[] };
 	};
 }
 
@@ -300,6 +302,7 @@ export function benchmarkReport(result: BenchmarkResult): string {
 			const notLoaded = notLoadedText(s.counts.assets);
 			if (notLoaded) lines.push(`      ${notLoaded}`);
 			if (s.counts.memory) lines.push(`      ${memoryLine(s.counts.memory)}`);
+			if (s.counts.dynamic) lines.push(`      ${dynamicLine(s.counts.dynamic)}`);
 			for (const m of s.moving.length > 1 ? s.moving : []) {
 				const total = m.gpu.length > 0 ? `GPU ${msText(m.gpuTotal.median)}` : "";
 				lines.push(`      ${m.label.padEnd(14)} ${msText(m.median)} ${fpsText(m.median)} ${total}`);
@@ -466,4 +469,13 @@ export function benchmarkJson(result: BenchmarkResult): string {
 		(_k, v) => (typeof v === "number" && !Number.isFinite(v) ? null : v),
 		1,
 	);
+}
+
+/** Where Dynamic settled for a station: its share of Native, and the savings taken. */
+export function dynamicLine(d: { share: number; savings: string[] }): string {
+	const savings =
+		d.savings.length === 0
+			? "no savings"
+			: d.savings.map((s) => (s === "fullResLamps" ? "lights at half size" : s)).join(", ");
+	return `Dynamic: ${Math.round(d.share * 100)}% of Native, ${savings}`;
 }

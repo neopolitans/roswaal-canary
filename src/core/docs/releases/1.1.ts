@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.64",
+		date: "2026-11-24",
+		headline:
+			"Benchmarks measure Dynamic render scale and Dynamic optimization as they work in use.",
+		fixed: [
+			"**A benchmark with Render scale Dynamic or Dynamic optimization on measures them**: each station starts at Native with no savings, its motions let them settle for three seconds before they are timed, and the report says where each station settled. They had no say in a benchmark, which measured Native.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.63",
 		date: "2026-11-24",
 		headline: "Neon's glow costs at 150% and Native what it does at 100%.",

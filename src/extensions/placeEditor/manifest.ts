@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.39.0",
+	version: "0.39.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.39.1",
+			roswaal: "1.1.0-canary.64",
+			date: "2026-11-24",
+			text: "Benchmarks honour Dynamic and Dynamic optimization: busyFrames' moving frames feed dynamicFrame, a 3 s settle per motion, a reset per station, a Dynamic line per station.",
+		},
 		{
 			version: "0.39.0",
 			roswaal: "1.1.0-canary.63",

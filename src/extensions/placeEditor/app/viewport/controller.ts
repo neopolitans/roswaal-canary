@@ -2196,6 +2196,8 @@ export class ViewportController {
 		before?: (frame: number) => void,
 		after?: () => void,
 		budget = Number.POSITIVE_INFINITY,
+		/** Each frame's time to Dynamic and Dynamic optimization, as the frame loop gives them. */
+		adapt = false,
 	): Promise<number[]> {
 		const view = this.view;
 		if (!view) return [];
@@ -2210,7 +2212,10 @@ export class ViewportController {
 			after?.();
 			inFlight.push(
 				view.finished().then(() => {
-					done.push(performance.now());
+					const at = performance.now();
+					const last = done.at(-1);
+					done.push(at);
+					if (adapt && last !== undefined) this.dynamicFrame(at, at - last, true);
 				}),
 			);
 			if (inFlight.length >= 2) await inFlight.shift();
@@ -2332,8 +2337,14 @@ export class ViewportController {
 				step(Math.min(0.1, (now - last) / 1000));
 				last = now;
 			};
+			// Dynamic or Dynamic optimization: they settle along the path first,
+			// as they would in use, and go on adapting while it is timed.
+			const adapting =
+				busy &&
+				(this.options.renderScale === "dynamic" || this.options.dynamicOptimization === true);
+			if (adapting) await this.busyFrames(MOVING_MOST, byClock, undefined, DYNAMIC_SETTLE_MS, true);
 			const times = busy
-				? await this.busyFrames(MOVING_MOST, byClock, undefined, MOVING_MS)
+				? await this.busyFrames(MOVING_MOST, byClock, undefined, MOVING_MS, adapting)
 				: await this.waitedFrames(MOVING_MOST, MOVING_MS, byClock);
 			await view.settled();
 			await new Promise((r) => setTimeout(r, 50));
@@ -2579,6 +2590,8 @@ export class ViewportController {
 							done++;
 							continue;
 						}
+						// Dynamic starts each station afresh: Native, no savings taken.
+						this.resetDynamic();
 						report(label, station, variant.label, "Still");
 						const still = await timeStill(station.name);
 						lastFrame = still.median;
@@ -2675,6 +2688,7 @@ export class ViewportController {
 			beams: stats?.beams ?? 0,
 			...(missing > 0 ? { assets: gaps } : {}),
 			...(stats?.memory ? { memory: stats.memory } : {}),
+			...(this.dynamicState() ? { dynamic: this.dynamicState()! } : {}),
 		};
 	}
 
@@ -2879,6 +2893,27 @@ export class ViewportController {
 
 	/** Dynamic optimization's savings: see dynamicScale.ts. */
 	private savings = new DynamicSavings();
+
+	/** Dynamic and Dynamic optimization back to the start: Native, no savings taken. */
+	private resetDynamic(): void {
+		const was = this.dynamic.step !== 0 || this.savings.taken !== 0;
+		this.dynamic.reset();
+		this.savings.reset();
+		if (!was) return;
+		this.view?.setRender(this.withSavings(this.state.render));
+		this.fit();
+	}
+
+	/** Where Dynamic and Dynamic optimization stand, for a benchmark station's report; null with both off. */
+	private dynamicState(): { share: number; savings: string[] } | null {
+		const scale = this.options.renderScale === "dynamic";
+		const optimizing = this.options.dynamicOptimization === true;
+		if (!scale && !optimizing) return null;
+		return {
+			share: scale ? this.dynamic.share() : 1,
+			savings: optimizing ? [...this.savings.off()] : [],
+		};
+	}
 
 	/** The render settings as the view draws them: less the savings Dynamic optimization has taken. */
 	private withSavings(render: RenderSettings): RenderSettings {
@@ -4145,6 +4180,8 @@ const PROFILE_BUDGET = 1500;
 const PROFILE_FEWEST = 8;
 /** How long each motion of a profile or benchmark runs: one second, as many frames as that takes. */
 const MOVING_MS = 1000;
+/** With Dynamic or Dynamic optimization on, how long a benchmark's motion lets them settle before it is timed. */
+const DYNAMIC_SETTLE_MS = 3000;
 /** A bound on those frames, for a display or GPU far beyond any yet. */
 const MOVING_MOST = 4000;
 

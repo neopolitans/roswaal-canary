@@ -1274,7 +1274,7 @@ struct IOut {
 	@builtin(position) clip: vec4f, @location(0) world: vec3f, @location(1) normal: vec3f,
 	@location(2) uv: vec2f, @location(3) tint: vec4f,
 };
-@vertex fn vsImage(@location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) uv: vec2f, @location(3) tint: vec4f) -> IOut {
+fn imageOut(pos: vec3f, nrm: vec3f, uv: vec2f, tint: vec4f) -> IOut {
 	var o: IOut;
 	o.world = pos;
 	o.clip = u.viewProj * vec4f(pos, 1.0);
@@ -1284,10 +1284,19 @@ struct IOut {
 	o.tint = vec4f(pow(tint.rgb, vec3f(2.2)), tint.a);
 	return o;
 }
-@fragment fn fsImage(i: IOut) -> @location(0) vec4f {
-	let t = textureSampleBias(image, imageSampler, i.uv, u.lod.x);
-	let edge = nearEdge(i.world);
-	let wide = fwidth(edge);
+@vertex fn vsImage(@location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) uv: vec2f, @location(3) tint: vec4f) -> IOut {
+	return imageOut(pos, nrm, uv, tint);
+}
+// A Decal or Texture on a face of the reflection cube, seen from its middle
+// as vsRefl sees the parts. Its own group: the image's texture is group 1.
+@group(2) @binding(0) var<uniform> reflFace: ReflU;
+@vertex fn vsImageRefl(@location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) uv: vec2f, @location(3) tint: vec4f) -> IOut {
+	var o = imageOut(pos, nrm, uv, tint);
+	o.clip = reflFace.viewProj * vec4f(pos, 1.0);
+	return o;
+}
+// The image lit, in linear light, and its alpha: the view's and the cube's.
+fn imageLit(i: IOut, t: vec4f) -> vec4f {
 	let albedo = pow(t.rgb, vec3f(2.2)) * i.tint.rgb;
 	let n = normalize(i.normal);
 	let ndl = max(dot(n, u.sun.xyz), 0.0);
@@ -1301,8 +1310,19 @@ struct IOut {
 	if (has(${FEATURE_BIT.unlit}u)) { c = albedo; }
 	let d = length(u.camPos.xyz - i.world);
 	c = air(c, d, i.world.y);
-	if (u.debug.w > 2.5) { return vec4f(sunMapTint(display(c), i.world, edge, wide), t.a * i.tint.a); }
-	return vec4f(display(c), t.a * i.tint.a);
+	return vec4f(c, t.a * i.tint.a);
+}
+@fragment fn fsImage(i: IOut) -> @location(0) vec4f {
+	let t = textureSampleBias(image, imageSampler, i.uv, u.lod.x);
+	let edge = nearEdge(i.world);
+	let wide = fwidth(edge);
+	let lit = imageLit(i, t);
+	if (u.debug.w > 2.5) { return vec4f(sunMapTint(display(lit.rgb), i.world, edge, wide), lit.a); }
+	return vec4f(display(lit.rgb), lit.a);
+}
+// The cube keeps linear light, as fsRefl gives it.
+@fragment fn fsImageRefl(i: IOut) -> @location(0) vec4f {
+	return imageLit(i, textureSampleBias(image, imageSampler, i.uv, u.lod.x));
 }
 // A solid part's Decal or Texture, where it is mostly opaque, into the depth:
 // a see-through part behind it is then hidden by it, one in front blends over it.
@@ -2360,6 +2380,48 @@ export class WebGpuView implements ViewRenderer {
 			depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
 			multisample: { count: this.samples },
 		});
+		// The same images on the reflection cube's faces: its formats, and both
+		// sides, as the faces mirror some triangles' winding (see makeReflections).
+		if (this.reflFaceLayout)
+			this.pipeline((p) => (this.reflImagePipe = p), {
+				layout: d.createPipelineLayout({
+					bindGroupLayouts: [layout, this.imageLayout, this.reflFaceLayout],
+				}),
+				vertex: {
+					module,
+					entryPoint: "vsImageRefl",
+					buffers: [
+						{
+							arrayStride: IMAGE_VERTEX * 4,
+							attributes: [
+								{ shaderLocation: 0, offset: 0, format: "float32x3" },
+								{ shaderLocation: 1, offset: 12, format: "float32x3" },
+								{ shaderLocation: 2, offset: 24, format: "float32x2" },
+								{ shaderLocation: 3, offset: 32, format: "float32x4" },
+							],
+						},
+					],
+				},
+				fragment: {
+					module,
+					entryPoint: "fsImageRefl",
+					targets: [
+						{
+							format: "rgba16float",
+							blend: {
+								color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+								alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+							},
+						},
+					],
+				},
+				primitive: { topology: "triangle-list", cullMode: "none" },
+				depthStencil: {
+					format: "depth32float",
+					depthWriteEnabled: false,
+					depthCompare: "less-equal",
+				},
+			});
 		this.viewPipelines(module, layout, buffers);
 		this.effects = new GpuEffects({
 			device: d,
@@ -4319,6 +4381,8 @@ fn at(c: vec2i) -> u32 {
 			],
 		});
 		this.imageGroups.set(asset, { texture, group });
+		// The reflection cube shows the images too: drawn again with this one.
+		if (this.imageList.some((quad) => quad.asset === asset)) this.reflStale();
 	}
 
 	private imageHalve: { pipe: GPURenderPipeline; layout: GPUBindGroupLayout } | null = null;
@@ -4415,6 +4479,32 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			}
 		}
 	}
+
+	/**
+	 * The solid parts' Decals and Textures on a face of the reflection cube,
+	 * over the parts just drawn, farthest from its middle first.
+	 */
+	private reflectImages(pass: GPURenderPassEncoder, face: GPUBindGroup, at: number[]): void {
+		if (!this.reflImagePipe || !this.imageVertices || this.imageList.length === 0) return;
+		if (!passesOf(this.render.features).images) return;
+		const order = imageOrder(this.imageList, "solid", at, (asset) => this.imageGroups.has(asset));
+		if (order.length === 0) return;
+		pass.setPipeline(this.reflImagePipe);
+		pass.setBindGroup(2, face);
+		pass.setVertexBuffer(0, this.imageVertices);
+		let bound = "";
+		for (const q of order) {
+			const asset = this.imageList[q].asset;
+			if (asset !== bound) {
+				pass.setBindGroup(1, this.imageGroups.get(asset)!.group);
+				bound = asset;
+			}
+			pass.draw(6, 1, q * 6);
+		}
+	}
+
+	private reflFaceLayout: GPUBindGroupLayout | null = null;
+	private reflImagePipe: GPURenderPipeline | null = null;
 
 	/** Every image whose texture has arrived, over what glows, in the glow's pass. */
 	private veilImages(pass: GPURenderPassEncoder): void {
@@ -5015,6 +5105,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const faceLayout = d.createBindGroupLayout({
 			entries: [{ binding: 0, visibility: STAGE.VERTEX, buffer: {} }],
 		});
+		this.reflFaceLayout = faceLayout;
 		this.reflGroups = [0, 1, 2, 3, 4, 5].map(() => {
 			const buffer = d.createBuffer({ size: 64, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
 			return {
@@ -5085,6 +5176,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			pass.setBindGroup(0, this.reflBind);
 			pass.setBindGroup(1, group);
 			this.solids(pass, this.draws, true);
+			this.reflectImages(pass, group, fill.at);
 			pass.end();
 			this.redrawn.probeFaces++;
 			// Its smaller levels, each from the one above it.
@@ -5952,6 +6044,8 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		});
 		this.loaded.add(layer);
 		this.device.queue.writeBuffer(this.uniform, UNIFORM_MATERIALS, materialBlock(this.loaded));
+		// The reflection cube was drawn with the material's plain pattern: again, with its texture.
+		this.reflStale();
 	}
 
 	destroy(): void {

@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.33.0",
+	version: "0.33.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.33.1",
+			roswaal: "1.1.0-canary.57",
+			date: "2026-11-24",
+			text: "The reflection cube draws solid parts' Decals and Textures (WebGPU vsImageRefl/fsImageRefl, WebGL2 the image program per face) and is drawn again when an image or a material texture arrives.",
+		},
 		{
 			version: "0.33.0",
 			roswaal: "1.1.0-canary.56",

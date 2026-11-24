@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.57",
+		date: "2026-11-24",
+		headline: "Reflections show Decals, Textures and material textures.",
+		fixed: [
+			"**Scene reflections show the Decals and Textures on solid parts.** The reflections drew the parts alone, as though their images were not there.",
+			"**Reflections take on a material's texture once it has loaded, and an image once it has downloaded.** They kept the plain pattern or the bare face until the camera moved on.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.56",
 		date: "2026-11-24",
 		headline:

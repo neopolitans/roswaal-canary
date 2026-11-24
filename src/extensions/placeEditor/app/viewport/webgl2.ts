@@ -1286,6 +1286,13 @@ export class WebGl2View implements ViewRenderer {
 		if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
 		this.reflAt = [...camera.eye];
 		const faces = probeFaces(camera.eye, true);
+		// The solid parts' Decals and Textures go on each face too: the image
+		// program's lighting set for this camera, its view swapped per face.
+		const images =
+			this.imageVao && passesOf(this.render.features).images
+				? imageOrder(this.imageList, "solid", camera.eye, (asset) => this.imageTextures.has(asset))
+				: [];
+		if (images.length > 0) this.use(this.imageProgram, camera, false);
 		this.use(this.reflProgram, camera, false);
 		this.usualDepth(true);
 		gl.depthFunc(gl.LESS);
@@ -1310,6 +1317,7 @@ export class WebGl2View implements ViewRenderer {
 			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 			gl.uniformMatrix4fv(this.reflProgram.viewProj, false, face);
 			this.solids();
+			if (images.length > 0) this.reflectImages(images, face);
 		});
 		this.runs = culled;
 		gl.framebufferTexture2D(
@@ -3843,6 +3851,36 @@ export class WebGl2View implements ViewRenderer {
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 		gl.activeTexture(gl.TEXTURE0);
 		this.imageTextures.set(asset, texture);
+		// The reflection cube shows the images too: drawn again with this one.
+		if (this.imageList.some((quad) => quad.asset === asset)) this.reflAt = null;
+	}
+
+	/** `order`'s images on a face of the reflection cube, over its parts; the reflection program left in use. */
+	private reflectImages(order: number[], face: Float32Array): void {
+		const gl = this.gl;
+		gl.useProgram(this.imageProgram.program);
+		gl.uniformMatrix4fv(this.imageProgram.viewProj, false, face);
+		gl.enable(gl.BLEND);
+		gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+		gl.depthFunc(gl.LEQUAL);
+		gl.depthMask(false);
+		gl.bindVertexArray(this.imageVao);
+		gl.activeTexture(gl.TEXTURE2);
+		let bound = "";
+		for (const q of order) {
+			const asset = this.imageList[q].asset;
+			if (asset !== bound) {
+				gl.bindTexture(gl.TEXTURE_2D, this.imageTextures.get(asset) ?? null);
+				bound = asset;
+			}
+			gl.drawArrays(gl.TRIANGLES, q * 6, 6);
+		}
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindVertexArray(null);
+		gl.depthMask(true);
+		gl.depthFunc(gl.LESS);
+		gl.disable(gl.BLEND);
+		gl.useProgram(this.reflProgram.program);
 	}
 
 	/** One layer's images whose texture has arrived, onto their faces, farthest first; whether any was drawn. */
@@ -3936,6 +3974,8 @@ export class WebGl2View implements ViewRenderer {
 			gl.useProgram(prog.program);
 			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), block);
 		}
+		// The reflection cube was drawn with the material's plain pattern: again, with its texture.
+		this.reflAt = null;
 	}
 
 	destroy(): void {

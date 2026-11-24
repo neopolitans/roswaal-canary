@@ -77,6 +77,7 @@ import {
 	CASCADE_MAP,
 	type Camera,
 	CameraHeading,
+	CascadeCadence,
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
@@ -1511,6 +1512,7 @@ export class WebGpuView implements ViewRenderer {
 		// A near sky refill under way holds a group made with the old maps.
 		this.nearFill = null;
 		this.cascadeLast = new Float32Array(CASCADE_BLOCK);
+		this.cadence = new CascadeCadence();
 		this.onRedraw?.();
 	}
 
@@ -6012,6 +6014,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 	private cascadeGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
 	/** The cascades last drawn, to draw them again only when they moved. */
 	private cascadeLast: Float32Array = new Float32Array(CASCADE_BLOCK);
+	private cadence = new CascadeCadence();
 	/** The place's box, kept with its fingerprint. */
 	private box: { min: number[]; max: number[] } | null = null;
 
@@ -6020,7 +6023,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		// Shadows frozen from the Rendering panel: the maps drawn last are sampled as they are.
 		if (this.render.freezeShadows) return;
 		const l = this.lighting;
-		const block = cascadeBlock(
+		const fresh = cascadeBlock(
 			camera,
 			this.width / this.height,
 			l?.sun ?? [0, 1, 0],
@@ -6031,13 +6034,19 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			this.quality,
 			this.shadowMap,
 		);
-		if (!partsMoved && block.every((v, i) => v === this.cascadeLast[i])) return;
+		// While only the camera moves, the far cascades on a cadence: see CascadeCadence.
+		const step = this.cadence.next(fresh, this.cascadeLast, l?.sun ?? [0, 1, 0], partsMoved);
+		if (!step) return;
+		const { block, due } = step;
 		this.cascadeLast = block;
 		this.redrawn.sunMaps++;
 		const q = this.device.queue;
 		q.writeBuffer(this.cascadeUniform, 0, block);
+		// One frame more once the camera stops, for the cascades still behind.
+		if (step.again) this.onRedraw?.();
 		if (block[SUN_CASCADES.length * 16 + 7] !== 1) return;
 		this.cascadeGroups.forEach(({ buffer, group }, k) => {
+			if (!due[k]) return;
 			q.writeBuffer(buffer, 0, block.subarray(k * 16, k * 16 + 16));
 			const pass = encoder.beginRenderPass({
 				timestampWrites: this.stamp("shadows"),

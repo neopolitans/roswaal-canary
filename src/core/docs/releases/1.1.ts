@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.65",
+		date: "2026-11-24",
+		headline: "The sun's far shadows are drawn less often while only the camera moves.",
+		changed: [
+			"**While only the camera moves, the sun's shadow maps are drawn on a cadence**: the near one every frame, the middle one every second frame, the far one every third, each read as it was drawn. Once the camera stops, the next frame brings them all up to date; the place or the sun changing draws them all at once.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.64",
 		date: "2026-11-24",
 		headline:

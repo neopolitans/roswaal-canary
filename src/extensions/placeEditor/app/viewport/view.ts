@@ -1582,3 +1582,58 @@ export function renderLegend(mode: RenderMode): RenderLegend | null {
 	}
 	return null;
 }
+
+/**
+ * How often each sun cascade is drawn again while only the camera moves, in
+ * frames: the near one every frame, the next every second, the far one every
+ * third. A far cascade covers hundreds of studs, so a frame's step barely
+ * moves what it shows. The place or the sun changing draws them all.
+ */
+export const CASCADE_EVERY = [1, 2, 3] as const;
+
+/** Whether two blocks are the same, value for value. */
+function sameBlock(a: Float32Array, b: Float32Array): boolean {
+	return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * Which sun cascades a frame draws, and the block the shaders then read:
+ * each cascade's matrix and texel as its map was last drawn, so a cascade
+ * not drawn this frame is read as it is in its map. When the camera stops,
+ * the frame after draws every cascade still behind (`again` asks for it).
+ */
+export class CascadeCadence {
+	private fresh: Float32Array | null = null;
+	private key = "";
+	private frame = 0;
+
+	/**
+	 * `fresh`: the block for this frame's camera; `last`: the block the
+	 * shaders read now; `sun`: the sun's way. Null when nothing is to be drawn.
+	 */
+	next(
+		fresh: Float32Array,
+		last: Float32Array,
+		sun: readonly number[],
+		partsMoved: boolean,
+	): { block: Float32Array; due: boolean[]; again: boolean } | null {
+		const n = SUN_CASCADES.length;
+		const moved = this.fresh === null || !sameBlock(fresh, this.fresh);
+		this.fresh = fresh;
+		// The sun, the softness, the cascades' reach or the map's size: all again.
+		const key = `${sun.join(",")}|${Array.from(fresh.subarray(n * 16)).join(",")}`;
+		const changed = key !== this.key;
+		this.key = key;
+		if (!partsMoved && !changed && sameBlock(fresh, last)) return null;
+		const all = partsMoved || changed || !moved;
+		const due = SUN_CASCADES.map((_, k) => all || this.frame % CASCADE_EVERY[k] === 0);
+		this.frame++;
+		const block = fresh.slice();
+		due.forEach((drawn, k) => {
+			if (drawn) return;
+			block.set(last.subarray(k * 16, k * 16 + 16), k * 16);
+			block[n * 16 + 4 + k] = last[n * 16 + 4 + k];
+		});
+		return { block, due, again: !due.every(Boolean) };
+	}
+}

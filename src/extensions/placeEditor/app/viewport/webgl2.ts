@@ -56,6 +56,7 @@ import {
 	CASCADE_MAP,
 	type Camera,
 	CameraHeading,
+	CascadeCadence,
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
@@ -1216,6 +1217,7 @@ export class WebGl2View implements ViewRenderer {
 		this.gl.deleteTexture(this.sunMaps);
 		this.makeCascades();
 		this.cascadeLast = new Float32Array(CASCADE_BLOCK);
+		this.cadence = new CascadeCadence();
 		this.onRedraw?.();
 	}
 
@@ -3040,6 +3042,7 @@ export class WebGl2View implements ViewRenderer {
 	private sunMaps: WebGLTexture | null = null;
 	/** The cascades last drawn: what the shaders read, and to draw them again only when they moved. */
 	private cascadeLast: Float32Array = new Float32Array(CASCADE_BLOCK);
+	private cadence = new CascadeCadence();
 	/** The place's box, kept with its fingerprint. */
 	private box: { min: number[]; max: number[] } | null = null;
 
@@ -3082,9 +3085,14 @@ export class WebGl2View implements ViewRenderer {
 			this.quality,
 			this.shadowMap,
 		);
-		if (!partsMoved && block.every((v, i) => v === this.cascadeLast[i])) return;
-		this.cascadeLast = block;
-		if (block[SUN_CASCADES.length * 16 + 7] !== 1 || !this.sunMaps) return;
+		// While only the camera moves, the far cascades on a cadence: see CascadeCadence.
+		const step = this.cadence.next(block, this.cascadeLast, l?.sun ?? [0, 1, 0], partsMoved);
+		if (!step) return;
+		const due = step.due;
+		this.cascadeLast = step.block;
+		// One frame more once the camera stops, for the cascades still behind.
+		if (step.again) this.onRedraw?.();
+		if (step.block[SUN_CASCADES.length * 16 + 7] !== 1 || !this.sunMaps) return;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.skyFbo);
 		gl.drawBuffers([gl.NONE]);
 		gl.readBuffer(gl.NONE);
@@ -3095,9 +3103,14 @@ export class WebGl2View implements ViewRenderer {
 		gl.depthMask(true);
 		gl.clearDepth(1);
 		SUN_CASCADES.forEach((_, k) => {
+			if (!due[k]) return;
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this.sunMaps, 0, k);
 			gl.clear(gl.DEPTH_BUFFER_BIT);
-			gl.uniformMatrix4fv(this.depthProgram.viewProj, false, block.subarray(k * 16, k * 16 + 16));
+			gl.uniformMatrix4fv(
+				this.depthProgram.viewProj,
+				false,
+				step.block.subarray(k * 16, k * 16 + 16),
+			);
 			this.solids();
 		});
 		gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, null, 0, 0);

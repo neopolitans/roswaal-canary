@@ -297,7 +297,7 @@ ${OVERDRAW_WGSL}
 const SAMPLES = 4;
 
 /** The pipelines built again for one set of switches: see WebGpuView.litFor. */
-type LitKind = "solid" | "solidWrite" | "blended" | "glassBlended";
+type LitKind = "solid" | "solidWrite" | "blended" | "glassBlended" | "lamps";
 /** Where the material table starts in the frame's uniforms, in bytes: after `U`'s two matrices and fifteen vec4s. */
 const UNIFORM_MATERIALS = 368;
 /**
@@ -439,6 +439,39 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		shine = shine + lit * hf(pow(max(dot(n, normalize(l + v)), 0.0), gloss));
 	}
 	return Lamps(vec3f(sum) * 1.25, vec3f(shine) * 1.25);
+}
+// The lights' light from the half-size pass (FEATURE_BIT.halfLamps): rgb
+// the diffuse and the highlight, a the pass's distance from the eye.
+@group(0) @binding(18) var lampLight: texture_2d<f32>;
+@group(0) @binding(19) var lampShine: texture_2d<f32>;
+// A pixel's lamp light: the four nearest of the half-size pass, weighted as
+// bilinear filtering would, each only where its distance from the eye agrees
+// with this pixel's; where none does, as at an edge, worked out here.
+fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
+	if (has(${FEATURE_BIT.halfLamps}u)) {
+		let size = vec2i(textureDimensions(lampLight));
+		let at = i.clip.xy * 0.5 - 0.5;
+		let base = vec2i(floor(at));
+		let f = fract(at);
+		let dist = length(u.camPos.xyz - i.world);
+		let near = max(0.05, dist * 0.015);
+		var diffuse = vec3f(0.0);
+		var shine = vec3f(0.0);
+		var total = 0.0;
+		for (var k = 0; k < 4; k++) {
+			let o = vec2i(k & 1, k >> 1u);
+			let p = clamp(base + o, vec2i(0), size - vec2i(1));
+			let l = textureLoad(lampLight, p, 0);
+			if (abs(l.a - dist) < near) {
+				let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
+				diffuse = diffuse + l.rgb * w;
+				shine = shine + textureLoad(lampShine, p, 0).rgb * w;
+				total = total + w;
+			}
+		}
+		if (total > 0.01) { return Lamps(diffuse / total, shine / total); }
+	}
+	return partLights(i.world, n, v, gloss);
 }
 // The Rendering panel's heatmaps: the lights p is tested against, as
 // partLights walks them; those that reach it; and those weighed by how
@@ -722,6 +755,22 @@ struct ReflU { viewProj: mat4x4f };
 	return o;
 }
 @fragment fn fsRefl(i: VOut) -> @location(0) vec4f { return vec4f(surface(i).rgb, 1.0); }
+// The half-size lamp pass: each solid part's lights at half the frame's
+// pixels, as surface() works them out, and its distance from the eye.
+struct LampOut { @location(0) light: vec4f, @location(1) shine: vec4f };
+@fragment fn fsLamps(i: VOut) -> LampOut {
+	let a = u.mats[(i.look & 255u) * 3u];
+	let faceN = normalize(cross(dpdx(i.world), dpdy(i.world)));
+	var n = normalize(i.normal);
+	if (!has(${FEATURE_BIT.smooth}u)) { n = select(-faceN, faceN, dot(faceN, n) >= 0.0); }
+	let toEye = u.camPos.xyz - i.world;
+	let d = length(toEye);
+	let l = partLights(i.world, n, toEye / max(d, 1e-4), a.y * 2.0);
+	var o: LampOut;
+	o.light = vec4f(l.diffuse, d);
+	o.shine = vec4f(l.spec, 1.0);
+	return o;
+}
 // Highlight instances' mask: each pixel the Highlight of the part there, 1 to
 // 31; 0, none. hlRows, by part row: its Highlight, 256 for a part with a
 // Transparency, 512 for DepthMode AlwaysOnTop. hl.info.x: parts with a
@@ -1080,7 +1129,7 @@ fn surface(i: VOut) -> vec4f {
 		let lit = u.sunColour.rgb * ndl * sunK;
 		let fill = (vec3f(u.fog.w, u.fogColour.w, u.hazeColour.w) + u.ambient.rgb * max(vis, ${SKY_SEEN_LEAST})) * (0.9 + 0.1 * n.y);
 		var lamps = Lamps(vec3f(0.0), vec3f(0.0));
-		if (has(${FEATURE_BIT.pointLights}u | ${FEATURE_BIT.spotLights}u | ${FEATURE_BIT.surfaceLights}u)) { lamps = partLights(i.world, n, v, a.y * 2.0); }
+		if (has(${FEATURE_BIT.pointLights}u | ${FEATURE_BIT.spotLights}u | ${FEATURE_BIT.surfaceLights}u)) { lamps = lampsAt(i, n, v, a.y * 2.0); }
 		let lampShine = select(0.0, 1.0, has(${FEATURE_BIT.lightHighlights}u));
 		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps.diffuse) + mix(vec3f(1.0), albedo, a.z) * (spec * lit + lamps.spec * a.x * pat.y * 4.6 * lampShine);
 		if (has(${FEATURE_BIT.reflections}u)) {
@@ -1987,6 +2036,7 @@ export class WebGpuView implements ViewRenderer {
 			solidWrite: this.solidWrite,
 			blended: this.blended,
 			glassBlended: this.glassBlended,
+			lamps: this.lampsPipe,
 		};
 		const built = this.litBuilt.get(bits);
 		if (built) return built;
@@ -2168,9 +2218,12 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 15, visibility: STAGE.FRAGMENT, sampler: {} },
 				{ binding: 16, visibility: STAGE.FRAGMENT, texture: { viewDimension: "cube" } },
 				{ binding: 17, visibility: STAGE.FRAGMENT, sampler: {} },
+				{ binding: 18, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+				{ binding: 19, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
 			],
 		});
 		this.layout = layout;
+		this.makeLampTargets();
 		this.makeReflections(module, layout, buffers);
 		this.makeAntialias();
 		// The lighting cells, two: one read while the other is filled. See fillCells.
@@ -2220,6 +2273,21 @@ export class WebGpuView implements ViewRenderer {
 				primitive: { topology: "triangle-list", cullMode: "back" },
 				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "equal" },
 				multisample: { count: this.samples },
+			}),
+		);
+		// The half-size lamp pass (see lampsAt): one sample, its own depth.
+		this.pipeline(
+			(p) => (this.lampsPipe = p),
+			this.lit("lamps", {
+				layout: pipelineLayout,
+				vertex: { module, entryPoint: "vs", buffers },
+				fragment: {
+					module,
+					entryPoint: "fsLamps",
+					targets: [{ format: "rgba16float" }, { format: "rgba16float" }],
+				},
+				primitive: { topology: "triangle-list", cullMode: "back" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
 			}),
 		);
 		// The lean path's (see leanDepth): shaded and depth-tested in one draw,
@@ -3264,6 +3332,8 @@ fn at(c: vec2i) -> u32 {
 	resize(width: number, height: number): void {
 		this.width = Math.max(1, width);
 		this.height = Math.max(1, height);
+		this.makeLampTargets();
+		if (this.bind) this.rebind();
 		this.makeAaTargets();
 		this.makeUpTargets();
 		for (const t of [
@@ -3647,6 +3717,9 @@ fn at(c: vec2i) -> u32 {
 		const culling = performance.now();
 		this.cull(camera, [...this.draws, ...this.glass]);
 		this.cpuCulling += performance.now() - culling;
+		// The lights at half size, before the passes that read them.
+		if (this.litBits() & FEATURE_BIT.halfLamps && !this.probe && !heat && !wire)
+			this.drawLamps(encoder, lit.lamps);
 		// Occlusion: the solid parts' depth first, in a pass of its own.
 		const passes = passesOf(this.render.features);
 		// Made in every view, so occlusion works in each; only the picture's
@@ -4964,12 +5037,23 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
 	/** The shaders' textures and samplers, made again when one is replaced. */
 	private rebind(): void {
-		this.bind = this.bindWith(this.reflCube);
+		this.bind = this.bindWith(this.reflCube, this.skyUniform, true);
+		this.lampBind = this.bindWith(this.reflCube);
 		// The cube's own faces are drawn with a blank one in its place.
 		this.reflBind = this.bindWith(this.reflBlank);
 	}
 
-	private bindWith(cube: GPUTexture, sky: GPUBuffer = this.skyUniform): GPUBindGroup {
+	/**
+	 * `lamps`: the half-size lamp pass's textures, for the camera's passes;
+	 * otherwise blank ones, for a pass that draws them or never reads them.
+	 */
+	private bindWith(
+		cube: GPUTexture,
+		sky: GPUBuffer = this.skyUniform,
+		lamps = false,
+	): GPUBindGroup {
+		const light = lamps ? this.lampLight : this.lampBlank;
+		const shine = lamps ? this.lampShine : this.lampBlank;
 		return this.device.createBindGroup({
 			layout: this.layout,
 			entries: [
@@ -4991,8 +5075,72 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				{ binding: 15, resource: this.cellSampler },
 				{ binding: 16, resource: cube.createView({ dimension: "cube" }) },
 				{ binding: 17, resource: this.reflSampler },
+				{ binding: 18, resource: light.createView() },
+				{ binding: 19, resource: shine.createView() },
 			],
 		});
+	}
+
+	// -- the lamp light at half size: see lampsAt ---------------------------------------
+
+	private lampLight!: GPUTexture;
+	private lampShine!: GPUTexture;
+	private lampDepth!: GPUTexture;
+	private lampBlank!: GPUTexture;
+	/** Group 0 for the lamp pass, with blank lamp textures: it draws the real ones. */
+	private lampBind!: GPUBindGroup;
+	private lampsPipe!: GPURenderPipeline;
+
+	/** The lamp pass's targets, half the frame across and down. */
+	private makeLampTargets(): void {
+		const d = this.device;
+		for (const t of [this.lampLight, this.lampShine, this.lampDepth]) t?.destroy();
+		this.lampBlank ??= d.createTexture({
+			size: [1, 1],
+			format: "rgba16float",
+			usage: TEXTURE.TEXTURE_BINDING,
+		});
+		const size = [Math.max(1, Math.ceil(this.width / 2)), Math.max(1, Math.ceil(this.height / 2))];
+		const target = (format: GPUTextureFormat, binding: boolean) =>
+			d.createTexture({
+				size,
+				format,
+				usage: TEXTURE.RENDER_ATTACHMENT | (binding ? TEXTURE.TEXTURE_BINDING : 0),
+			});
+		this.lampLight = target("rgba16float", true);
+		this.lampShine = target("rgba16float", true);
+		this.lampDepth = target("depth32float", false);
+	}
+
+	/** The solid parts' lamp light at half size, for the camera's passes to read. */
+	private drawLamps(encoder: GPUCommandEncoder, pipe: GPURenderPipeline): void {
+		const pass = encoder.beginRenderPass({
+			colorAttachments: [
+				{
+					view: this.lampLight.createView(),
+					// No distance agrees with -1: nothing drawn there is worked out where it is read.
+					clearValue: { r: 0, g: 0, b: 0, a: -1 },
+					loadOp: "clear",
+					storeOp: "store",
+				},
+				{
+					view: this.lampShine.createView(),
+					clearValue: { r: 0, g: 0, b: 0, a: 0 },
+					loadOp: "clear",
+					storeOp: "store",
+				},
+			],
+			depthStencilAttachment: {
+				view: this.lampDepth.createView(),
+				depthClearValue: 0,
+				depthLoadOp: "clear",
+				depthStoreOp: "discard",
+			},
+		});
+		pass.setPipeline(pipe);
+		pass.setBindGroup(0, this.lampBind);
+		this.solids(pass);
+		pass.end();
 	}
 
 	// -- scene reflections: see PROBE_SIZE ----------------------------------------------

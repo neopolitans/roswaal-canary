@@ -35,6 +35,7 @@ export interface RenderFeatures {
 	spotLights: boolean;
 	surfaceLights: boolean;
 	lightHighlights: boolean;
+	fullResLamps: boolean;
 	neonGlow: boolean;
 	lavaGlow: boolean;
 	beams: boolean;
@@ -166,6 +167,12 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 			f("spotLights", "SpotLights", 4, "SpotLights, without shadows."),
 			f("surfaceLights", "SurfaceLights", 4, "SurfaceLights, without shadows."),
 			f("lightHighlights", "Light highlights", 4, "Each light's highlight on shiny materials."),
+			f(
+				"fullResLamps",
+				"Full-resolution light",
+				4,
+				"The lights worked out at every pixel. Off, at half the pixels across and down and filled in, which is faster at Native; WebGPU.",
+			),
 		],
 	},
 	{
@@ -359,6 +366,7 @@ export const LEVEL_ADDS: Partial<Record<FeatureKey, number>> = {
 	highlights: 8,
 	lightHighlights: 8,
 	bloom: 9,
+	fullResLamps: 18,
 	nearSkyMaps: 13,
 	particles: 16,
 	farShadows: 17,
@@ -463,6 +471,8 @@ export const FEATURE_BIT = {
 	unlit: 16384,
 	/** The place round the camera in reflections, from its cube: see PROBE_SIZE. */
 	sceneReflect: 131072,
+	/** The lights' light read from the half-size pass, not worked out at each pixel: see lampsAt. */
+	halfLamps: 262144,
 } as const;
 
 export function featureBits(features: RenderFeatures): number {
@@ -482,6 +492,11 @@ export function featureBits(features: RenderFeatures): number {
 		[on("spotLights"), FEATURE_BIT.spotLights],
 		[on("surfaceLights"), FEATURE_BIT.surfaceLights],
 		[on("lightHighlights"), FEATURE_BIT.lightHighlights],
+		// Only where a light is on: with none, there is no lamp light to halve.
+		[
+			!on("fullResLamps") && (on("pointLights") || on("spotLights") || on("surfaceLights")),
+			FEATURE_BIT.halfLamps,
+		],
 		[on("lavaGlow"), FEATURE_BIT.lava],
 		[on("neonGlow"), FEATURE_BIT.neonGlow],
 		[!on("thinWallsBlockSky"), FEATURE_BIT.leak],

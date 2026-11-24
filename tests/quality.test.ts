@@ -66,8 +66,10 @@ describe("quality levels", () => {
 	});
 
 	it("keep Fast (iPad)'s switches at Level 15", () => {
-		// Fast (iPad)'s, and Scene reflections, which came after it, under Sky reflections.
+		// Fast (iPad)'s, and Scene reflections, which came after it, under Sky
+		// reflections; and full-resolution light, from Level 18 since canary.61.
 		const fast: FeatureKey[] = [
+			"fullResLamps",
 			"softEdges",
 			"skyReflections",
 			"sceneReflections",

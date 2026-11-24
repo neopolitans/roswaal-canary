@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.61",
+		date: "2026-11-24",
+		headline: "Lamp light at half the pixels at Levels 1 to 17, for speed at high render scales.",
+		added: [
+			"**Full-resolution light**, a Rendering switch under Lights, on from Level 18. Off, the light of PointLights, SpotLights and SurfaceLights is worked out at half the pixels across and down and filled in, with each edge worked out at full size, so it costs about a quarter as much. WebGPU.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.60",
 		date: "2026-11-24",
 		headline: "Render scale: Dynamic, fewer pixels while frames do not fit and more once they do.",

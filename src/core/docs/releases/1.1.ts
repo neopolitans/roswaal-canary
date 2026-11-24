@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.43",
+		date: "2026-11-24",
+		headline: "Sun shadows cost less where they are plain.",
+		changed: [
+			"**The sun's sharp shadows read the shadow map less**: a face turned from the sun does not look its shadow up at all, and a point plainly in sun or shade takes four of the eight samples, the soft edges of shadows all eight. The pictures are the same.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.42",
 		date: "2026-11-24",
 		headline: "Particles' quads are built on the GPU.",

@@ -470,8 +470,8 @@ uniform mat4 cascViews[3];
 uniform vec4 cascFar;
 uniform vec4 cascTexel;
 const vec2 POISSON[8] = vec2[8](
-	vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
-	vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893));
+	vec2(-0.840, -0.074), vec2(0.962, -0.195), vec2(-0.203, 0.621), vec2(0.185, -0.893),
+	vec2(-0.326, -0.406), vec2(-0.696, 0.457), vec2(0.473, -0.480), vec2(0.519, 0.767));
 float cascadeSees(int k, vec3 p, vec3 n) {
 	float texel = cascTexel[k];
 	// As WebGpuView's cascadeSees: out along the normal by less where the sun
@@ -481,8 +481,11 @@ float cascadeSees(int k, vec3 p, vec3 n) {
 	vec4 c = cascViews[k] * vec4(p + n * texel * (0.5 + slope), 1.0);
 	vec3 q = c.xyz * 0.5 + 0.5;
 	float r = max(cascFar.w / texel, 1.5) / float(textureSize(sunMaps, 0).x);
+	// As WebGpuView's: four taps, and the other four only at a shadow's soft edge.
 	float seen = 0.0;
-	for (int j = 0; j < 8; j++) seen += texture(sunMaps, vec4(q.xy + POISSON[j] * r, float(k), q.z - 0.00005));
+	for (int j = 0; j < 4; j++) seen += texture(sunMaps, vec4(q.xy + POISSON[j] * r, float(k), q.z - 0.00005));
+	if (seen < 0.001 || seen > 3.999) return seen / 4.0;
+	for (int j = 4; j < 8; j++) seen += texture(sunMaps, vec4(q.xy + POISSON[j] * r, float(k), q.z - 0.00005));
 	return seen / 8.0;
 }
 float sunSees(vec3 p, vec3 n) {
@@ -605,7 +608,9 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		// reaches, and the sun where it does, as WebGpuView's surface; the
 		// switches as it leaves them out.
 		float vis = skyVisibility(world, n);
-		float sunK = sunSees(world, n);
+		// Turned from the sun, its light is nothing whatever the shadow: not looked up.
+		float sunK = 0.0;
+		if (ndl > 0.0) sunK = sunSees(world, n);
 		vec3 lit = L[1].rgb * ndl * sunK;
 		vec3 fill = (vec3(L[8].w, L[9].w, L[10].w) + L[2].rgb * max(vis, ${SKY_SEEN_LEAST})) * (0.9 + 0.1 * n.y);
 		vec3 lampShine = vec3(0.0);
@@ -867,7 +872,8 @@ void main() {
 	vec3 n = normalize(vNormal);
 	float ndl = max(dot(n, L[0].xyz), 0.0);
 	float vis = skyVisibility(vWorld, n);
-	float sunK = sunSees(vWorld, n);
+	float sunK = 0.0;
+	if (ndl > 0.0) sunK = sunSees(vWorld, n);
 	vec3 fill = (vec3(L[8].w, L[9].w, L[10].w) + L[2].rgb * max(vis, ${SKY_SEEN_LEAST})) * (0.9 + 0.1 * n.y);
 	vec3 lampShine;
 	vec3 lamps = vec3(0.0);

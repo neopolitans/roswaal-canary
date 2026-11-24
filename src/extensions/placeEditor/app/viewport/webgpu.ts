@@ -648,10 +648,12 @@ fn skyVisibilityMaps(p: vec3f, n: vec3f) -> f32 {
 struct CascU { views: array<mat4x4f, 3>, far: vec4f, texel: vec4f };
 @group(0) @binding(12) var sunMaps: texture_depth_2d_array;
 @group(0) @binding(13) var<uniform> cascU: CascU;
+// The first four round the edge, one each way, so they can stand for all eight (see cascadeSees).
 var<private> POISSON: array<vec2f, 8> = array<vec2f, 8>(
-	vec2f(-0.326, -0.406), vec2f(-0.840, -0.074), vec2f(-0.696, 0.457), vec2f(-0.203, 0.621),
-	vec2f(0.962, -0.195), vec2f(0.473, -0.480), vec2f(0.519, 0.767), vec2f(0.185, -0.893));
-// Cascade k's share of the sun reaching p: eight taps over ShadowSoftness's width.
+	vec2f(-0.840, -0.074), vec2f(0.962, -0.195), vec2f(-0.203, 0.621), vec2f(0.185, -0.893),
+	vec2f(-0.326, -0.406), vec2f(-0.696, 0.457), vec2f(0.473, -0.480), vec2f(0.519, 0.767));
+// Cascade k's share of the sun reaching p: eight taps over ShadowSoftness's width,
+// or four where those four agree, as they do wherever p is plainly in sun or shade.
 fn cascadeSees(k: i32, p: vec3f, n: vec3f) -> f32 {
 	let texel = cascU.texel[k];
 	// Pushed out along the normal by a texel or so, less where the sun is
@@ -664,7 +666,12 @@ fn cascadeSees(k: i32, p: vec3f, n: vec3f) -> f32 {
 	// map's texels blur into a straight edge rather than steps.
 	let r = max(cascU.far.w / texel, 1.5) / f32(textureDimensions(sunMaps).x);
 	var seen = 0.0;
-	for (var j = 0; j < 8; j++) {
+	for (var j = 0; j < 4; j++) {
+		seen = seen + textureSampleCompareLevel(sunMaps, skyCompare, uv + POISSON[j] * r, k, c.z - 0.00005);
+	}
+	// Only a shadow's soft edge takes the other four.
+	if (seen < 0.001 || seen > 3.999) { return seen / 4.0; }
+	for (var j = 4; j < 8; j++) {
 		seen = seen + textureSampleCompareLevel(sunMaps, skyCompare, uv + POISSON[j] * r, k, c.z - 0.00005);
 	}
 	return seen / 8.0;
@@ -1065,7 +1072,9 @@ fn surface(i: VOut) -> vec4f {
 		// reaches, and the sun where it does. A switch off leaves its light out
 		// of the lighting (renderFeatures.ts's litFor) or its bit unset.
 		let vis = skyVisibility(i.world, n);
-		let sunK = sunSees(i.world, n);
+		// Turned from the sun, its light is nothing whatever the shadow: not looked up.
+		var sunK = 0.0;
+		if (ndl > 0.0) { sunK = sunSees(i.world, n); }
 		let lit = u.sunColour.rgb * ndl * sunK;
 		let fill = (vec3f(u.fog.w, u.fogColour.w, u.hazeColour.w) + u.ambient.rgb * max(vis, ${SKY_SEEN_LEAST})) * (0.9 + 0.1 * n.y);
 		var lamps = Lamps(vec3f(0.0), vec3f(0.0));
@@ -1282,7 +1291,8 @@ struct IOut {
 	let n = normalize(i.normal);
 	let ndl = max(dot(n, u.sun.xyz), 0.0);
 	let vis = skyVisibility(i.world, n);
-	let sunK = sunSees(i.world, n);
+	var sunK = 0.0;
+	if (ndl > 0.0) { sunK = sunSees(i.world, n); }
 	var lamps = vec3f(0.0);
 	if (has(${FEATURE_BIT.pointLights}u | ${FEATURE_BIT.spotLights}u | ${FEATURE_BIT.surfaceLights}u)) { lamps = partLights(i.world, n, n, 1.0).diffuse; }
 	let fill = (vec3f(u.fog.w, u.fogColour.w, u.hazeColour.w) + u.ambient.rgb * max(vis, ${SKY_SEEN_LEAST})) * (0.9 + 0.1 * n.y);

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.52",
+		date: "2026-11-24",
+		headline: "Meshes and images download on the website, as canary.50 meant.",
+		fixed: [
+			'**Downloads on the website no longer fail with "Illegal invocation".** The browser refused how the downloader called its own fetch, which the daemon never minds.',
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.51",
 		date: "2026-11-24",
 		headline: "Failed downloads say why, and occlusion culling is off on Apple's GPUs as meant.",

@@ -9,7 +9,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	ASSET_FOLDER,
@@ -346,3 +346,27 @@ class FakeEntry {
 		};
 	}
 }
+
+describe("the browser's own fetch", () => {
+	it("is called on its own, as a browser requires, not as the cache's method", async () => {
+		const roblox = fakeRoblox({});
+		// A browser's fetch throws when its `this` is anything but the global scope.
+		const strict = function (this: unknown, input: string | URL, init?: RequestInit) {
+			if (this !== undefined && this !== globalThis)
+				throw new TypeError("Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation");
+			return roblox.fetch(input, init);
+		};
+		vi.stubGlobal("fetch", strict);
+		try {
+			const assets = new AssetCache({
+				token: async () => "access-token",
+				shelf: browserShelf(async () => new FakeDir("") as unknown as FileSystemDirectoryHandle),
+			});
+			expect(await assets.fetchAll("/p", ["31"])).toEqual({
+				"31": { state: "ready", assetTypeId: 4 },
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});

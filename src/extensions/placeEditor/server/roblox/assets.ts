@@ -136,7 +136,9 @@ export class AssetCache {
 	constructor(options: AssetCacheOptions) {
 		this.token = options.token;
 		this.shelf = options.shelf;
-		this.fetch = options.fetch ?? fetch;
+		// Called on its own, never as this object's method: a browser refuses that
+		// ("Illegal invocation"), where Node does not mind.
+		this.fetch = options.fetch ?? ((input, init) => fetch(input, init));
 		this.now = options.now ?? Date.now;
 	}
 

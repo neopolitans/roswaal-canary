@@ -29,6 +29,72 @@ export const EFFECT_VERTEX = 9;
 /** Four vertices a quad, drawn as two triangles by `quadIndices`. */
 export const QUAD_VERTICES = 4;
 
+/**
+ * Words a particle, drawn as one instance whose quad the vertex shader
+ * builds (PARTICLE_CORNERS): its centre and half its size, its velocity and
+ * rotation, Squash across and up, the flipbook frame's image rectangle, its
+ * colour as RGBA8, LightEmission, LightInfluence and Brightness, and its
+ * Orientation (0 FacingCamera, 1 FacingCameraWorldUp, 2 VelocityParallel,
+ * 3 VelocityPerpendicular). Laying out four corners here cost 20,000
+ * particles about 2 ms a frame on a desktop, most of their time.
+ */
+export const PARTICLE_INSTANCE = 20;
+
+/** The six corners of a particle's two triangles, as the shaders take them: across, up. */
+export const PARTICLE_CORNERS: readonly (readonly [number, number])[] = [
+	[-1, 1],
+	[1, 1],
+	[1, -1],
+	[-1, 1],
+	[1, -1],
+	[-1, -1],
+];
+
+/**
+ * A particle's corner where the shaders put it, and its image position: the
+ * same arithmetic as vsParticle (WGSL) and VS_PARTICLE (GLSL), for tests.
+ * `p` is the instance's words; `right` and `up` the view's, `eye` the camera.
+ */
+export function particleCorner(
+	p: ArrayLike<number>,
+	corner: number,
+	view: { right: number[]; up: number[]; eye: number[] },
+): { position: number[]; uv: number[] } {
+	const [cx, cy] = PARTICLE_CORNERS[corner];
+	const pos = [p[0], p[1], p[2]];
+	const half = p[3];
+	const v = [p[4], p[5], p[6]];
+	const mode = p[18];
+	const speed = Math.hypot(v[0], v[1], v[2]);
+	let ax = view.right;
+	let ay = view.up;
+	if (mode > 0.5 && mode < 1.5) {
+		const to = unit([view.eye[0] - pos[0], 0, view.eye[2] - pos[2]]);
+		if (to[0] !== 0 || to[2] !== 0) ax = [to[2], 0, -to[0]];
+		ay = [0, 1, 0];
+	} else if (mode > 1.5 && mode < 2.5 && speed > 1e-6) {
+		ay = [v[0] / speed, v[1] / speed, v[2] / speed];
+		const side = unit(
+			cross(ay, [view.eye[0] - pos[0], view.eye[1] - pos[1], view.eye[2] - pos[2]]),
+		);
+		if (side[0] !== 0 || side[1] !== 0 || side[2] !== 0) ax = side;
+	} else if (mode > 2.5 && speed > 1e-6) {
+		const n = [v[0] / speed, v[1] / speed, v[2] / speed];
+		const refAxis = Math.abs(n[1]) < 0.99 ? [0, 1, 0] : [1, 0, 0];
+		ax = unit(cross(refAxis, n));
+		ay = cross(n, ax);
+	}
+	const c = Math.cos(p[7]) * half;
+	const s = Math.sin(p[7]) * half;
+	const position = [0, 1, 2].map(
+		(k) => pos[k] + (ax[k] * c - ay[k] * s) * p[8] * cx + (ay[k] * c + ax[k] * s) * p[9] * cy,
+	);
+	return {
+		position,
+		uv: [cx < 0 ? p[10] : p[10] + p[12], cy > 0 ? p[11] : p[11] + p[13]],
+	};
+}
+
 /** The most particles one emitter keeps alive, and the most in the whole view. */
 export const PARTICLES_PER_EMITTER = 1000;
 export const PARTICLES_MOST = 20000;
@@ -78,19 +144,27 @@ export function quadIndices(quads: number): Uint32Array {
 	return out;
 }
 
-/** A run of quads drawn with one image. */
+/** A run of quads (a beam's) or particle instances drawn with one image. */
 export interface EffectBatch {
+	kind: "quads" | "particles";
 	/** The image's asset id, or one of the stand-ins. */
 	texture: string;
+	/** In quads, or in instances. */
 	first: number;
 	count: number;
 }
 
 /** One frame of effects, as the renderers draw them. */
 export interface EffectFrame {
-	/** `quads` quads of `QUAD_VERTICES` vertices of `EFFECT_VERTEX` words. */
+	/** `quads` quads (beams') of `QUAD_VERTICES` vertices of `EFFECT_VERTEX` words. */
 	vertices: Float32Array;
 	quads: number;
+	/** `drawn` particles of `PARTICLE_INSTANCE` words, the quads built from them by the shader. */
+	instances: Float32Array;
+	drawn: number;
+	/** The view's right and up, which a particle facing the camera is drawn along. */
+	right: number[];
+	up: number[];
 	batches: EffectBatch[];
 	/** Beams drawn, and particles alive in the simulation. */
 	beams: number;
@@ -300,6 +374,8 @@ export class EffectsSim {
 	private elapsed = 0;
 	private vertices = new Float32Array(0);
 	private words = new Uint32Array(0);
+	private instances = new Float32Array(0);
+	private instanceWords = new Uint32Array(0);
 	/** Particles alive across every emitter. */
 	private alive = 0;
 
@@ -368,8 +444,12 @@ export class EffectsSim {
 		};
 
 		let moving = false;
-		const batches: (EffectBatch & { far: number; fill: (at: number) => number })[] = [];
+		const batches: (Omit<EffectBatch, "first" | "count"> & {
+			far: number;
+			fill: (at: number) => number;
+		})[] = [];
 		let quads = 0;
+		let instances = 0;
 		if (show.particles) {
 			for (const em of this.emitters) {
 				const d = Math.hypot(em.centre[0] - eye[0], em.centre[1] - eye[1], em.centre[2] - eye[2]);
@@ -387,13 +467,12 @@ export class EffectsSim {
 				const count = em.count;
 				const texture = em.def.texture && ready(em.def.texture) ? em.def.texture : FALLBACK_DOT;
 				batches.push({
+					kind: "particles",
 					texture,
-					first: 0,
-					count,
 					far: d - em.def.zOffset,
-					fill: (at) => this.particleQuads(em, at, eye, right, up, forward),
+					fill: (at) => this.particleInstances(em, at, eye, forward),
 				});
-				quads += count;
+				instances += count;
 			}
 		} else for (const em of this.emitters) if (em.awake) this.sleep(em);
 
@@ -415,34 +494,44 @@ export class EffectsSim {
 				if (has && beam.textureSpeed !== 0) moving = true;
 				beams++;
 				batches.push({
+					kind: "quads",
 					texture,
-					first: 0,
-					count: beam.segments,
 					far: Math.hypot(mid[0] - eye[0], mid[1] - eye[1], mid[2] - eye[2]) - beam.zOffset,
 					fill: (at) => this.beamQuads(beam, at, eye, has),
 				});
 				quads += beam.segments;
 			}
 
-		this.room(quads);
+		this.room(quads, instances);
 		// Farthest first: blended and writing no depth, the nearer has to come last.
 		batches.sort((a, b) => b.far - a.far);
-		let at = 0;
+		const at = { quads: 0, particles: 0 };
 		const out: EffectBatch[] = [];
 		const filling = performance.now();
 		for (const b of batches) {
-			const made = b.fill(at);
+			const from = at[b.kind];
+			const made = b.fill(from);
 			if (made === 0) continue;
 			const prev = out[out.length - 1];
-			if (prev && prev.texture === b.texture && prev.first + prev.count === at) prev.count += made;
-			else out.push({ texture: b.texture, first: at, count: made });
-			at += made;
+			if (
+				prev &&
+				prev.kind === b.kind &&
+				prev.texture === b.texture &&
+				prev.first + prev.count === from
+			)
+				prev.count += made;
+			else out.push({ kind: b.kind, texture: b.texture, first: from, count: made });
+			at[b.kind] += made;
 		}
-		// particleQuads counts its sorting apart: the rest is laying out.
+		// particleInstances counts its sorting apart: the rest is laying out.
 		timing.quads = Math.max(0, performance.now() - filling - timing.sort);
 		return {
-			vertices: this.vertices.subarray(0, at * QUAD_VERTICES * EFFECT_VERTEX),
-			quads: at,
+			vertices: this.vertices.subarray(0, at.quads * QUAD_VERTICES * EFFECT_VERTEX),
+			quads: at.quads,
+			instances: this.instances.subarray(0, at.particles * PARTICLE_INSTANCE),
+			drawn: at.particles,
+			right,
+			up,
 			batches: out,
 			beams,
 			particles: this.alive,
@@ -450,12 +539,18 @@ export class EffectsSim {
 		};
 	}
 
-	/** Room in the buffer for `quads` quads. */
-	private room(quads: number): void {
+	/** Room in the buffers for `quads` quads and `instances` particles. */
+	private room(quads: number, instances: number): void {
 		const need = quads * QUAD_VERTICES * EFFECT_VERTEX;
-		if (this.vertices.length >= need) return;
-		this.vertices = new Float32Array(Math.max(need, this.vertices.length * 2));
-		this.words = new Uint32Array(this.vertices.buffer);
+		if (this.vertices.length < need) {
+			this.vertices = new Float32Array(Math.max(need, this.vertices.length * 2));
+			this.words = new Uint32Array(this.vertices.buffer);
+		}
+		const room = instances * PARTICLE_INSTANCE;
+		if (this.instances.length < room) {
+			this.instances = new Float32Array(Math.max(room, this.instances.length * 2));
+			this.instanceWords = new Uint32Array(this.instances.buffer);
+		}
 	}
 
 	/** An emitter out of reach: its particles let go. */
@@ -554,22 +649,25 @@ export class EffectsSim {
 	private keys = new Float64Array(0);
 	private colour = [0, 0, 0];
 
-	/** An emitter's particles as quads from quad `at`, farthest first; how many were laid out. */
-	private particleQuads(
-		em: Emitter,
-		at: number,
-		eye: number[],
-		right: number[],
-		up: number[],
-		forward: number[],
-	): number {
+	/**
+	 * An emitter's particles as instances from instance `at`, farthest first;
+	 * how many were laid out. The quads are the shader's: see particleCorner.
+	 */
+	private particleInstances(em: Emitter, at: number, eye: number[], forward: number[]): number {
 		const def = em.def;
 		const data = em.data;
 		const n = em.count;
 		if (this.keys.length < n) this.keys = new Float64Array(n * 2);
 		const sorting = performance.now();
 		const keys = this.keys;
+		// LightEmission 1 is drawn added, keeping all of what is behind: in any
+		// order it comes to the same, so its particles are not sorted.
+		const added = def.lightEmission >= 1;
 		for (let i = 0; i < n; i++) {
+			if (added) {
+				keys[i] = i;
+				continue;
+			}
 			const o = i * P;
 			const dx = data[o] - eye[0];
 			const dy = data[o + 1] - eye[1];
@@ -578,10 +676,10 @@ export class EffectsSim {
 		}
 		// The engine's own numeric sort, with no function to call: a sort by a
 		// comparison function took 2 ms of 4.6 for 20,000 particles (Edge, 23 Nov 2026).
-		const sorted = keys.subarray(0, n).sort();
+		const sorted = added ? keys.subarray(0, n) : keys.subarray(0, n).sort();
 		this.timing.sort += performance.now() - sorting;
-		const v = this.vertices;
-		const w = this.words;
+		const v = this.instances;
+		const w = this.instanceWords;
 		const fb = def.flipbook;
 		const frames = fb.layout > 0 ? fb.columns * fb.rows : 1;
 		const colour = this.colour;
@@ -618,36 +716,6 @@ export class EffectsSim {
 				pz += (tz / dist) * z;
 				half *= (dist - z) / dist;
 			}
-			// Its two axes, by Orientation, then turned by its rotation (clockwise for positive).
-			let ax = right;
-			let ay = up;
-			const vx = data[o + 3];
-			const vy = data[o + 4];
-			const vz = data[o + 5];
-			const speed = Math.hypot(vx, vy, vz);
-			if (def.orientation === 1) {
-				const to = unit([eye[0] - px, 0, eye[2] - pz]);
-				ax = to[0] === 0 && to[2] === 0 ? right : [to[2], 0, -to[0]];
-				ay = [0, 1, 0];
-			} else if (def.orientation === 2 && speed > 1e-6) {
-				ay = [vx / speed, vy / speed, vz / speed];
-				const side = unit(cross(ay, [eye[0] - px, eye[1] - py, eye[2] - pz]));
-				ax = side[0] === 0 && side[1] === 0 && side[2] === 0 ? right : side;
-			} else if (def.orientation === 3 && speed > 1e-6) {
-				const n = [vx / speed, vy / speed, vz / speed];
-				const ref = Math.abs(n[1]) < 0.99 ? [0, 1, 0] : [1, 0, 0];
-				ax = unit(cross(ref, n));
-				ay = cross(n, ax);
-			}
-			const rot = data[o + ROT];
-			const c = Math.cos(rot) * half;
-			const s = Math.sin(rot) * half;
-			const rx0 = (ax[0] * c - ay[0] * s) * sx;
-			const rx1 = (ax[1] * c - ay[1] * s) * sx;
-			const rx2 = (ax[2] * c - ay[2] * s) * sx;
-			const ry0 = (ay[0] * c + ax[0] * s) * sy;
-			const ry1 = (ay[1] * c + ax[1] * s) * sy;
-			const ry2 = (ay[2] * c + ax[2] * s) * sy;
 			// The flipbook's frame, by FlipbookMode.
 			let u0 = 0;
 			let v0 = 0;
@@ -667,23 +735,28 @@ export class EffectsSim {
 				v0 = Math.floor(f / fb.columns) * dv;
 			}
 			colourAt(def.color, t, colour);
-			const word = packColour(colour, alpha);
-			let b = (at + made) * QUAD_VERTICES * EFFECT_VERTEX;
-			// Top left, top right, bottom right, bottom left.
-			for (let q = 0; q < 4; q++) {
-				const cx = q === 0 || q === 3 ? -1 : 1;
-				const cy = q < 2 ? 1 : -1;
-				v[b] = px + rx0 * cx + ry0 * cy;
-				v[b + 1] = py + rx1 * cx + ry1 * cy;
-				v[b + 2] = pz + rx2 * cx + ry2 * cy;
-				v[b + 3] = cx < 0 ? u0 : u0 + du;
-				v[b + 4] = cy > 0 ? v0 : v0 + dv;
-				w[b + 5] = word;
-				v[b + 6] = def.lightEmission;
-				v[b + 7] = def.lightInfluence;
-				v[b + 8] = def.brightness;
-				b += EFFECT_VERTEX;
-			}
+			// Its two axes, by Orientation, and its turn are the shader's: see particleCorner.
+			const b = (at + made) * PARTICLE_INSTANCE;
+			v[b] = px;
+			v[b + 1] = py;
+			v[b + 2] = pz;
+			v[b + 3] = half;
+			v[b + 4] = data[o + 3];
+			v[b + 5] = data[o + 4];
+			v[b + 6] = data[o + 5];
+			v[b + 7] = data[o + ROT];
+			v[b + 8] = sx;
+			v[b + 9] = sy;
+			v[b + 10] = u0;
+			v[b + 11] = v0;
+			v[b + 12] = du;
+			v[b + 13] = dv;
+			w[b + 14] = packColour(colour, alpha);
+			v[b + 15] = def.lightEmission;
+			v[b + 16] = def.lightInfluence;
+			v[b + 17] = def.brightness;
+			v[b + 18] = def.orientation;
+			v[b + 19] = 0;
 			made++;
 		}
 		return made;
@@ -823,8 +896,12 @@ export function flipbookFrame(
 
 /** Red, green and blue from 0 to 1 and an alpha, as one RGBA8 word. */
 export function packColour(rgb: number[], alpha: number): number {
-	const b = (x: number) => Math.round(Math.max(0, Math.min(1, x)) * 255);
-	return (b(rgb[0]) | (b(rgb[1]) << 8) | (b(rgb[2]) << 16) | (b(alpha) << 24)) >>> 0;
+	return (byte(rgb[0]) | (byte(rgb[1]) << 8) | (byte(rgb[2]) << 16) | (byte(alpha) << 24)) >>> 0;
+}
+
+/** 0 to 1 as 0 to 255. */
+function byte(x: number): number {
+	return Math.round(Math.max(0, Math.min(1, x)) * 255);
 }
 
 /**
@@ -861,14 +938,15 @@ export const FX_CURVE = { power: "3.4", knee: "0.33", lit: "0.5" } as const;
 export const EFFECT_COST = 4;
 
 /** Floats in the block the effects' shaders read: see `effectBlock`. */
-export const EFFECT_BLOCK = 16 + 4 * 5;
+export const EFFECT_BLOCK = 16 + 4 * 7;
 
 /**
  * The block the effects' shaders read: the view's matrix; the camera and
  * 2 to the ExposureCompensation; the light a lit effect is drawn in and the
  * Rendering panel's mode; Lighting's fog (start, end, on) and the haze's
  * density; the fog's colour and whether haze is drawn; the haze's colour and
- * a pixel's share of the render heatmap.
+ * a pixel's share of the render heatmap; the view's right and up, for the
+ * particles the shader turns to face the camera.
  */
 export function effectBlock(
 	viewProj: Float32Array,
@@ -887,6 +965,7 @@ export function effectBlock(
 	mode: number,
 	haze: boolean,
 	costShare: number,
+	axes: { right: number[]; up: number[] } = { right: [1, 0, 0], up: [0, 1, 0] },
 ): Float32Array {
 	const out = new Float32Array(EFFECT_BLOCK);
 	out.set(viewProj, 0);
@@ -895,5 +974,7 @@ export function effectBlock(
 	out.set([l.fog.start, l.fog.end, l.fog.on ? 1 : 0, l.hazeDensity], 24);
 	out.set([...l.fog.colour, haze ? 1 : 0], 28);
 	out.set([...l.hazeColour, costShare], 32);
+	out.set([...axes.right, 0], 36);
+	out.set([...axes.up, 0], 40);
 	return out;
 }

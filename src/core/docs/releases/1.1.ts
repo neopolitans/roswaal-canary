@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.42",
+		date: "2026-11-24",
+		headline: "Particles' quads are built on the GPU.",
+		changed: [
+			"**Particles take less of the page's time each frame**: each is sent to the GPU once, and the GPU builds its quad, turned by its Orientation and rotation, in both renderers. 20,000 particles went from 3.4 to 2.6 ms on a desktop, and send less to the GPU.",
+			"**Particles with LightEmission 1 are no longer sorted**: drawn added, they look the same in any order.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.41",
 		date: "2026-11-24",
 		headline: "The open place's 3D view lets go of the GPU while a benchmark runs.",

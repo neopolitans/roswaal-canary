@@ -22,6 +22,7 @@ import {
 	FALLBACK_WHITE,
 	FX_CURVE,
 	fallbackPixels,
+	PARTICLE_INSTANCE,
 	QUAD_VERTICES,
 	quadIndices,
 } from "./effects.js";
@@ -39,6 +40,7 @@ export const EFFECT_SHADER = /* wgsl */ `
 struct FxU {
 	viewProj: mat4x4f,
 	camPos: vec4f, light: vec4f, fog: vec4f, fogColour: vec4f, hazeColour: vec4f,
+	right: vec4f, up: vec4f,
 };
 @group(0) @binding(0) var<uniform> fx: FxU;
 @group(1) @binding(0) var image: texture_2d<f32>;
@@ -54,6 +56,53 @@ struct FxOut {
 	o.uv = uv;
 	o.colour = colour;
 	o.look = look;
+	return o;
+}
+// A particle's quad, built here from its instance (see effects.ts's
+// particleCorner, the same arithmetic): its axes by Orientation, turned by
+// its rotation, scaled by Squash, and its flipbook frame's corner.
+@vertex fn vsParticle(
+	@builtin(vertex_index) vi: u32,
+	@location(0) centre: vec4f, @location(1) motion: vec4f, @location(2) squash: vec2f,
+	@location(3) rect: vec4f, @location(4) colour: vec4f, @location(5) look: vec4f,
+) -> FxOut {
+	var corners = array<vec2f, 6>(
+		vec2f(-1.0, 1.0), vec2f(1.0, 1.0), vec2f(1.0, -1.0),
+		vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(-1.0, -1.0),
+	);
+	let k = corners[vi];
+	let p = centre.xyz;
+	let v = motion.xyz;
+	let mode = look.w;
+	let speed = length(v);
+	var ax = fx.right.xyz;
+	var ay = fx.up.xyz;
+	if (mode > 0.5 && mode < 1.5) {
+		let to = vec3f(fx.camPos.x - p.x, 0.0, fx.camPos.z - p.z);
+		if (length(to) > 1e-9) {
+			let u = normalize(to);
+			ax = vec3f(u.z, 0.0, -u.x);
+		}
+		ay = vec3f(0.0, 1.0, 0.0);
+	} else if (mode > 1.5 && mode < 2.5 && speed > 1e-6) {
+		ay = v / speed;
+		let side = cross(ay, fx.camPos.xyz - p);
+		if (length(side) > 1e-9) { ax = normalize(side); }
+	} else if (mode > 2.5 && speed > 1e-6) {
+		let n = v / speed;
+		let refAxis = select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(n.y) < 0.99);
+		ax = normalize(cross(refAxis, n));
+		ay = cross(n, ax);
+	}
+	let c = cos(motion.w) * centre.w;
+	let s = sin(motion.w) * centre.w;
+	let pos = p + (ax * c - ay * s) * squash.x * k.x + (ay * c + ax * s) * squash.y * k.y;
+	var o: FxOut;
+	o.clip = fx.viewProj * vec4f(pos, 1.0);
+	o.world = pos;
+	o.uv = vec2f(select(rect.x + rect.z, rect.x, k.x < 0.0), select(rect.y + rect.w, rect.y, k.y > 0.0));
+	o.colour = colour;
+	o.look = look.xyz;
 	return o;
 }
 // How much of the air's colour lies over a point this far off: the fog, or the haze.
@@ -105,6 +154,11 @@ export interface GpuEffectsHost {
 export class GpuEffects {
 	private sim = new EffectsSim(undefined);
 	private drawn!: GPURenderPipeline;
+	/** Particles: an instance each, the quad built by vsParticle. */
+	private particlePipe!: GPURenderPipeline;
+	private instances: GPUBuffer | null = null;
+	/** Instances the buffer holds room for. */
+	private instanceRoom = 0;
 	private layout: GPUBindGroupLayout;
 	private uniform: GPUBuffer;
 	private group: GPUBindGroup;
@@ -136,8 +190,50 @@ export class GpuEffects {
 			entries: [{ binding: 0, resource: { buffer: this.uniform } }],
 		});
 		const module = d.createShaderModule({ code: EFFECT_SHADER });
+		const pipeLayout = d.createPipelineLayout({
+			bindGroupLayouts: [this.layout, host.imageLayout],
+		});
+		const fragment: GPUFragmentState = {
+			module,
+			entryPoint: "fsFx",
+			targets: [
+				{
+					format: host.format,
+					blend: {
+						color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+						alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+					},
+				},
+			],
+		};
+		const stride = PARTICLE_INSTANCE * 4;
+		host.pipeline((p) => (this.particlePipe = p), {
+			layout: pipeLayout,
+			vertex: {
+				module,
+				entryPoint: "vsParticle",
+				buffers: [
+					{
+						arrayStride: stride,
+						stepMode: "instance",
+						attributes: [
+							{ shaderLocation: 0, offset: 0, format: "float32x4" },
+							{ shaderLocation: 1, offset: 16, format: "float32x4" },
+							{ shaderLocation: 2, offset: 32, format: "float32x2" },
+							{ shaderLocation: 3, offset: 40, format: "float32x4" },
+							{ shaderLocation: 4, offset: 56, format: "unorm8x4" },
+							{ shaderLocation: 5, offset: 60, format: "float32x4" },
+						],
+					},
+				],
+			},
+			fragment,
+			primitive: { topology: "triangle-list", cullMode: "none" },
+			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
+			multisample: { count: host.samples },
+		});
 		host.pipeline((p) => (this.drawn = p), {
-			layout: d.createPipelineLayout({ bindGroupLayouts: [this.layout, host.imageLayout] }),
+			layout: pipeLayout,
 			vertex: {
 				module,
 				entryPoint: "vsFx",
@@ -232,9 +328,17 @@ export class GpuEffects {
 			show,
 			ready,
 		);
-		this.last = { ...frame, draws: 0, quads: frame.quads };
-		if (frame.quads === 0) return;
+		this.last = { ...frame, draws: 0, quads: frame.quads + frame.drawn };
+		if (frame.quads === 0 && frame.drawn === 0) return;
 		const d = this.host.device;
+		if (frame.drawn > this.instanceRoom) {
+			this.instanceRoom = Math.max(frame.drawn, this.instanceRoom * 2, 256);
+			this.instances?.destroy();
+			this.instances = d.createBuffer({
+				size: this.instanceRoom * PARTICLE_INSTANCE * 4,
+				usage: BUFFER.VERTEX | BUFFER.COPY_DST,
+			});
+		}
 		if (frame.quads > this.room) {
 			this.room = Math.max(frame.quads, this.room * 2, 256);
 			this.vertices?.destroy();
@@ -250,9 +354,9 @@ export class GpuEffects {
 			});
 			d.queue.writeBuffer(this.indices, 0, indices);
 		}
-		if (!this.vertices || !this.indices) return;
 		const sending = performance.now();
-		d.queue.writeBuffer(this.vertices, 0, frame.vertices);
+		if (frame.quads > 0 && this.vertices) d.queue.writeBuffer(this.vertices, 0, frame.vertices);
+		if (frame.drawn > 0 && this.instances) d.queue.writeBuffer(this.instances, 0, frame.instances);
 		this.uploadMs = performance.now() - sending;
 		const viewProj = multiply(
 			perspective(FOV, aspect, camera.near, camera.far, true, true),
@@ -269,17 +373,31 @@ export class GpuEffects {
 				featureBits(render.features) & FEATURE_BIT.unlit ? 3 : renderDebug(render)[0],
 				airOn(render.features),
 				effectShare(mode),
+				frame,
 			),
 		);
-		pass.setPipeline(this.drawn);
 		pass.setBindGroup(0, this.group);
-		pass.setVertexBuffer(0, this.vertices);
-		pass.setIndexBuffer(this.indices, "uint32");
+		let bound: "quads" | "particles" | null = null;
 		for (const batch of frame.batches) {
 			const group = this.fallbacks.get(batch.texture) ?? this.host.imageGroup(batch.texture);
 			if (!group) continue;
+			// Beams' quads and particles' instances, farthest first, whichever comes next.
+			if (batch.kind !== bound) {
+				if (batch.kind === "particles") {
+					if (!this.instances || !this.particlePipe) continue;
+					pass.setPipeline(this.particlePipe);
+					pass.setVertexBuffer(0, this.instances);
+				} else {
+					if (!this.vertices || !this.indices) continue;
+					pass.setPipeline(this.drawn);
+					pass.setVertexBuffer(0, this.vertices);
+					pass.setIndexBuffer(this.indices, "uint32");
+				}
+				bound = batch.kind;
+			}
 			pass.setBindGroup(1, group);
-			pass.drawIndexed(batch.count * 6, 1, batch.first * 6);
+			if (batch.kind === "particles") pass.draw(6, batch.count, 0, batch.first);
+			else pass.drawIndexed(batch.count * 6, 1, batch.first * 6);
 			this.last.draws++;
 		}
 	}
@@ -295,6 +413,7 @@ export class GpuEffects {
 	destroy(): void {
 		this.vertices?.destroy();
 		this.indices?.destroy();
+		this.instances?.destroy();
 		this.uniform.destroy();
 	}
 }

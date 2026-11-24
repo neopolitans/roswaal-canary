@@ -17,8 +17,10 @@ import {
 	FALLBACK_WHITE,
 	flipbookFrame,
 	keyIndex,
+	PARTICLE_INSTANCE,
 	PARTICLES_PER_EMITTER,
 	packColour,
+	particleCorner,
 	QUAD_VERTICES,
 	quadIndices,
 	seeded,
@@ -131,7 +133,7 @@ describe("a beam's curve", () => {
 		expect(frame.quads).toBe(4);
 		expect(frame.beams).toBe(1);
 		// Untextured: plain white, and nothing to animate.
-		expect(frame.batches).toEqual([{ texture: FALLBACK_WHITE, first: 0, count: 4 }]);
+		expect(frame.batches).toEqual([{ kind: "quads", texture: FALLBACK_WHITE, first: 0, count: 4 }]);
 		expect(frame.moving).toBe(false);
 		const v = frame.vertices;
 		const at = (q: number, c: number) =>
@@ -303,7 +305,8 @@ describe("the simulation", () => {
 		const b = new EffectsSim({ beams: [], emitters: [emitter({ spread: [30, 30] })] });
 		const fa = a.frame(view, 0, show, () => false);
 		const fb = b.frame(view, 0, show, () => false);
-		expect(Array.from(fa.vertices)).toEqual(Array.from(fb.vertices));
+		expect(fa.drawn).toBeGreaterThan(0);
+		expect(Array.from(fa.instances)).toEqual(Array.from(fb.instances));
 	});
 	it("moves particles by speed, acceleration and drag", () => {
 		const e = emitter({
@@ -343,7 +346,7 @@ describe("the simulation", () => {
 		const sim = new EffectsSim({ beams: [], emitters: [faint] });
 		const frame = sim.frame(view, 0, show, () => false);
 		expect(frame.particles).toBeGreaterThan(0);
-		expect(frame.quads).toBe(0);
+		expect(frame.drawn).toBe(0);
 		const far = { ...view, eye: [0, 5, 5000], at: [0, 5, 4000] };
 		expect(sim.frame(far, 0.016, show, () => false).particles).toBe(0);
 		const off = new EffectsSim({ beams: [], emitters: [emitter()] });
@@ -372,12 +375,60 @@ describe("the simulation", () => {
 		});
 		const sim = new EffectsSim({ beams: [], emitters: [e] });
 		const frame = sim.frame(view, 0, show, () => false);
-		const v = frame.vertices;
-		const corner = (c: number) => Array.from(v.subarray(c * EFFECT_VERTEX, c * EFFECT_VERTEX + 3));
+		expect(frame.batches[0]).toMatchObject({ kind: "particles", first: 0 });
+		const v = frame.instances;
+		// Where the shaders put its corners: top left, then bottom right.
+		const corner = (c: number) =>
+			particleCorner(v.subarray(0, PARTICLE_INSTANCE), c, { ...frame, eye: view.eye }).position;
 		close(corner(0), [-1, 1, 0]);
 		close(corner(2), [1, -1, 0]);
-		const word = new Uint32Array(v.buffer, v.byteOffset, v.length)[5];
+		const word = new Uint32Array(v.buffer, v.byteOffset, v.length)[14];
 		expect(word).toBe(packColour([1, 0, 0], 0.5));
+	});
+	it("leaves an emitter drawn added (LightEmission 1) in the order it keeps", () => {
+		const sim = new EffectsSim({
+			beams: [],
+			emitters: [emitter({ lightEmission: 1, spread: [30, 30] })],
+		});
+		const frame = sim.frame(view, 0, show, () => false);
+		const kept = (
+			sim as unknown as { emitters: { data: Float32Array; count: number; cap: number }[] }
+		).emitters[0];
+		const P = kept.data.length / kept.cap;
+		expect(frame.drawn).toBeGreaterThan(3);
+		for (let i = 0; i < frame.drawn; i++)
+			expect(frame.instances[i * PARTICLE_INSTANCE]).toBeCloseTo(kept.data[i * P], 4);
+	});
+	it("turns a particle by Orientation as the shaders do", () => {
+		// An instance at the origin, 1 stud across, moving up at 3 studs a second.
+		const at = (orientation: number, rotation = 0) => {
+			const p = new Float32Array(PARTICLE_INSTANCE);
+			p.set([0, 0, 0, 0.5, 0, 3, 0, rotation, 1, 1, 0, 0, 1, 1]);
+			p[18] = orientation;
+			return p;
+		};
+		// A camera along +Z looking back down -Z, a little above.
+		const facing = { right: [1, 0, 0], up: [0, 1, 0], eye: [0, 2, 10] };
+		const top = (p: Float32Array) => particleCorner(p, 1, facing).position;
+		// FacingCamera: the view's own right and up.
+		close(top(at(0)), [0.5, 0.5, 0]);
+		// FacingCameraWorldUp: upright, its side square to the camera on the ground.
+		close(top(at(1)), [0.5, 0.5, 0]);
+		close(particleCorner(at(1), 1, { ...facing, eye: [10, 2, 0] }).position, [0, 0.5, -0.5]);
+		// VelocityParallel: its up along the velocity, its side square to it and the camera.
+		close(top(at(2)), [0.5, 0.5, 0]);
+		close(particleCorner(at(2), 1, { ...facing, eye: [10, 2, 0] }).position, [0, 0.5, -0.5]);
+		// VelocityPerpendicular: lying square to the velocity.
+		const flat = top(at(3));
+		expect(flat[1]).toBeCloseTo(0, 6);
+		// Rotation turns it clockwise, as Roblox does: a quarter turn takes the top right corner to the bottom right.
+		close(top(at(0, Math.PI / 2)), [0.5, -0.5, 0]);
+		// Squash and the image's rectangle.
+		const squashed = at(0);
+		squashed.set([0.5, 2, 0.25, 0.5, 0.25, 0.5], 8);
+		const c = particleCorner(squashed, 2, facing);
+		close(c.position, [0.25, -1, 0]);
+		close(c.uv, [0.5, 1]);
 	});
 });
 

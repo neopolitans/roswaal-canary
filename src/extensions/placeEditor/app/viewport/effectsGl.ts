@@ -18,6 +18,7 @@ import {
 	FALLBACK_WHITE,
 	FX_CURVE,
 	fallbackPixels,
+	PARTICLE_INSTANCE,
 	QUAD_VERTICES,
 	quadIndices,
 } from "./effects.js";
@@ -38,6 +39,53 @@ void main() {
 	mat4 viewProj = mat4(FX[0], FX[1], FX[2], FX[3]);
 	gl_Position = viewProj * vec4(pos, 1.0);
 	vWorld = pos; vUv = uv; vColour = colour; vLook = look;
+#ifdef LOG_DEPTH
+	vDepthW = 1.0 + gl_Position.w;
+#endif
+}`;
+
+/** A particle's quad, built from its instance: see effects.ts's particleCorner, the same arithmetic. */
+const VS_PARTICLE = `#version 300 es
+precision highp float;
+layout(location = 0) in vec4 centre; layout(location = 1) in vec4 motion; layout(location = 2) in vec2 squash;
+layout(location = 3) in vec4 rect; layout(location = 4) in vec4 colour; layout(location = 5) in vec4 look;
+uniform vec4 FX[${EFFECT_BLOCK / 4}];
+out vec3 vWorld; out vec2 vUv; out vec4 vColour; out vec3 vLook;
+#ifdef LOG_DEPTH
+out float vDepthW;
+#endif
+const vec2 CORNERS[6] = vec2[6](vec2(-1.0, 1.0), vec2(1.0, 1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(-1.0, -1.0));
+void main() {
+	vec2 k = CORNERS[gl_VertexID % 6];
+	vec3 p = centre.xyz;
+	vec3 v = motion.xyz;
+	float mode = look.w;
+	float speed = length(v);
+	vec3 ax = FX[9].xyz;
+	vec3 ay = FX[10].xyz;
+	if (mode > 0.5 && mode < 1.5) {
+		vec3 to = vec3(FX[4].x - p.x, 0.0, FX[4].z - p.z);
+		if (length(to) > 1e-9) { vec3 u = normalize(to); ax = vec3(u.z, 0.0, -u.x); }
+		ay = vec3(0.0, 1.0, 0.0);
+	} else if (mode > 1.5 && mode < 2.5 && speed > 1e-6) {
+		ay = v / speed;
+		vec3 side = cross(ay, FX[4].xyz - p);
+		if (length(side) > 1e-9) ax = normalize(side);
+	} else if (mode > 2.5 && speed > 1e-6) {
+		vec3 n = v / speed;
+		vec3 refAxis = abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+		ax = normalize(cross(refAxis, n));
+		ay = cross(n, ax);
+	}
+	float c = cos(motion.w) * centre.w;
+	float s = sin(motion.w) * centre.w;
+	vec3 pos = p + (ax * c - ay * s) * squash.x * k.x + (ay * c + ax * s) * squash.y * k.y;
+	mat4 viewProj = mat4(FX[0], FX[1], FX[2], FX[3]);
+	gl_Position = viewProj * vec4(pos, 1.0);
+	vWorld = pos;
+	vUv = vec2(k.x < 0.0 ? rect.x : rect.x + rect.z, k.y > 0.0 ? rect.y : rect.y + rect.w);
+	vColour = colour;
+	vLook = look.xyz;
 #ifdef LOG_DEPTH
 	vDepthW = 1.0 + gl_Position.w;
 #endif
@@ -95,6 +143,13 @@ export class GlEffects {
 	private program: WebGLProgram;
 	private block: WebGLUniformLocation | null;
 	private logFar: WebGLUniformLocation | null;
+	/** Particles: an instance each, the quad built by VS_PARTICLE. */
+	private particleProgram: WebGLProgram;
+	private particleBlock: WebGLUniformLocation | null;
+	private particleLogFar: WebGLUniformLocation | null;
+	private particleVao: WebGLVertexArrayObject;
+	private instances: WebGLBuffer;
+	private instanceRoom = 0;
 	private vao: WebGLVertexArrayObject;
 	private vertices: WebGLBuffer;
 	private indices: WebGLBuffer;
@@ -122,15 +177,26 @@ export class GlEffects {
 				throw new Error(gl.getShaderInfoLog(s) ?? "effects shader");
 			return s;
 		};
-		const program = gl.createProgram()!;
-		gl.attachShader(program, compile(gl.VERTEX_SHADER, VS_FX));
-		gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FS_FX));
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS))
-			throw new Error(gl.getProgramInfoLog(program) ?? "effects link");
+		const link = (vs: string) => {
+			const program = gl.createProgram()!;
+			gl.attachShader(program, compile(gl.VERTEX_SHADER, vs));
+			gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FS_FX));
+			gl.linkProgram(program);
+			if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+				throw new Error(gl.getProgramInfoLog(program) ?? "effects link");
+			return program;
+		};
+		const program = link(VS_FX);
 		this.program = program;
 		this.block = gl.getUniformLocation(program, "FX[0]") ?? gl.getUniformLocation(program, "FX");
 		this.logFar = gl.getUniformLocation(program, "logFar");
+		this.particleProgram = link(VS_PARTICLE);
+		this.particleBlock =
+			gl.getUniformLocation(this.particleProgram, "FX[0]") ??
+			gl.getUniformLocation(this.particleProgram, "FX");
+		this.particleLogFar = gl.getUniformLocation(this.particleProgram, "logFar");
+		this.particleVao = gl.createVertexArray()!;
+		this.instances = gl.createBuffer()!;
 		this.vao = gl.createVertexArray()!;
 		this.vertices = gl.createBuffer()!;
 		this.indices = gl.createBuffer()!;
@@ -211,8 +277,17 @@ export class GlEffects {
 			show,
 			ready,
 		);
-		this.last = { ...frame, draws: 0, quads: frame.quads };
-		if (frame.quads === 0) return;
+		this.last = { ...frame, draws: 0, quads: frame.quads + frame.drawn };
+		if (frame.quads === 0 && frame.drawn === 0) return;
+		if (frame.drawn > 0) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.instances);
+			if (frame.drawn > this.instanceRoom) {
+				this.instanceRoom = Math.max(frame.drawn, this.instanceRoom * 2, 256);
+				gl.bufferData(gl.ARRAY_BUFFER, this.instanceRoom * PARTICLE_INSTANCE * 4, gl.DYNAMIC_DRAW);
+			}
+			gl.bufferSubData(gl.ARRAY_BUFFER, 0, frame.instances);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		}
 		gl.bindVertexArray(this.vao);
 		if (frame.quads > this.room) {
 			this.room = Math.max(frame.quads, this.room * 2, 256);
@@ -224,29 +299,37 @@ export class GlEffects {
 			);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, quadIndices(this.room), gl.STATIC_DRAW);
 		}
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.vertices);
-		gl.bufferSubData(gl.ARRAY_BUFFER, 0, frame.vertices);
-		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		if (frame.quads > 0) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.vertices);
+			gl.bufferSubData(gl.ARRAY_BUFFER, 0, frame.vertices);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		}
 		const reversed = this.host.reversed;
 		const viewProj = multiply(
 			perspective(FOV, aspect, camera.near, camera.far, reversed, reversed),
 			lookAt(camera.eye, camera.at),
 		);
-		gl.useProgram(this.program);
-		gl.uniform4fv(
-			this.block,
-			effectBlock(
-				viewProj,
-				camera.eye,
-				lighting,
-				// No light at all: the effects in their own colours, as the parts are.
-				featureBits(render.features) & FEATURE_BIT.unlit ? 3 : renderDebug(render)[0],
-				airOn(render.features),
-				effectShare(mode),
-			),
+		const block = effectBlock(
+			viewProj,
+			camera.eye,
+			lighting,
+			// No light at all: the effects in their own colours, as the parts are.
+			featureBits(render.features) & FEATURE_BIT.unlit ? 3 : renderDebug(render)[0],
+			airOn(render.features),
+			effectShare(mode),
+			frame,
 		);
-		if (this.logFar) gl.uniform1f(this.logFar, 1 / Math.log2(camera.far + 1));
-		gl.uniform1i(gl.getUniformLocation(this.program, "fxImage"), 2);
+		const logFar = 1 / Math.log2(camera.far + 1);
+		// Both programs given the block and the image's unit once; each batch picks one.
+		for (const [program, loc, far] of [
+			[this.particleProgram, this.particleBlock, this.particleLogFar],
+			[this.program, this.block, this.logFar],
+		] as const) {
+			gl.useProgram(program);
+			gl.uniform4fv(loc, block);
+			if (far) gl.uniform1f(far, logFar);
+			gl.uniform1i(gl.getUniformLocation(program, "fxImage"), 2);
+		}
 		gl.enable(gl.BLEND);
 		gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 		gl.enable(gl.DEPTH_TEST);
@@ -255,13 +338,32 @@ export class GlEffects {
 		gl.disable(gl.CULL_FACE);
 		gl.activeTexture(gl.TEXTURE2);
 		gl.bindSampler(2, this.sampler);
+		let bound: "quads" | "particles" | null = null;
 		for (const batch of frame.batches) {
 			const texture = this.fallbacks.get(batch.texture) ?? this.host.imageTexture(batch.texture);
 			if (!texture) continue;
 			gl.bindTexture(gl.TEXTURE_2D, texture);
-			gl.drawElements(gl.TRIANGLES, batch.count * 6, gl.UNSIGNED_INT, batch.first * 6 * 4);
+			if (batch.kind === "particles") {
+				if (bound !== "particles") {
+					gl.useProgram(this.particleProgram);
+					gl.bindVertexArray(this.particleVao);
+					gl.bindBuffer(gl.ARRAY_BUFFER, this.instances);
+					bound = "particles";
+				}
+				// WebGL2 has no first instance: the attributes start at this batch's instead.
+				this.pointInstances(batch.first);
+				gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, batch.count);
+			} else {
+				if (bound !== "quads") {
+					gl.useProgram(this.program);
+					gl.bindVertexArray(this.vao);
+					bound = "quads";
+				}
+				gl.drawElements(gl.TRIANGLES, batch.count * 6, gl.UNSIGNED_INT, batch.first * 6 * 4);
+			}
 			this.last.draws++;
 		}
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		gl.bindSampler(2, null);
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindVertexArray(null);
@@ -270,8 +372,31 @@ export class GlEffects {
 		gl.disable(gl.BLEND);
 	}
 
+	/** The particle attributes, an instance each, from instance `first` of the bound buffer. */
+	private pointInstances(first: number): void {
+		const gl = this.host.gl;
+		const stride = PARTICLE_INSTANCE * 4;
+		const base = first * stride;
+		const attrs: [number, number, number, boolean, number][] = [
+			[0, 4, gl.FLOAT, false, 0],
+			[1, 4, gl.FLOAT, false, 16],
+			[2, 2, gl.FLOAT, false, 32],
+			[3, 4, gl.FLOAT, false, 40],
+			[4, 4, gl.UNSIGNED_BYTE, true, 56],
+			[5, 4, gl.FLOAT, false, 60],
+		];
+		for (const [loc, size, type, norm, offset] of attrs) {
+			gl.enableVertexAttribArray(loc);
+			gl.vertexAttribPointer(loc, size, type, norm, stride, base + offset);
+			gl.vertexAttribDivisor(loc, 1);
+		}
+	}
+
 	destroy(): void {
 		const gl = this.host.gl;
+		gl.deleteBuffer(this.instances);
+		gl.deleteVertexArray(this.particleVao);
+		gl.deleteProgram(this.particleProgram);
 		gl.deleteBuffer(this.vertices);
 		gl.deleteBuffer(this.indices);
 		gl.deleteVertexArray(this.vao);

@@ -324,18 +324,21 @@ export function effectTextures(effects: SceneEffects | undefined): string[] {
 export function numberAt(keys: readonly NumberKeypoint[], t: number, spread = 0): number {
 	const n = keys.length;
 	if (n === 0) return 0;
-	const value = (k: NumberKeypoint) => k[1] + k[2] * spread;
-	if (t <= keys[0][0] || n === 1) return value(keys[0]);
+	// Written out, with no function made each call: it runs for every particle every frame.
+	const first = keys[0];
+	if (t <= first[0] || n === 1) return first[1] + first[2] * spread;
 	for (let i = 1; i < n; i++) {
 		const b = keys[i];
 		if (t <= b[0]) {
 			const a = keys[i - 1];
 			const span = b[0] - a[0];
 			const k = span > 0 ? (t - a[0]) / span : 1;
-			return value(a) + (value(b) - value(a)) * k;
+			const va = a[1] + a[2] * spread;
+			return va + (b[1] + b[2] * spread - va) * k;
 		}
 	}
-	return value(keys[n - 1]);
+	const last = keys[n - 1];
+	return last[1] + last[2] * spread;
 }
 
 /** A ColorSequence at `t`, 0 to 1, into `out` as red, green and blue from 0 to 1. */

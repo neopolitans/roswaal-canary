@@ -495,6 +495,7 @@ export function App() {
 						? sceneView.upscale
 						: "off",
 				antialias: antialiasSetting(sceneView.antialiasing),
+				dynamicOptimization: sceneView.dynamicOptimization === true,
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
@@ -513,6 +514,7 @@ export function App() {
 			sceneView.upscale,
 			sceneView.antialiasing,
 			sceneView.quality,
+			sceneView.dynamicOptimization,
 		],
 	);
 	useEffect(() => viewport?.setOptions(viewOptions), [viewport, viewOptions]);
@@ -2847,6 +2849,8 @@ export function App() {
 								onQuality={(quality) => placeEditor.set("quality", quality)}
 								antialias={sceneView.antialiasing ?? "auto"}
 								onAntialias={(value) => placeEditor.set("antialiasing", value)}
+								scene={sceneView}
+								onScene={(key, value) => placeEditor.set(key, value)}
 							/>
 						) : undefined,
 					performance:

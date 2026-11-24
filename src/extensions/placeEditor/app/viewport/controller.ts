@@ -47,7 +47,7 @@ import {
 	still,
 	turnedBy,
 } from "./drag.js";
-import { DynamicScale } from "./dynamicScale.js";
+import { DynamicSavings, DynamicScale } from "./dynamicScale.js";
 import { FRAME_RUN, FrameHistory, frameInterval } from "./frameGraph.js";
 import { rayHit, rayPick } from "./geometry.js";
 import { gizmoCell, lightGizmoLines } from "./gizmos.js";
@@ -160,6 +160,8 @@ export interface ViewportOptions {
 	 * every pixel the screen has; Automatic, the quality level's.
 	 */
 	renderScale?: number | "native" | "auto" | "dynamic";
+	/** Savings taken at any level while frames do not fit: see DynamicSavings. */
+	dynamicOptimization?: boolean;
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -698,7 +700,7 @@ export class ViewportController {
 		this.set({ render });
 		if (render.features !== was.features && this.place)
 			this.view?.setLighting(litFor(this.place.lighting, render.features));
-		this.view?.setRender(render);
+		this.view?.setRender(this.withSavings(render));
 		if (render.lightRanges !== was.lightRanges) this.view?.setOverlay(this.overlayLines());
 		this.redraw();
 	}
@@ -757,6 +759,10 @@ export class ViewportController {
 		this.view.setGlassHides(options.glassHides);
 		this.view.setPostEffects(options.postEffects);
 		if (was.renderScale !== options.renderScale) this.dynamic.reset();
+		if (was.dynamicOptimization !== options.dynamicOptimization) {
+			this.savings.reset();
+			this.view.setRender(this.withSavings(this.state.render));
+		}
 		if (was.renderScale !== options.renderScale || was.upscale !== options.upscale) this.fit();
 		this.redraw();
 	}
@@ -1961,7 +1967,7 @@ export class ViewportController {
 		view.setGlassHides(this.options.glassHides);
 		view.setPostEffects(this.options.postEffects);
 		view.setQuality(viewQuality(this.level()));
-		view.setRender(this.state.render);
+		view.setRender(this.withSavings(this.state.render));
 		this.view = view;
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
 		view.onRedraw = () => this.redraw();
@@ -2795,6 +2801,8 @@ export class ViewportController {
 		if (!auto || this.state.profiling || this.starting) return;
 		// Dynamic moves first: the level only once it is at either end of its steps.
 		if (this.options.renderScale === "dynamic" && !this.dynamic.atEnd()) return;
+		// And Dynamic optimization's savings before the level.
+		if (this.options.dynamicOptimization && this.savings.taken > 0 && !this.savings.full()) return;
 		const render = this.state.render;
 		if (presetLevel(render.preset) !== auto.level) return;
 		if (changedFrom(render.features, this.levelFeatures(this.level())).length > 0) return;
@@ -2867,7 +2875,25 @@ export class ViewportController {
 	/** Render scale Dynamic's step: see dynamicScale.ts. */
 	private dynamic = new DynamicScale();
 
-	/** A moving frame's time for Dynamic, against the time a frame has; sized again when its step changes. */
+	/** Dynamic optimization's savings: see dynamicScale.ts. */
+	private savings = new DynamicSavings();
+
+	/** The render settings as the view draws them: less the savings Dynamic optimization has taken. */
+	private withSavings(render: RenderSettings): RenderSettings {
+		const off = this.options.dynamicOptimization ? this.savings.off() : [];
+		if (off.length === 0) return render;
+		return {
+			...render,
+			features: { ...render.features, ...Object.fromEntries(off.map((k) => [k, false])) },
+		};
+	}
+
+	/**
+	 * A moving frame's time for Dynamic optimization and Dynamic's render
+	 * scale, against the time a frame has. The savings go first; the scale
+	 * goes down only once they are all taken, and they are given back only
+	 * once it is back at the screen's own pixels.
+	 */
 	private dynamicFrame(now: number, ms: number, timed: boolean): void {
 		const rate = this.options.frameRate;
 		const refresh = this.refresh.period();
@@ -2877,6 +2903,14 @@ export class ViewportController {
 				: rate === "steady" && this.steady.halved
 					? refresh * 2
 					: refresh;
+		const optimizing = this.options.dynamicOptimization === true;
+		if (optimizing && this.savings.frame(now, ms, budget, timed, this.dynamic.step === 0)) {
+			this.view?.setRender(this.withSavings(this.state.render));
+			this.redraw();
+			return;
+		}
+		if (this.options.renderScale !== "dynamic") return;
+		if (optimizing && !this.savings.full()) return;
 		if (this.dynamic.frame(now, ms, budget, timed)) this.fit();
 	}
 
@@ -2939,7 +2973,8 @@ export class ViewportController {
 			// WebGPU says when the GPU is done with the frame: how much room is left.
 			const timed = this.view.backend === "WebGPU";
 			if (rate === "steady") this.steady.drawn(now, timed);
-			const dynamic = this.options.renderScale === "dynamic";
+			const dynamic =
+				this.options.renderScale === "dynamic" || this.options.dynamicOptimization === true;
 			// Moving: drawn one after another, for the camera or the place, not a still frame.
 			const moving = !still && gap < this.refresh.period() * 4;
 			if (timed && (rate === "steady" || (dynamic && moving))) {

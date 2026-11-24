@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.62",
+		date: "2026-11-24",
+		headline: "Dynamic optimization, and the Scene view settings in the Rendering panel.",
+		added: [
+			"**Dynamic optimization**, in Settings › Scene view. Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first: today, the lights worked out at half the pixels. It gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
+			"**The Rendering panel offers Frame rate, Render scale, Upscaling, Renderer and Dynamic optimization** beside Quality and Antialiasing, each saved as Settings saves it.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.61",
 		date: "2026-11-24",
 		headline: "Lamp light at half the pixels at Levels 1 to 17, for speed at high render scales.",

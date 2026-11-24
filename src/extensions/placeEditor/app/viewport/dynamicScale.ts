@@ -76,3 +76,67 @@ export class DynamicScale {
 		this.changed = Number.NEGATIVE_INFINITY;
 	}
 }
+
+/**
+ * Dynamic optimization's savings, in the order they are taken: each a
+ * Rendering switch turned off while frames do not fit, whatever the level.
+ * Half-size lamp light first: it costs the least to the eye.
+ */
+export const DYNAMIC_SAVINGS = ["fullResLamps"] as const;
+export type DynamicSaving = (typeof DYNAMIC_SAVINGS)[number];
+
+/** Back on only when the typical frame takes less than this share of its budget. */
+const SAVINGS_ROOM = 0.6;
+/** And no sooner than this after the last change, in ms: a saving's effect is seen first. */
+const SAVINGS_SETTLE_MS = 3000;
+
+/** Dynamic optimization: how many of DYNAMIC_SAVINGS are taken now. */
+export class DynamicSavings {
+	taken = 0;
+	private work: number[] = [];
+	private changed = Number.NEGATIVE_INFINITY;
+	private lastMiss = Number.NEGATIVE_INFINITY;
+
+	/** The switches turned off now. */
+	off(): readonly DynamicSaving[] {
+		return DYNAMIC_SAVINGS.slice(0, this.taken);
+	}
+
+	/** Whether every saving is taken: Dynamic's render scale may go down from here. */
+	full(): boolean {
+		return this.taken === DYNAMIC_SAVINGS.length;
+	}
+
+	/**
+	 * A moving frame, as DynamicScale.frame; `mayGiveBack`: whether a saving
+	 * may be given back now (not while the render scale is still lowered).
+	 * True when what is taken changed.
+	 */
+	frame(now: number, ms: number, budget: number, timed: boolean, mayGiveBack = true): boolean {
+		if (!timed && ms > budget * 1.5) this.lastMiss = now;
+		this.work.push(ms);
+		if (this.work.length < 20 || now - this.changed < 500) return false;
+		const sorted = [...this.work].sort((a, b) => a - b);
+		const typical = sorted[Math.floor(sorted.length * 0.75)];
+		this.work = [];
+		if (typical > budget * (timed ? 0.92 : 1.5) && !this.full()) {
+			this.taken++;
+			this.changed = now;
+			return true;
+		}
+		if (this.taken === 0 || !mayGiveBack || now - this.changed < SAVINGS_SETTLE_MS) return false;
+		const room = timed
+			? typical < budget * SAVINGS_ROOM
+			: now - this.lastMiss > SAVINGS_SETTLE_MS * 2;
+		if (!room) return false;
+		this.taken--;
+		this.changed = now;
+		return true;
+	}
+
+	reset(): void {
+		this.taken = 0;
+		this.work = [];
+		this.changed = Number.NEGATIVE_INFINITY;
+	}
+}

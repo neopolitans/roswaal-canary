@@ -129,6 +129,8 @@ export interface PlaceEditorSettings {
 	frameRate: ViewportFrameRate;
 	renderScale: ViewportRenderScale;
 	upscale: ViewportUpscale;
+	/** Savings taken at any level while frames do not fit: see dynamicScale.ts's DynamicSavings. */
+	dynamicOptimization: boolean;
 	/** Stored as `antialiasing`: 1.1.0-canary.6 saved `antialias` as "4" for everyone. */
 	antialiasing: ViewportAntialias;
 	outlineWidth: OutlineWidth;
@@ -193,6 +195,15 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "off",
 				choices: VIEWPORT_UPSCALES,
+			},
+			{
+				key: "dynamicOptimization",
+				title: "Dynamic optimization",
+				help: "While frames do not fit the display, the view takes savings whatever the quality level, the least visible first: today, the lights worked out at half the pixels. It gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
+				type: "boolean",
+				default: false,
+				on: "Takes savings while frames do not fit",
+				off: "Draws as the quality level says",
 			},
 			{
 				key: "antialiasing",

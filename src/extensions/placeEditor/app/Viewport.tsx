@@ -25,9 +25,13 @@ import { errorMessage } from "../../../core/errorMessage.js";
 import { startBenchmark } from "../benchmarkEvent.js";
 import {
 	antialiasSetting,
+	type PlaceEditorSettings,
+	renderScaleLabels,
 	VIEWPORT_ANTIALIAS,
 	VIEWPORT_FRAME_RATES,
+	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
+	VIEWPORT_UPSCALES,
 	type ViewportFrameRate,
 	type ViewportRenderer,
 } from "../settings.js";
@@ -855,6 +859,64 @@ function AssetCard({ assets }: { assets: AssetProgress | null }) {
 	);
 }
 
+/**
+ * The Scene view settings the Rendering panel offers beside Quality and
+ * Antialiasing, so they are at hand while looking at the view: each saved
+ * as Settings saves it.
+ */
+function SceneSettings({
+	scene,
+	onScene,
+}: {
+	scene: PlaceEditorSettings;
+	onScene: (key: string, value: string | boolean) => void;
+}) {
+	const scaleLabels = renderScaleLabels(
+		typeof devicePixelRatio === "number" ? devicePixelRatio : 1,
+		typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent),
+	);
+	const choice = (
+		key: keyof PlaceEditorSettings,
+		label: string,
+		choices: readonly { value: string; label: string }[],
+		labels: Record<string, string> = {},
+	) => (
+		<label className="render-heat" key={key}>
+			<span>{label}</span>
+			<select
+				className="tb place-edit-field"
+				value={String(scene[key] ?? choices[0].value)}
+				onChange={(e) => onScene(key, e.target.value)}
+			>
+				{choices.map((c) => (
+					<option key={c.value} value={c.value}>
+						{labels[c.value] ?? c.label}
+					</option>
+				))}
+			</select>
+		</label>
+	);
+	return (
+		<>
+			{choice("frameRate", "Frame rate", VIEWPORT_FRAME_RATES)}
+			{choice("renderScale", "Render scale", VIEWPORT_RENDER_SCALES, scaleLabels)}
+			{choice("upscale", "Upscaling", VIEWPORT_UPSCALES)}
+			{choice("renderer", "Renderer", VIEWPORT_RENDERERS)}
+			<label className="render-heat">
+				<span>Dynamic optimization</span>
+				<select
+					className="tb place-edit-field"
+					value={scene.dynamicOptimization ? "on" : "off"}
+					onChange={(e) => onScene("dynamicOptimization", e.target.value === "on")}
+				>
+					<option value="off">Off</option>
+					<option value="on">On</option>
+				</select>
+			</label>
+		</>
+	);
+}
+
 /** What a heatmap's colours mean, under the modes. */
 const HEAT_LEGEND: Partial<Record<RenderMode, [string, string]>> = {
 	cost: ["Cheap", "Costly"],
@@ -1566,6 +1628,8 @@ export function RenderPanel({
 	onQuality,
 	antialias,
 	onAntialias,
+	scene,
+	onScene,
 }: {
 	controller: ViewportController;
 	/** Settings' Quality, chosen here too: "auto" or a level, "1" to "21". */
@@ -1573,6 +1637,9 @@ export function RenderPanel({
 	/** Settings' Antialiasing, chosen here too: "auto", or a mode's setting value. */
 	antialias: string;
 	onAntialias: (antialias: string) => void;
+	/** Settings' Scene view, chosen here too: frame rate, render scale, upscaling, renderer, Dynamic optimization. */
+	scene?: PlaceEditorSettings;
+	onScene?: (key: string, value: string | boolean) => void;
 }) {
 	const { render, quality, antialiasModes } = useViewport(controller);
 	const apply = (next: RenderSettings) => controller.setRender(next);
@@ -1676,6 +1743,7 @@ export function RenderPanel({
 								))}
 							</select>
 						</label>
+						{scene && onScene && <SceneSettings scene={scene} onScene={onScene} />}
 						{render.mode === "lit" && (
 							<div className="render-step">
 								<button

@@ -93,3 +93,30 @@ describe("Dynamic render scale", () => {
 		expect(scale.share()).toBe(1);
 	});
 });
+
+describe("Dynamic optimization", () => {
+	it("takes half-size lamp light while frames do not fit, and gives it back with room", async () => {
+		const { DynamicSavings } = await import(
+			"../src/extensions/placeEditor/app/viewport/dynamicScale.js"
+		);
+		const savings = new DynamicSavings();
+		let t = 0;
+		const run = (ms: number, frames: number, mayGiveBack = true) => {
+			for (let i = 0; i < frames; i++) {
+				t += BUDGET;
+				savings.frame(t, ms, BUDGET, true, mayGiveBack);
+			}
+		};
+		run(10, 100);
+		expect(savings.off()).toEqual([]);
+		run(20, 25);
+		expect(savings.off()).toEqual(["fullResLamps"]);
+		expect(savings.full()).toBe(true);
+		// Room, but the render scale is still lowered: kept.
+		run(8, 300, false);
+		expect(savings.taken).toBe(1);
+		// Room, and not before three seconds since it was taken.
+		run(8, 300);
+		expect(savings.taken).toBe(0);
+	});
+});

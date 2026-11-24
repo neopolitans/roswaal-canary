@@ -33,6 +33,18 @@ export interface Camera {
 	far: number;
 }
 
+/**
+ * Of a frame's effects time: particles moved on, born and retired (step);
+ * each emitter's put farthest first (sort); the quads laid out, beams' too
+ * (quads); and the quads sent to the GPU (upload). Milliseconds.
+ */
+export interface EffectSteps {
+	step: number;
+	sort: number;
+	quads: number;
+	upload: number;
+}
+
 export interface ViewRenderer {
 	readonly backend: "WebGPU" | "WebGL2";
 	/** Samples a pixel, and each sun shadow map's side: fixed for the view's life. */
@@ -1333,7 +1345,7 @@ export interface RenderStats {
 	 * Of `cpu`, where the renderer times them: Beams and particles simulated
 	 * and sent to the GPU, and the parts culled against the view.
 	 */
-	cpuSteps?: { effects: number; culling: number };
+	cpuSteps?: { effects: number; culling: number; fx?: EffectSteps };
 	/**
 	 * Milliseconds of the GPU's time, by pass, where the browser can time
 	 * them: the sun's and sky's maps, the place, and its glow and effects.

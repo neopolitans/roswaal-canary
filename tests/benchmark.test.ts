@@ -162,6 +162,30 @@ describe("a benchmark's scores", () => {
 		expect(warm).toContain(
 			"Warm: each station again after the whole first pass, +25% across the stations",
 		);
+		const fx = benchmarkReport({
+			...result,
+			levels: [
+				{
+					...result.levels[0],
+					stations: [
+						{
+							...station(11, 4, 9),
+							still: {
+								...station(11, 4, 9).still,
+								cpuSteps: {
+									effects: 7.4,
+									culling: 0,
+									fx: { step: 0.6, sort: 2.1, quads: 3.9, upload: 0.8 },
+								},
+							},
+						},
+					],
+				},
+			],
+		});
+		expect(fx).toContain(
+			"CPU: effects 7.40 ms (step 0.60 ms · sort 2.10 ms · quads 3.90 ms · upload 0.80 ms) · culling",
+		);
 		const off = benchmarkReport({ ...result, switchedOff: ["Occlusion culling"] });
 		expect(off).toContain("Switched off in the Rendering panel: Occlusion culling");
 	});

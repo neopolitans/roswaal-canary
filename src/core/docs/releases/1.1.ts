@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.38",
+		date: "2026-11-24",
+		headline: "Particles sorted faster, and the benchmark splits their CPU time.",
+		changed: [
+			"**Particles take less of the page's time each frame**: they are put in drawing order by one number each, which the browser sorts much faster. 20,000 particles went from 4.6 to 3.4 ms on a desktop.",
+		],
+		added: [
+			"**The benchmark's report splits the effects' CPU time** into stepping the particles, sorting them, laying out their quads and sending them to the GPU.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.37",
 		date: "2026-11-23",
 		headline: "Shaders built ahead after an update, and a start that says why it is slow.",

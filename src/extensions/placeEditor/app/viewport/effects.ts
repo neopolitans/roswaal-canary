@@ -331,6 +331,9 @@ export class EffectsSim {
 		return this.beams.length === 0 && this.emitters.length === 0;
 	}
 
+	/** The last frame's time on stepping, sorting and laying out: see EffectSteps. */
+	readonly timing = { step: 0, sort: 0, quads: 0 };
+
 	/**
 	 * Moves the particles on to `now`, in seconds, and lays out what `view`
 	 * sees. `ready` says whether an image has arrived; what has not is drawn
@@ -344,6 +347,10 @@ export class EffectsSim {
 	): EffectFrame {
 		const dt = this.last === null ? 0 : Math.max(0, Math.min(LONGEST_STEP, now - this.last));
 		this.last = now;
+		const timing = this.timing;
+		timing.step = 0;
+		timing.sort = 0;
+		timing.quads = 0;
 		this.elapsed += dt;
 		const eye = view.eye;
 		const forward = unit([view.at[0] - eye[0], view.at[1] - eye[1], view.at[2] - eye[2]]);
@@ -371,8 +378,10 @@ export class EffectsSim {
 					if (em.awake) this.sleep(em);
 					continue;
 				}
+				const stepping = performance.now();
 				if (!em.awake) this.wake(em);
 				else this.step(em, dt * em.def.timeScale);
+				timing.step += performance.now() - stepping;
 				if (em.def.timeScale > 0) moving = true;
 				if (em.count === 0 || !seen(em.centre, em.radius)) continue;
 				const count = em.count;
@@ -420,6 +429,7 @@ export class EffectsSim {
 		batches.sort((a, b) => b.far - a.far);
 		let at = 0;
 		const out: EffectBatch[] = [];
+		const filling = performance.now();
 		for (const b of batches) {
 			const made = b.fill(at);
 			if (made === 0) continue;
@@ -428,6 +438,8 @@ export class EffectsSim {
 			else out.push({ texture: b.texture, first: at, count: made });
 			at += made;
 		}
+		// particleQuads counts its sorting apart: the rest is laying out.
+		timing.quads = Math.max(0, performance.now() - filling - timing.sort);
 		return {
 			vertices: this.vertices.subarray(0, at * QUAD_VERTICES * EFFECT_VERTEX),
 			quads: at,
@@ -538,8 +550,8 @@ export class EffectsSim {
 		this.alive++;
 	}
 
-	private order = new Uint32Array(0);
-	private away = new Float32Array(0);
+	/** Each particle's sortKey, this frame. */
+	private keys = new Float64Array(0);
 	private colour = [0, 0, 0];
 
 	/** An emitter's particles as quads from quad `at`, farthest first; how many were laid out. */
@@ -554,28 +566,28 @@ export class EffectsSim {
 		const def = em.def;
 		const data = em.data;
 		const n = em.count;
-		if (this.order.length < n) {
-			this.order = new Uint32Array(n * 2);
-			this.away = new Float32Array(n * 2);
-		}
-		const order = this.order;
-		const away = this.away;
+		if (this.keys.length < n) this.keys = new Float64Array(n * 2);
+		const sorting = performance.now();
+		const keys = this.keys;
 		for (let i = 0; i < n; i++) {
 			const o = i * P;
 			const dx = data[o] - eye[0];
 			const dy = data[o + 1] - eye[1];
 			const dz = data[o + 2] - eye[2];
-			away[i] = dx * forward[0] + dy * forward[1] + dz * forward[2];
-			order[i] = i;
+			keys[i] = sortKey(dx * forward[0] + dy * forward[1] + dz * forward[2], i);
 		}
-		const sorted = order.subarray(0, n).sort((a, b) => away[b] - away[a]);
+		// The engine's own numeric sort, with no function to call: a sort by a
+		// comparison function took 2 ms of 4.6 for 20,000 particles (Edge, 23 Nov 2026).
+		const sorted = keys.subarray(0, n).sort();
+		this.timing.sort += performance.now() - sorting;
 		const v = this.vertices;
 		const w = this.words;
 		const fb = def.flipbook;
 		const frames = fb.layout > 0 ? fb.columns * fb.rows : 1;
 		const colour = this.colour;
 		let made = 0;
-		for (const i of sorted) {
+		for (const key of sorted) {
+			const i = keyIndex(key);
 			const o = i * P;
 			const age = data[o + AGE];
 			const life = data[o + LIFE];
@@ -762,6 +774,25 @@ export class EffectsSim {
 		}
 		return n;
 	}
+}
+
+/** Room for a particle's index in a sort key: more than any emitter holds. */
+const KEY_INDEX = 2 ** 21;
+
+/**
+ * A particle's place in the drawing order as one number, so the engine's
+ * numeric sort puts them farthest first: how far along the view it is, to
+ * 1/1024 stud and turned round, then its index. Exact while |away| is under
+ * four million studs.
+ */
+export function sortKey(away: number, index: number): number {
+	const q = Math.floor(-(Number.isFinite(away) ? away : 0) * 1024);
+	return q * KEY_INDEX + index;
+}
+
+/** The particle's index back from its sortKey. */
+export function keyIndex(key: number): number {
+	return key - Math.floor(key / KEY_INDEX) * KEY_INDEX;
 }
 
 /**

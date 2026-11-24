@@ -16,11 +16,13 @@ import {
 	FALLBACK_DOT,
 	FALLBACK_WHITE,
 	flipbookFrame,
+	keyIndex,
 	PARTICLES_PER_EMITTER,
 	packColour,
 	QUAD_VERTICES,
 	quadIndices,
 	seeded,
+	sortKey,
 	spreadDirection,
 } from "../src/extensions/placeEditor/app/viewport/effects.js";
 import {
@@ -582,5 +584,16 @@ describe("a place's effects", () => {
 		expect(second.box).toEqual([2, 4, 6]);
 		expect(second.shape).toBe(1);
 		expect(second.rate).toBe(3);
+	});
+});
+
+describe("particles' drawing order", () => {
+	it("puts the farthest first by one number each, and gives each index back", () => {
+		const away = [12.5, -3, 400, 12.5, 0, 1e-4];
+		const keys = Float64Array.from(away.map((a, i) => sortKey(a, i))).sort();
+		const order = Array.from(keys, keyIndex);
+		expect(order).toEqual([2, 0, 3, 5, 4, 1]);
+		expect(keyIndex(sortKey(-123456.789, 2 ** 21 - 1))).toBe(2 ** 21 - 1);
+		expect(keyIndex(sortKey(Number.NaN, 7))).toBe(7);
 	});
 });

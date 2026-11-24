@@ -78,6 +78,7 @@ import {
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
+	type EffectSteps,
 	FOV,
 	FULL_QUALITY,
 	fingerprint,
@@ -1583,7 +1584,10 @@ export class WebGpuView implements ViewRenderer {
 	/** This frame's CPU time on effects and on culling: see RenderStats.cpuSteps. */
 	private cpuEffects = 0;
 	private cpuCulling = 0;
-	private cpuSteps = { effects: 0, culling: 0 };
+	private cpuSteps: { effects: number; culling: number; fx?: EffectSteps } = {
+		effects: 0,
+		culling: 0,
+	};
 
 	stats(): RenderStats {
 		const fx = this.effects?.last;
@@ -3713,7 +3717,11 @@ fn at(c: vec2i) -> u32 {
 		this.lastTally = this.tally;
 		this.runs.clear();
 		this.cpuMs = performance.now() - started;
-		this.cpuSteps = { effects: this.cpuEffects, culling: this.cpuCulling };
+		this.cpuSteps = {
+			effects: this.cpuEffects,
+			culling: this.cpuCulling,
+			...(this.effects && this.cpuEffects > 0 ? { fx: this.effects.steps() } : {}),
+		};
 	}
 
 	settled(): Promise<void> {
@@ -3778,7 +3786,11 @@ fn at(c: vec2i) -> u32 {
 		}
 		this.lastTally = this.tally;
 		this.cpuMs = performance.now() - started;
-		this.cpuSteps = { effects: this.cpuEffects, culling: this.cpuCulling };
+		this.cpuSteps = {
+			effects: this.cpuEffects,
+			culling: this.cpuCulling,
+			...(this.effects && this.cpuEffects > 0 ? { fx: this.effects.steps() } : {}),
+		};
 	}
 
 	deviceFacts(): {

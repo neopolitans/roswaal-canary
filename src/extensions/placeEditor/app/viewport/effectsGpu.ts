@@ -28,7 +28,7 @@ import {
 import { lookAt, multiply, perspective } from "./math.js";
 import { airOn, FEATURE_BIT, featureBits } from "./renderFeatures.js";
 import { effectShare, effectsShown } from "./renderViews.js";
-import { type Camera, FOV, type RenderSettings, renderDebug } from "./view.js";
+import { type Camera, type EffectSteps, FOV, type RenderSettings, renderDebug } from "./view.js";
 
 const BUFFER = { INDEX: 0x10, VERTEX: 0x20, UNIFORM: 0x40, COPY_DST: 0x8 } as const;
 const STAGE = { VERTEX: 0x1, FRAGMENT: 0x2 } as const;
@@ -225,6 +225,7 @@ export class GpuEffects {
 		}
 		const ready = (asset: string) => this.host.imageGroup(asset) !== undefined;
 		const aspect = width / height;
+		this.uploadMs = 0;
 		const frame = this.sim.frame(
 			{ eye: camera.eye, at: camera.at, aspect, fov: FOV },
 			now,
@@ -250,7 +251,9 @@ export class GpuEffects {
 			d.queue.writeBuffer(this.indices, 0, indices);
 		}
 		if (!this.vertices || !this.indices) return;
+		const sending = performance.now();
 		d.queue.writeBuffer(this.vertices, 0, frame.vertices);
+		this.uploadMs = performance.now() - sending;
 		const viewProj = multiply(
 			perspective(FOV, aspect, camera.near, camera.far, true, true),
 			lookAt(camera.eye, camera.at),
@@ -279,6 +282,14 @@ export class GpuEffects {
 			pass.drawIndexed(batch.count * 6, 1, batch.first * 6);
 			this.last.draws++;
 		}
+	}
+
+	/** The last frame's time sending its quads, in milliseconds. */
+	private uploadMs = 0;
+
+	/** The last frame's effects time by step: see EffectSteps. */
+	steps(): EffectSteps {
+		return { ...this.sim.timing, upload: this.uploadMs };
 	}
 
 	destroy(): void {

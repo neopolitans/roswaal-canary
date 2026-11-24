@@ -266,8 +266,12 @@ export function benchmarkReport(result: BenchmarkResult): string {
 		for (const s of level.stations) {
 			const stages = s.gpu.map((r) => `${STAGE_SHORT[r.stage]} ${msText(r.median)}`).join(" · ");
 			const steps = s.still.cpuSteps;
+			const fx = steps?.fx && steps.effects > 0 ? steps.fx : null;
+			const parts = fx
+				? ` (step ${msText(fx.step)} · sort ${msText(fx.sort)} · quads ${msText(fx.quads)} · upload ${msText(fx.upload)})`
+				: "";
 			const cpu = steps
-				? `effects ${msText(steps.effects)} · culling ${msText(steps.culling)} · the rest ${msText(Math.max(0, (s.still.cpuMs ?? 0) - steps.effects - steps.culling))}`
+				? `effects ${msText(steps.effects)}${parts} · culling ${msText(steps.culling)} · the rest ${msText(Math.max(0, (s.still.cpuMs ?? 0) - steps.effects - steps.culling))}`
 				: "";
 			lines.push(`  ${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`);
 			if (stages) lines.push(`      GPU: ${stages}`);

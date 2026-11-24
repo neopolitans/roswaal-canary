@@ -20,6 +20,8 @@
  * report are tested without a GPU.
  */
 
+import type { EffectSteps } from "./view.js";
+
 /** A frame's stages, in the order they are drawn. Not every renderer has every one. */
 export const STAGES = [
 	"skyMaps",
@@ -292,7 +294,7 @@ export interface Timed {
 	/** The page's own work for the frame, where the renderer times it: the draw call's time. */
 	cpuMs?: number;
 	/** Of that, effects simulated and sent, and parts culled: see RenderStats.cpuSteps. */
-	cpuSteps?: { effects: number; culling: number };
+	cpuSteps?: { effects: number; culling: number; fx?: EffectSteps };
 }
 
 /** A row's GPU time as a column, or nothing where the GPU has no timers. */

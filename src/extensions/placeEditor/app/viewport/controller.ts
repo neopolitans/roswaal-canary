@@ -115,6 +115,7 @@ import type { UpscaleMode } from "./upscale.js";
 import {
 	type Camera,
 	DEFAULT_RENDER,
+	type EffectSteps,
 	FOV,
 	type MeshGeometry,
 	madeGeometry,
@@ -2193,6 +2194,7 @@ export class ViewportController {
 		const cpu: number[] = [];
 		const effects: number[] = [];
 		const culling: number[] = [];
+		const fx: Record<keyof EffectSteps, number[]> = { step: [], sort: [], quads: [], upload: [] };
 		view?.setProfiling(null, (f) => gpu.push(Object.values(f).reduce((a, b) => a + (b ?? 0), 0)));
 		const intervals = await this.busyFrames(n, undefined, () => {
 			const s = this.view?.stats();
@@ -2201,6 +2203,8 @@ export class ViewportController {
 			if (s.cpuSteps) {
 				effects.push(s.cpuSteps.effects);
 				culling.push(s.cpuSteps.culling);
+				const parts = s.cpuSteps.fx;
+				if (parts) for (const k of Object.keys(fx) as (keyof EffectSteps)[]) fx[k].push(parts[k]);
 			}
 		});
 		// The last frames' stamps are read back after they finish.
@@ -2215,7 +2219,22 @@ export class ViewportController {
 			...(gpu.length >= Math.min(5, n) ? { gpuMs: steady(gpu) } : {}),
 			...(cpu.length > 0 ? { cpuMs: steady(cpu) } : {}),
 			...(effects.length > 0
-				? { cpuSteps: { effects: steady(effects), culling: steady(culling) } }
+				? {
+						cpuSteps: {
+							effects: steady(effects),
+							culling: steady(culling),
+							...(fx.step.length > 0
+								? {
+										fx: {
+											step: steady(fx.step),
+											sort: steady(fx.sort),
+											quads: steady(fx.quads),
+											upload: steady(fx.upload),
+										},
+									}
+								: {}),
+						},
+					}
 				: {}),
 		};
 	}

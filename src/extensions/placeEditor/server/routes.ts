@@ -28,11 +28,13 @@ export interface RobloxAssets {
 	summary(root: string): Promise<{ count: number; bytes: number }>;
 	clear(root: string): Promise<void>;
 	read(root: string, id: string): Promise<{ assetTypeId?: number; bytes: Uint8Array } | null>;
+	/** Where copies are kept: the project's folder (the daemon), or this browser (the website). */
+	readonly kept: "project" | "browser";
 }
 
 /**
- * What a host gives the Place Editor. The daemon passes both; the website
- * passes neither, and the Roblox routes answer 501 or `available: false`.
+ * What a host gives the Place Editor: the daemon and the website pass both. A
+ * host passing neither has the Roblox routes answer 501 or `available: false`.
  */
 export interface PlaceEditorCapabilities {
 	/**
@@ -40,7 +42,7 @@ export interface PlaceEditorCapabilities {
 	 * (`src/server/roblox/signin.ts`).
 	 */
 	roblox?: RobloxAccount;
-	/** What Sign in with Roblox downloads, kept in the project: `roblox/assets.ts`. */
+	/** What Sign in with Roblox downloads, kept in the project or the browser: `roblox/assets.ts`. */
 	robloxAssets?: RobloxAssets;
 }
 
@@ -138,8 +140,8 @@ export function placeEditorRoutes(
 		/** Whether anyone is signed in with Roblox, and who: never a token. */
 		"GET /roblox": async () => {
 			const account = capabilities.roblox;
-			// `downloads`: whether this host keeps what the sign-in fetches (the
-			// website does not yet), so the editor can say why nothing comes.
+			// `downloads`: whether this host keeps what the sign-in fetches, so the
+			// editor can say why nothing comes from one that does not.
 			return account
 				? {
 						available: true,
@@ -158,12 +160,15 @@ export function placeEditorRoutes(
 			return { ok: true };
 		},
 
-		/** How many assets the open project holds from Sign in with Roblox. Reads only. */
+		/**
+		 * How many assets are kept from Sign in with Roblox, and where: the open
+		 * project's (daemon), or this browser's (website). Reads only.
+		 */
 		"GET /roblox/assets": async () => {
 			const assets = capabilities.robloxAssets;
 			const current = ctx.current();
 			if (!assets || !current) return { available: Boolean(assets), count: 0, bytes: 0 };
-			return { available: true, ...(await assets.summary(current.root)) };
+			return { available: true, kept: assets.kept, ...(await assets.summary(current.root)) };
 		},
 
 		/**
@@ -201,7 +206,7 @@ export function placeEditorRoutes(
 			};
 		},
 
-		/** Deletes the open project's downloaded assets. */
+		/** Deletes the open project's downloaded assets: on the website, this browser's. */
 		"POST /roblox/assets/clear": async () => {
 			await ability("robloxAssets").clear(ctx.project().root);
 			return { ok: true };

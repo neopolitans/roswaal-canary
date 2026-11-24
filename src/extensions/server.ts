@@ -7,8 +7,10 @@
  */
 
 import type { OpenProject } from "../server/project.js";
+import type { RobloxSignIn } from "../server/roblox/signin.js";
 import type { LoadedPlace, RouteHandler } from "../server/routes.js";
 import { type PlaceEditorCapabilities, placeEditorRoutes } from "./placeEditor/server/routes.js";
+import { placeEditorWebsite } from "./placeEditor/server/website.js";
 
 /** What a session lends an extension's routes. */
 export interface ExtensionContext {
@@ -23,6 +25,19 @@ export interface ExtensionContext {
 /** What a host gives each extension. */
 export interface ExtensionCapabilities {
 	placeEditor?: PlaceEditorCapabilities;
+}
+
+/**
+ * What the website's worker gives the extensions: its sign-in, and what that
+ * downloads, kept in this browser's own storage for the site. `forget`
+ * deletes every download, for the sign-in's `onForget`.
+ */
+export function websiteExtensions(roblox: RobloxSignIn): {
+	capabilities: ExtensionCapabilities;
+	forget(): Promise<void>;
+} {
+	const placeEditor = placeEditorWebsite(roblox);
+	return { capabilities: { placeEditor: placeEditor.capabilities }, forget: placeEditor.forget };
 }
 
 /** Every extension's routes, for one session. */

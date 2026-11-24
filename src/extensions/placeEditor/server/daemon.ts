@@ -1,14 +1,15 @@
 /**
  * The Place Editor on the daemon: Sign in with Roblox, kept in this account's
  * vault, and what it downloads, kept in each project. Signing out, or losing
- * access, deletes all of it. The website has neither.
+ * access, deletes all of it. The website's is `website.ts`.
  */
 
 import { loopbackReceiver } from "../../../server/roblox/loopback.js";
 import { ROBLOX_REDIRECT, RobloxSignIn } from "../../../server/roblox/signin.js";
 import { fileVault } from "../../../server/roblox/vault.js";
 import type { DaemonExtensionOptions } from "../../daemon.js";
-import { AssetCache, downloadRegistry } from "./roblox/assets.js";
+import { AssetCache } from "./roblox/assets.js";
+import { downloadRegistry, projectShelf } from "./roblox/projectShelf.js";
 import type { PlaceEditorCapabilities } from "./routes.js";
 
 export interface PlaceEditorDaemon {
@@ -34,7 +35,10 @@ export function placeEditorDaemon(options: DaemonExtensionOptions): PlaceEditorD
 				})
 			: options.roblox;
 	if (roblox) {
-		assets = new AssetCache({ token: () => roblox.accessToken(), registry: downloadRegistry() });
+		assets = new AssetCache({
+			token: () => roblox.accessToken(),
+			shelf: projectShelf(downloadRegistry()),
+		});
 	}
 	return {
 		capabilities: roblox && assets ? { roblox, robloxAssets: assets } : {},

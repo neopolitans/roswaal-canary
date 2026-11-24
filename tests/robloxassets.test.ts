@@ -1,6 +1,6 @@
 /**
  * What Sign in with Roblox downloads: kept in the project's `.roswaal/assets`,
- * out of Git, fetched only from Roblox's CDN and without the token, Roblox's
+ * out of Git (the daemon), or in the site's browser storage (the website), fetched only from Roblox's CDN and without the token, Roblox's
  * own assets never downloaded, unused ones expiring, and every project's
  * deleted on signing out.
  */
@@ -14,10 +14,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	ASSET_FOLDER,
 	AssetCache,
-	downloadRegistry,
 	isRobloxCdn,
 	LARGEST_ASSET,
 } from "../src/extensions/placeEditor/server/roblox/assets.js";
+import {
+	BROWSER_ASSET_FOLDER,
+	browserShelf,
+} from "../src/extensions/placeEditor/server/roblox/browserShelf.js";
+import {
+	downloadRegistry,
+	projectShelf,
+} from "../src/extensions/placeEditor/server/roblox/projectShelf.js";
 
 let base: string;
 beforeEach(async () => {
@@ -73,7 +80,7 @@ function cache(roblox: ReturnType<typeof fakeRoblox>, now = () => 1_000_000_000)
 		registryFile,
 		assets: new AssetCache({
 			token: async () => "access-token",
-			registry,
+			shelf: projectShelf(registry),
 			fetch: roblox.fetch,
 			now,
 		}),
@@ -211,3 +218,131 @@ describe("keeping downloads only as long as they are needed", () => {
 		await expect(stat(registryFile)).rejects.toThrow();
 	});
 });
+
+describe("downloading on the website, into the browser's own storage", () => {
+	function browserCache(roblox: ReturnType<typeof fakeRoblox>, now = () => 1_000_000_000) {
+		const root = new FakeDir("");
+		return {
+			root,
+			assets: new AssetCache({
+				token: async () => "access-token",
+				shelf: browserShelf(async () => root as unknown as FileSystemDirectoryHandle),
+				fetch: roblox.fetch,
+				now,
+			}),
+		};
+	}
+
+	it("keeps copies in one roblox-assets folder, shared by every project, never in a project", async () => {
+		const { assets, root } = browserCache(fakeRoblox({}));
+		expect(assets.kept).toBe("browser");
+		await assets.fetchAll("/one", ["21"]);
+		expect([...root.dirs.keys()]).toEqual([BROWSER_ASSET_FOLDER]);
+		expect([...(root.dirs.get(BROWSER_ASSET_FOLDER)?.files.keys() ?? [])].sort()).toEqual([
+			"21",
+			"21.json",
+		]);
+		// Another project in the same browser finds it without asking Roblox again.
+		const read = await assets.read("/two", "21");
+		expect(read?.bytes.length).toBe(16);
+		expect(read?.assetTypeId).toBe(4);
+		expect(await assets.summary("/two")).toEqual({ count: 1, bytes: 16 });
+	});
+
+	it("downloads an asset two requests ask for at once only once", async () => {
+		const roblox = fakeRoblox({});
+		const { assets } = browserCache(roblox);
+		await Promise.all([assets.fetchAll("/p", ["22"]), assets.fetchAll("/p", ["22"])]);
+		expect(roblox.seen.filter((s) => s.url.includes("rbxcdn.com"))).toHaveLength(1);
+	});
+
+	it("remembers Roblox's own as skipped, and expires what goes unused", async () => {
+		let clock = 1_000_000_000;
+		const { assets } = browserCache(fakeRoblox({ creator: { "23": "1" } }), () => clock);
+		expect(await assets.fetchAll("/p", ["23", "24"])).toEqual({
+			"23": { state: "skipped", reason: "roblox-made" },
+			"24": { state: "ready", assetTypeId: 4 },
+		});
+		expect(await assets.read("/p", "23")).toBeNull();
+		clock += 31 * 24 * 60 * 60_000;
+		expect(await assets.expire("/p")).toBe(2);
+		expect(await assets.summary("/p")).toEqual({ count: 0, bytes: 0 });
+	});
+
+	it("deletes every copy at once on signing out, and on Clear", async () => {
+		const { assets, root } = browserCache(fakeRoblox({}));
+		await assets.fetchAll("/one", ["25"]);
+		await assets.clearEverywhere();
+		expect([...root.dirs.keys()]).toEqual([]);
+		await assets.fetchAll("/one", ["26"]);
+		await assets.clear("/two");
+		expect([...root.dirs.keys()]).toEqual([]);
+		// Clearing what is already gone is not a failure.
+		await assets.clearEverywhere();
+	});
+});
+
+/** As much of an OPFS directory as the browser shelf asks for. */
+class FakeDir {
+	readonly kind = "directory" as const;
+	readonly files = new Map<string, FakeEntry>();
+	readonly dirs = new Map<string, FakeDir>();
+
+	constructor(readonly name: string) {}
+
+	async getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FakeDir> {
+		const found = this.dirs.get(name);
+		if (found) return found;
+		if (!options?.create) throw new DOMException(name, "NotFoundError");
+		const made = new FakeDir(name);
+		this.dirs.set(name, made);
+		return made;
+	}
+
+	async getFileHandle(name: string, options?: { create?: boolean }): Promise<FakeEntry> {
+		const found = this.files.get(name);
+		if (found) return found;
+		if (!options?.create) throw new DOMException(name, "NotFoundError");
+		const made = new FakeEntry(name);
+		this.files.set(name, made);
+		return made;
+	}
+
+	async removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> {
+		const dir = this.dirs.get(name);
+		if (dir && !options?.recursive && (dir.files.size > 0 || dir.dirs.size > 0))
+			throw new DOMException(name, "InvalidModificationError");
+		if (!this.files.delete(name) && !this.dirs.delete(name))
+			throw new DOMException(name, "NotFoundError");
+	}
+
+	async *values(): AsyncGenerator<FakeDir | FakeEntry> {
+		yield* this.dirs.values();
+		yield* this.files.values();
+	}
+}
+
+class FakeEntry {
+	readonly kind = "file" as const;
+	data = new Uint8Array();
+
+	constructor(readonly name: string) {}
+
+	async getFile() {
+		const data = this.data;
+		return {
+			text: async () => new TextDecoder().decode(data),
+			arrayBuffer: async () => data.slice().buffer,
+		};
+	}
+
+	async createWritable() {
+		return {
+			write: async (chunk: string | Uint8Array) => {
+				this.data =
+					typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
+			},
+			close: async () => undefined,
+		};
+	}
+}

@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.50",
+		date: "2026-11-24",
+		headline: "Meshes and images download on the website too.",
+		added: [
+			"**Signed in with Roblox on the website, a place's meshes and images are downloaded and drawn**, as with the daemon. Copies are kept in the browser's own storage for the site, shared by the projects you open there, and never written into a project folder. Signing out deletes them all.",
+		],
+		changed: [
+			"**The Privacy Policy says where the website keeps downloads**, and that Settings › Scene view clears them.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.49",
 		date: "2026-11-24",
 		headline: "The Privacy Policy is right about Cloudflare, and a failed sign-in says why.",

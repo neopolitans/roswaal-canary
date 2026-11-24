@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.30.0",
+	version: "0.31.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -28,7 +28,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 			what: "Panels from the place toolbar.",
 			kind: "Panels",
 		},
-		{ title: "Scene view, Roblox account", what: "Its pages in Settings.", kind: "Settings" },
+		{ title: "Scene view", what: "Its page in Settings.", kind: "Settings" },
 	],
 	pages: [
 		{
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.31.0",
+			roswaal: "1.1.0-canary.50",
+			date: "2026-11-24",
+			text: "Meshes and images download on the website too, kept in the browser's own storage for the site; the download rules are the daemon's, behind a shelf each host gives.",
+		},
 		{
 			version: "0.30.0",
 			roswaal: "1.1.0-canary.47",

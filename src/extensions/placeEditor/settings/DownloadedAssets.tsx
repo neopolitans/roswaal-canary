@@ -24,7 +24,11 @@ export function DownloadedAssetsSection() {
  * Unused assets go by themselves after 30 days.
  */
 function DownloadedAssetsRow() {
-	const [held, setHeld] = useState<{ count: number; bytes: number } | null>(null);
+	const [held, setHeld] = useState<{
+		kept?: "project" | "browser";
+		count: number;
+		bytes: number;
+	} | null>(null);
 	const [busy, setBusy] = useState(false);
 	const load = useCallback(() => {
 		robloxApi.assets().then(
@@ -42,9 +46,13 @@ function DownloadedAssetsRow() {
 		<Row
 			label="Downloaded assets"
 			help={
-				held.count === 0
-					? "None in this project. Any not used for 30 days are deleted by themselves."
-					: `${held.count} in this project, ${size}, out of Git. Any not used for 30 days are deleted by themselves.`
+				held.kept === "browser"
+					? held.count === 0
+						? "None in this browser. Any not used for 30 days are deleted by themselves."
+						: `${held.count} in this browser, ${size}, shared by the projects you open here. Any not used for 30 days are deleted by themselves.`
+					: held.count === 0
+						? "None in this project. Any not used for 30 days are deleted by themselves."
+						: `${held.count} in this project, ${size}, out of Git. Any not used for 30 days are deleted by themselves.`
 			}
 		>
 			<button

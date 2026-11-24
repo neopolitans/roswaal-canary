@@ -86,6 +86,11 @@ export function RobloxAccountPage() {
 									Downloading meshes and images here is still to come: for now, places show
 									stand-ins.
 								</li>
+							) : browser ? (
+								<li>
+									Meshes and images Roswaal downloads stay in this browser's storage for the site,
+									never in your folders, and are never shared.
+								</li>
 							) : (
 								<li>
 									Meshes and images Roswaal downloads stay in the project's <code>.roswaal</code>{" "}

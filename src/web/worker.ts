@@ -21,6 +21,7 @@
 /// <reference lib="webworker" />
 
 import { VERSION } from "../cli/version.js";
+import { websiteExtensions } from "../extensions/server.js";
 import { errorMessage } from "../server/errors.js";
 import { createProject } from "../server/newProject.js";
 import {
@@ -97,10 +98,14 @@ const roblox = new RobloxSignIn({
 	receiver: channelReceiver(self.location.origin),
 	keptIn: "browser",
 	onChange: (status) => post({ kind: "event", event: "roblox", data: status }),
+	// Signing out, or losing access, deletes every download in this browser.
+	onForget: () => website.forget(),
 });
+/** What the sign-in downloads, kept in this browser's own storage for the site. */
+const website = websiteExtensions(roblox);
 
 const session = new ApiSession({
-	extensions: { placeEditor: { roblox } },
+	extensions: website.capabilities,
 	capabilities: {
 		/**
 		 * The only thing this host can do that a machine cannot: throw the

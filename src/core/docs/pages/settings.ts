@@ -55,7 +55,7 @@ export function settingsPage(): DocPage {
 					[
 						"**Roblox account**",
 						"This computer, or this browser on the website",
-						"Sign in with Roblox, for what Roswaal fetches from Roblox: today the meshes and images the Place Editor draws, downloaded through `roswaal serve`",
+						"Sign in with Roblox, for what Roswaal fetches from Roblox: today the meshes and images the Place Editor draws, kept in the project with `roswaal serve` or in this browser on the website",
 					],
 					["**Canvas**", "This browser", "The grid, wires, node corners, and what scrolling does"],
 					[

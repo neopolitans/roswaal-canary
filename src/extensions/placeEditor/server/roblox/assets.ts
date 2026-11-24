@@ -1,12 +1,14 @@
 /**
  * Assets downloaded through Sign in with Roblox: the meshes and images a
- * place refers to, kept so they can be drawn.
+ * place refers to, kept so they can be drawn. Needs no Node: the daemon and
+ * the website's worker both run it, each with its own shelf.
  *
- * - **Where.** `.roswaal/assets/` in the project: `<id>` holds an asset's
- *   bytes and `<id>.json` what is known about it. A `.gitignore` of `*` keeps
- *   the folder out of Git whatever the project's own `.gitignore` says. Every
- *   write goes through `safeJoin` and the confined filesystem, as every
- *   project write does.
+ * - **Where.** A shelf the host gives. The daemon's (`projectShelf.ts`) is
+ *   the project's `.roswaal/assets/`, out of Git, with a list of the folders
+ *   holding copies so signing out can delete them all. The website's
+ *   (`browserShelf.ts`) is one folder in the site's own browser storage,
+ *   shared by every project opened in that browser and never written into a
+ *   project.
  * - **What is fetched.** The Assets API (`asset:read`) names the creator
  *   first: Roblox's own assets (user 1) are recorded as skipped and never
  *   downloaded, as the Privacy Policy says. Then asset delivery
@@ -14,25 +16,18 @@
  *   one of Roblox's download servers (`isRobloxCdn`), before and after any
  *   redirect (CASA 5.1). They are not sent the token. Each download is
  *   size-limited.
- * - **How long.** An asset unused for 30 days is deleted. Clear downloaded
- *   assets deletes a project's whole folder. Signing out, or losing access,
- *   deletes every project's, through the list `downloadRegistry` keeps of the
- *   folders downloaded into.
+ * - **How long.** An asset unused for 30 days is deleted. Clear deletes what
+ *   the shelf holds for the project (on the website, everything). Signing
+ *   out, or losing access, deletes everything everywhere.
  *
  * Never sold, never put back online, never used to train AI: nothing here
  * sends an asset anywhere.
  */
 
-import nodeFs from "node:fs";
-import os from "node:os";
-import nodePath from "node:path";
-
 import { readLimited } from "../../../../server/download.js";
 import { HttpError, UserError } from "../../../../server/errors.js";
-import { fs } from "../../../../server/host.js";
-import { safeJoin } from "../../../../server/paths.js";
 
-/** Where a project's downloads are kept. */
+/** Where a project's downloads are kept, on the daemon. */
 export const ASSET_FOLDER = ".roswaal/assets";
 /** The most one asset may be. Meshes and images are a few MiB at most. */
 export const LARGEST_ASSET = 32 * 1024 * 1024;
@@ -47,8 +42,6 @@ const ASSETS_API = "https://apis.roblox.com/assets/v1/assets/";
 const DELIVERY_API = "https://apis.roblox.com/asset-delivery-api/v1/assetId/";
 const REQUEST_MS = 20_000;
 const DAY_MS = 24 * 60 * 60_000;
-const IGNORE =
-	"# Assets downloaded through Sign in with Roblox. Never committed: see Roswaal's Privacy Policy.\n*\n";
 
 /** What is known about one asset. */
 export interface AssetRecord {
@@ -68,6 +61,27 @@ export type AssetOutcome =
 	| { state: "ready"; assetTypeId?: number }
 	| { state: "skipped"; reason: "roblox-made" }
 	| { state: "failed"; reason: string };
+
+/**
+ * Where downloads are kept. `root` is the open project's: the daemon keeps
+ * each project's apart, the website keeps one shelf for the browser and
+ * passes over it. Ids reaching a shelf are always digits.
+ */
+export interface AssetShelf {
+	/** Where copies are kept, for the editor to say: the project's folder, or this browser. */
+	readonly kept: "project" | "browser";
+	record(root: string, id: string): Promise<AssetRecord | null>;
+	/** Writes the record, and the bytes when there are any. */
+	keep(root: string, record: AssetRecord, bytes?: Uint8Array): Promise<void>;
+	bytes(root: string, id: string): Promise<Uint8Array | null>;
+	records(root: string): Promise<AssetRecord[]>;
+	/** Deletes one asset, its bytes and its record. */
+	remove(root: string, id: string): Promise<void>;
+	/** Deletes what is kept for this project: on the website, everything. */
+	clear(root: string): Promise<void>;
+	/** Deletes every copy kept anywhere: for signing out, and for lost access. */
+	clearEverywhere(): Promise<void>;
+}
 
 /** An address's scheme and host, and nothing of its path or query. */
 function hostOf(address: unknown): string {
@@ -100,99 +114,34 @@ export function isRobloxCdn(address: string): boolean {
 	}
 }
 
-/**
- * The project folders that hold downloads, in `~/.roswaal/roblox-downloads.json`,
- * so signing out can delete them all and not only the open project's.
- */
-export interface DownloadRegistry {
-	add(root: string): Promise<void>;
-	remove(root: string): Promise<void>;
-	roots(): Promise<string[]>;
-}
-
-export function downloadRegistry(
-	file = nodePath.join(os.homedir(), ".roswaal", "roblox-downloads.json"),
-): DownloadRegistry {
-	const read = async (): Promise<string[]> => {
-		try {
-			const parsed = JSON.parse(await nodeFs.promises.readFile(file, "utf8")) as {
-				roots?: unknown;
-			};
-			return Array.isArray(parsed.roots)
-				? parsed.roots.filter((r): r is string => typeof r === "string")
-				: [];
-		} catch {
-			return [];
-		}
-	};
-	const write = async (roots: string[]) => {
-		await nodeFs.promises.mkdir(nodePath.dirname(file), { recursive: true, mode: 0o700 });
-		await nodeFs.promises.rm(file, { force: true });
-		if (roots.length === 0) return;
-		await nodeFs.promises.writeFile(file, `${JSON.stringify({ roots }, null, "\t")}\n`, {
-			mode: 0o600,
-			flag: "wx",
-		});
-	};
-	return {
-		async add(root) {
-			const roots = await read();
-			if (!roots.includes(root)) await write([...roots, root]);
-		},
-		async remove(root) {
-			const roots = await read();
-			if (roots.includes(root)) await write(roots.filter((r) => r !== root));
-		},
-		roots: read,
-	};
-}
+/** Whether a text is an asset id, as every shelf may assume. */
+const isAssetId = (id: string) => /^\d{1,20}$/.test(id);
 
 export interface AssetCacheOptions {
 	/** An access token from the sign-in, refreshed as it needs. */
 	token: () => Promise<string>;
-	registry: DownloadRegistry;
+	shelf: AssetShelf;
 	fetch?: typeof fetch;
 	now?: () => number;
 }
 
 export class AssetCache {
 	private readonly token: () => Promise<string>;
-	private readonly registry: DownloadRegistry;
+	private readonly shelf: AssetShelf;
 	private readonly fetch: typeof fetch;
 	private readonly now: () => number;
+	/** Downloads under way, so two requests for one asset share one. */
+	private readonly pending = new Map<string, Promise<AssetOutcome>>();
 
 	constructor(options: AssetCacheOptions) {
 		this.token = options.token;
-		this.registry = options.registry;
+		this.shelf = options.shelf;
 		this.fetch = options.fetch ?? fetch;
 		this.now = options.now ?? Date.now;
 	}
 
-	private folder(root: string): string {
-		return safeJoin(root, ASSET_FOLDER);
-	}
-
-	private async record(root: string, id: string): Promise<AssetRecord | null> {
-		try {
-			return JSON.parse(
-				await fs.readFile(nodePath.join(this.folder(root), `${id}.json`), "utf8"),
-			) as AssetRecord;
-		} catch {
-			return null;
-		}
-	}
-
-	private async keep(root: string, record: AssetRecord, bytes?: Uint8Array): Promise<void> {
-		const folder = this.folder(root);
-		await fs.mkdir(folder, { recursive: true });
-		await fs.writeFile(nodePath.join(folder, ".gitignore"), IGNORE, "utf8");
-		if (bytes) await fs.writeFile(nodePath.join(folder, record.assetId), bytes);
-		await fs.writeFile(
-			nodePath.join(folder, `${record.assetId}.json`),
-			`${JSON.stringify(record, null, "\t")}\n`,
-			"utf8",
-		);
-		await this.registry.add(root);
+	get kept(): "project" | "browser" {
+		return this.shelf.kept;
 	}
 
 	/**
@@ -208,7 +157,7 @@ export class AssetCache {
 		const out: Record<string, AssetOutcome> = {};
 		for (const id of new Set(ids)) {
 			try {
-				out[id] = await this.fetchOne(root, id);
+				out[id] = await this.fetchShared(root, id);
 			} catch (err) {
 				out[id] = { state: "failed", reason: err instanceof Error ? err.message : String(err) };
 			}
@@ -216,12 +165,21 @@ export class AssetCache {
 		return out;
 	}
 
+	private fetchShared(root: string, id: string): Promise<AssetOutcome> {
+		const key = `${root}\0${id}`;
+		const under = this.pending.get(key);
+		if (under) return under;
+		const started = this.fetchOne(root, id).finally(() => this.pending.delete(key));
+		this.pending.set(key, started);
+		return started;
+	}
+
 	private async fetchOne(root: string, id: string): Promise<AssetOutcome> {
-		if (!/^\d{1,20}$/.test(id)) throw new UserError(`"${id.slice(0, 24)}" is not an asset id.`);
-		const known = await this.record(root, id);
+		if (!isAssetId(id)) throw new UserError(`"${id.slice(0, 24)}" is not an asset id.`);
+		const known = await this.shelf.record(root, id);
 		if (known?.skipped) return { state: "skipped", reason: known.skipped };
 		if (known) {
-			await this.keep(root, { ...known, used: this.now() });
+			await this.shelf.keep(root, { ...known, used: this.now() });
 			return { state: "ready", assetTypeId: known.assetTypeId };
 		}
 
@@ -239,7 +197,7 @@ export class AssetCache {
 		const creatorUserId = about.creationContext?.creator?.userId;
 		const now = this.now();
 		if (creatorUserId === ROBLOX_USER_ID) {
-			await this.keep(root, {
+			await this.shelf.keep(root, {
 				assetId: id,
 				creatorUserId,
 				skipped: "roblox-made",
@@ -275,7 +233,7 @@ export class AssetCache {
 		if (!download.ok)
 			throw new HttpError(502, `Asset ${id} could not be downloaded (${download.status}).`);
 		const bytes = await readLimited(download, LARGEST_ASSET, `Asset ${id}`);
-		await this.keep(
+		await this.shelf.keep(
 			root,
 			{
 				assetId: id,
@@ -299,25 +257,22 @@ export class AssetCache {
 		root: string,
 		id: string,
 	): Promise<{ assetTypeId?: number; bytes: Uint8Array } | null> {
-		if (!/^\d{1,20}$/.test(id)) return null;
-		const record = await this.record(root, id);
+		if (!isAssetId(id)) return null;
+		const record = await this.shelf.record(root, id);
 		if (!record || record.skipped) return null;
-		try {
-			const bytes = await fs.readFile(nodePath.join(this.folder(root), id));
-			return {
-				...(record.assetTypeId !== undefined ? { assetTypeId: record.assetTypeId } : {}),
-				bytes,
-			};
-		} catch {
-			return null;
-		}
+		const bytes = await this.shelf.bytes(root, id);
+		if (!bytes) return null;
+		return {
+			...(record.assetTypeId !== undefined ? { assetTypeId: record.assetTypeId } : {}),
+			bytes,
+		};
 	}
 
-	/** How many assets this project holds, and how many bytes. Reads only. */
+	/** How many assets are kept for this project (on the website, in all), and how many bytes. Reads only. */
 	async summary(root: string): Promise<{ count: number; bytes: number }> {
 		let count = 0;
 		let bytes = 0;
-		for (const record of await this.records(root)) {
+		for (const record of await this.shelf.records(root)) {
 			if (record.skipped) continue;
 			count++;
 			bytes += record.size ?? 0;
@@ -325,52 +280,25 @@ export class AssetCache {
 		return { count, bytes };
 	}
 
-	private async records(root: string): Promise<AssetRecord[]> {
-		let names: string[];
-		try {
-			names = await fs.readdir(this.folder(root));
-		} catch {
-			return [];
-		}
-		const out: AssetRecord[] = [];
-		for (const name of names) {
-			const id = /^(\d+)\.json$/.exec(name)?.[1];
-			if (!id) continue;
-			const record = await this.record(root, id);
-			if (record) out.push(record);
-		}
-		return out;
-	}
-
 	/** Deletes what has gone unused for `UNUSED_DAYS`. */
 	async expire(root: string): Promise<number> {
 		const before = this.now() - UNUSED_DAYS * DAY_MS;
 		let gone = 0;
-		for (const record of await this.records(root)) {
-			if (record.used >= before) continue;
-			const folder = this.folder(root);
-			await fs.rm(nodePath.join(folder, record.assetId), { force: true });
-			await fs.rm(nodePath.join(folder, `${record.assetId}.json`), { force: true });
+		for (const record of await this.shelf.records(root)) {
+			if (record.used >= before || !isAssetId(record.assetId)) continue;
+			await this.shelf.remove(root, record.assetId);
 			gone++;
 		}
 		return gone;
 	}
 
-	/** Deletes the project's downloads, folder and all. */
-	async clear(root: string): Promise<void> {
-		await fs.rm(this.folder(root), { recursive: true, force: true });
-		await this.registry.remove(root);
+	/** Deletes the project's downloads: on the website, every download in this browser. */
+	clear(root: string): Promise<void> {
+		return this.shelf.clear(root);
 	}
 
-	/** Deletes every project's downloads: for signing out, and for lost access. */
-	async clearEverywhere(): Promise<void> {
-		for (const root of await this.registry.roots()) {
-			try {
-				await this.clear(root);
-			} catch {
-				// A folder since moved or deleted has nothing left to delete.
-				await this.registry.remove(root);
-			}
-		}
+	/** Deletes every download kept anywhere: for signing out, and for lost access. */
+	clearEverywhere(): Promise<void> {
+		return this.shelf.clearEverywhere();
 	}
 }

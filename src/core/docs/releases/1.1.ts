@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.100",
+		date: "2026-11-25",
+		headline: "Parts block light objects on the light object grid, and darken the cells they fill.",
+		added: [
+			"**Parts block light objects on the light object grid** near the camera, and the cells they partly fill keep only the light of the air round them, as Studio's Soft voxels do: a room's corners darker, walls between a light and what is behind them. A surface takes its light from the air in front of it.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.99",
 		date: "2026-11-25",
 		headline: "The light object grid fills only what the camera newly reaches.",

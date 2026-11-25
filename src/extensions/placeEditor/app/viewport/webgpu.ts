@@ -48,6 +48,7 @@ import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geom
 import { canvasBytes, GpuMemory, trackWebGpu } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
+import { OCC_CELL, OCC_MARGIN, OCC_SIZE, OCC_STEPS, Occupancy } from "./occupancy.js";
 import { lightGridFor } from "./prepare.js";
 import {
 	type Probe,
@@ -357,10 +358,22 @@ const GRID_FILL = /* wgsl */ `${SOFT_FALL}
 // the switches, Soft, and the cascade's lowest cell up; region: its cells
 // along x, y and z. Stored wrapped round across (x along u, z along v) and up
 // from the cascade's lowest cell (y along w, each cascade a third).
-struct GridP { origin: vec4f, info: vec4f, region: vec4f };
+// occ: the occupancy window's lowest cell (x, y, z), and w whether to read it
+// (the finest cascade alone): see occupancy.ts.
+struct GridP { origin: vec4f, info: vec4f, region: vec4f, occ: vec4f };
 @group(0) @binding(3) var<uniform> gp: GridP;
 @group(0) @binding(4) var gridA: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(5) var gridB: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(6) var occ: texture_3d<f32>;
+// What parts fill of the cell at p, 0 to 1: wrapped round across as the grid
+// is, and nothing outside the window the GPU holds.
+fn filled(p: vec3f) -> f32 {
+	let s = ${OCC_SIZE};
+	let c = vec3i(floor(p / ${OCC_CELL}.0));
+	let rel = c - vec3i(gp.occ.xyz);
+	if (any(rel < vec3i(0)) || any(rel >= vec3i(s))) { return 0.0; }
+	return textureLoad(occ, vec3i(((c.x % s) + s) % s, rel.y, ((c.z % s) + s) % s), 0).r;
+}
 fn lightCell(p: vec3f) -> u32 {
 	let c = vec3i(floor(p / ${LIGHT_CELL}.0));
 	let h = (bitcast<u32>(c.x) * 73856093u) ^ (bitcast<u32>(c.y) * 19349663u) ^ (bitcast<u32>(c.z) * 83492791u);
@@ -416,6 +429,18 @@ fn lightCell(p: vec3f) -> u32 {
 			}
 			// A light smaller than the sample's cube: spread over it, its total kept.
 			k2 = k2 * min(1.0, 0.52 * pow(a.w / r, 3.0));
+			// On the way to it, each cell lets through what parts leave of it:
+			// the light's own cell and the sample's are not in the way.
+			if (gp.occ.w > 0.5 && k2 > 0.0) {
+				let dir = to / max(dist, 1e-4);
+				let steps = min(i32(dist / ${OCC_CELL}.0), ${OCC_STEPS});
+				var through = 1.0;
+				for (var s = 1; s < steps; s++) {
+					through = through * (1.0 - filled(p + dir * f32(s) * ${OCC_CELL}.0));
+					if (through < 0.02) { break; }
+				}
+				k2 = k2 * through;
+			}
 			let lit = col.rgb * k2;
 			let lum = dot(lit, vec3f(0.2126, 0.7152, 0.0722));
 			light = light + lit;
@@ -424,8 +449,11 @@ fn lightCell(p: vec3f) -> u32 {
 		}
 	}
 	let n = f32(m * m * m);
-	light = light / n;
-	let w = weight / n;
+	// A cell partly inside a part keeps the light of only the air round it.
+	var air = 1.0;
+	if (gp.occ.w > 0.5) { air = 1.0 - filled(corner + vec3f(size * 0.5)); }
+	light = light / n * air;
+	let w = weight / n * air;
 	// Where it comes from, from the cell's middle in cells, times its weight:
 	// a wrapped grid has no middle of its own to measure from.
 	let middle = corner + vec3f(size * 0.5);
@@ -663,7 +691,10 @@ fn gridLight(k: u32, p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 }
 // The finest cascade p is a cell inside, eased into the next over two
 // cells before its edge; past the coarsest, every light worked out here.
-fn gridLamps(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
+fn gridLamps(surface: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
+	// Read half a cell out from the face, on its air side, as Studio's Soft
+	// voxels light a surface: not averaged with the cells inside its part.
+	let p = surface + n * (gridU.cascades[0].w * 0.5);
 	for (var k = 0u; k < ${LIGHT_GRID_CASCADES}u; k++) {
 		let g = gridU.cascades[k];
 		let half = g.w * f32(${LIGHT_GRID_CELLS}) * 0.5;
@@ -3263,6 +3294,10 @@ export class WebGpuView implements ViewRenderer {
 			this.skyKey = key;
 			this.skyDirty = true;
 			this.box = sceneBox(scene);
+			// What parts fill, again, and the finest cascade with it: not while a drag moves them.
+			this.occ = null;
+			this.occAt = null;
+			this.gridOrigins[0] = null;
 		}
 		this.setLights(scene.lights);
 		if (this.skyImages && this.sunTexture) this.rebind();
@@ -5699,6 +5734,98 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private gridCell: number | null = null;
 	/** The setting, Automatic resolved against the place's style: see autoLightGrid. */
 	private gridSetting: number | null | "auto" = null;
+	/** What the place's parts fill, built when the grid first needs it: see occupancy.ts. */
+	private occ: Occupancy | null = null;
+	/** The cells round the finest cascade on the GPU, wrapped across. */
+	private occTex: GPUTexture | null = null;
+	/** The occupancy window's lowest cell; null, to be uploaded whole. */
+	private occAt: number[] | null = null;
+	private occBuilding = false;
+
+	/**
+	 * The occupancy window round the finest cascade, its lowest cell at `at`:
+	 * whole, or only the slices across it newly takes in, each written where
+	 * its place in the world falls (wrapped round in x and z).
+	 */
+	private syncOccupancy(at: number[]): void {
+		const d = this.device;
+		const n = OCC_SIZE;
+		this.occTex ??= d.createTexture({
+			size: [n, n, n],
+			dimension: "3d",
+			format: "r8unorm",
+			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST,
+		});
+		// Built in a task of its own, never inside a frame: a large place's
+		// parts take a while, and a long frame while the place loads let a
+		// texture be replaced under one still being sent. The finest cascade
+		// is filled again with it once it is ready.
+		if (!this.occ) {
+			const scene = this.scene;
+			if (scene && !this.occBuilding) {
+				this.occBuilding = true;
+				setTimeout(() => {
+					this.occBuilding = false;
+					if (this.scene !== scene) return;
+					this.occ = Occupancy.fromScene(scene);
+					this.occAt = null;
+					this.gridOrigins[0] = null;
+				}, 0);
+			}
+			return;
+		}
+		const occ = this.occ;
+		const was = this.occAt;
+		const regions: { min: number[]; count: number[] }[] = [];
+		if (
+			!was ||
+			was[1] !== at[1] ||
+			Math.abs(at[0] - was[0]) >= n ||
+			Math.abs(at[2] - was[2]) >= n
+		) {
+			regions.push({ min: [...at], count: [n, n, n] });
+		} else {
+			const dx = at[0] - was[0];
+			const dz = at[2] - was[2];
+			if (dx !== 0)
+				regions.push({
+					min: [dx > 0 ? was[0] + n : at[0], at[1], at[2]],
+					count: [Math.abs(dx), n, n],
+				});
+			if (dz !== 0)
+				regions.push({
+					min: [at[0], at[1], dz > 0 ? was[2] + n : at[2]],
+					count: [n, n, Math.abs(dz)],
+				});
+		}
+		this.occAt = [...at];
+		const wrap = (v: number) => ((v % n) + n) % n;
+		for (const { min, count } of regions) {
+			// Split where x or z wraps round, so each piece is one block of the texture.
+			const pieces = (a: number) => {
+				const start = wrap(min[a]);
+				const first = Math.min(count[a], n - start);
+				return first < count[a]
+					? [
+							{ from: 0, to: start, len: first },
+							{ from: first, to: 0, len: count[a] - first },
+						]
+					: [{ from: 0, to: start, len: count[a] }];
+			};
+			for (const px of pieces(0))
+				for (const pz of pieces(2)) {
+					const size = [px.len, count[1], pz.len];
+					const bytes = occ.region([min[0] + px.from, min[1], min[2] + pz.from], size);
+					d.queue.writeTexture(
+						{ texture: this.occTex, origin: [px.to, min[1] - at[1], pz.to] },
+						bytes,
+						{ bytesPerRow: size[0], rowsPerImage: size[1] },
+						size,
+					);
+				}
+		}
+	}
+
 	/** The style the grid was filled for: its light falls as Soft's or Realistic's. */
 	private gridSoft = false;
 	private gridA: GPUTexture | null = null;
@@ -5826,13 +5953,21 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		}
 		if (jobs.length === 0) return;
 		const d = this.device;
+		// What parts fill round the finest cascade, before its cells are filled.
+		const finest = this.gridOrigins[0];
+		const occAt = finest
+			? [finest[0] - OCC_MARGIN, finest[1] - OCC_MARGIN, finest[2] - OCC_MARGIN]
+			: null;
+		if (occAt) this.syncOccupancy(occAt);
+		// Not yet made (no finest cascade yet): the next frame.
+		if (!this.occTex) return;
 		this.gridPipe ??= d.createComputePipeline({
 			layout: "auto",
 			compute: { module: d.createShaderModule({ code: GRID_FILL }), entryPoint: "fill" },
 		});
 		// A block each: all are written before the pass runs.
 		while (this.gridParams.length < jobs.length)
-			this.gridParams.push(d.createBuffer({ size: 48, usage: BUFFER.UNIFORM | BUFFER.COPY_DST }));
+			this.gridParams.push(d.createBuffer({ size: 64, usage: BUFFER.UNIFORM | BUFFER.COPY_DST }));
 		const bits = this.render ? renderDebug(this.render)[1] : 0;
 		const soft = this.lighting?.soft ? 1 : 0;
 		const pass = encoder.beginComputePass();
@@ -5852,6 +5987,9 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					lowest,
 					...region.count,
 					0,
+					...(occAt ?? [0, 0, 0]),
+					// Blocking and what each cell keeps: the finest cascade alone.
+					k === 0 && occAt && this.occ ? 1 : 0,
 				]),
 			);
 			pass.setBindGroup(
@@ -5865,6 +6003,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 						{ binding: 3, resource: { buffer: this.gridParams[j] } },
 						{ binding: 4, resource: this.gridA!.createView({ dimension: "3d" }) },
 						{ binding: 5, resource: this.gridB!.createView({ dimension: "3d" }) },
+						{ binding: 6, resource: this.occTex!.createView({ dimension: "3d" }) },
 					],
 				}),
 			);

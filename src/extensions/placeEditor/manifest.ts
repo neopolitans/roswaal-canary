@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.66.0",
+	version: "0.67.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.67.0",
+			roswaal: "1.1.0-canary.100",
+			date: "2026-11-25",
+			text: "Occupancy (occupancy.ts): part boxes in 64-stud buckets, a region's 4-stud cells worked out on demand; OCC_SIZE 64-cell r8unorm window round the finest cascade, wrapped across, slices uploaded as it moves. GRID_FILL (finest cascade): paths to lights stepped through it (OCC_STEPS), each cell darkened by what fills it. gridLamps reads half a cell out from the face.",
+		},
 		{
 			version: "0.66.0",
 			roswaal: "1.1.0-canary.99",

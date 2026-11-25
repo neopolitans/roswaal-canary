@@ -26,6 +26,56 @@ export const OCC_SIZE = 64;
 export const OCC_MARGIN = 16;
 /** The cells a path to a light is stepped through, at most: a light's Range reaches 60 studs. */
 export const OCC_STEPS = 16;
+/** The coarse level's cells a side: each a block of 2 x 2 x 2 cells (OccupancyCoarse). */
+export const OCC_COARSE_SIZE = OCC_SIZE / 2;
+
+/**
+ * The occupancy window's coarse level: each block of 2 x 2 x 2 cells, 8
+ * studs a side, the most any of them is filled. A path to a light that
+ * meets an empty block steps past every cell in it without reading them
+ * (1.1.0, for a tablet's fill). Kept from a mirror of the window as it is
+ * uploaded, in the texture's own wrapped cells: a block of the texture is a
+ * block of the world (OCC_SIZE is even), and one whose cells came from either
+ * side of the window is the most of both, so it is empty only where every
+ * cell the window reads is.
+ */
+export class OccupancyCoarse {
+	private fine = new Uint8Array(OCC_SIZE ** 3);
+
+	/** The window's writes, mirrored; and what to upload to the coarse level for them. */
+	apply(writes: readonly OccupancyWrite[]): OccupancyWrite[] {
+		const n = OCC_SIZE;
+		const out: OccupancyWrite[] = [];
+		for (const w of writes) {
+			const [sx, sy, sz] = w.size;
+			for (let z = 0; z < sz; z++)
+				for (let y = 0; y < sy; y++) {
+					const from = (z * sy + y) * sx;
+					const to = ((w.to[2] + z) * n + (w.to[1] + y)) * n + w.to[0];
+					this.fine.set(w.bytes.subarray(from, from + sx), to);
+				}
+			// The blocks the write touches, each the most of its eight cells.
+			const lo = w.to.map((t) => t >> 1);
+			const hi = w.to.map((t, a) => (t + w.size[a] - 1) >> 1);
+			const size = lo.map((l, a) => hi[a] - l + 1);
+			const bytes = new Uint8Array(size[0] * size[1] * size[2]);
+			for (let z = 0; z < size[2]; z++)
+				for (let y = 0; y < size[1]; y++)
+					for (let x = 0; x < size[0]; x++) {
+						const c = [lo[0] + x, lo[1] + y, lo[2] + z];
+						let most = 0;
+						for (let k = 0; k < 8; k++) {
+							const f =
+								((2 * c[2] + (k >> 2)) * n + 2 * c[1] + ((k >> 1) & 1)) * n + 2 * c[0] + (k & 1);
+							if (this.fine[f] > most) most = this.fine[f];
+						}
+						bytes[(z * size[1] + y) * size[0] + x] = most;
+					}
+			out.push({ to: lo, size, bytes });
+		}
+		return out;
+	}
+}
 /** A piece of the occupancy window to upload: where it goes in the texture, its size, and its cells. */
 export interface OccupancyWrite {
 	to: number[];

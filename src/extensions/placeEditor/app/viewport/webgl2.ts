@@ -43,10 +43,12 @@ import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import {
 	OCC_CELL,
+	OCC_COARSE_SIZE,
 	OCC_MARGIN,
 	OCC_SIZE,
 	OCC_STEPS,
 	Occupancy,
+	OccupancyCoarse,
 	occupancyWrites,
 } from "./occupancy.js";
 import { lightGridFor } from "./prepare.js";
@@ -78,6 +80,8 @@ import {
 	GLOW_NARROW,
 	GLOW_WIDE,
 	type GlowShape,
+	GRID_FILL_BUDGET,
+	GridFillPlan,
 	glowShape,
 	glowSpread,
 	gradeBlock,
@@ -992,6 +996,9 @@ uniform vec4 gLo;
 uniform vec4 gCount;
 uniform vec4 gOcc;
 uniform highp sampler3D occ;
+// Its coarse level, as WebGpuView's GRID_FILL's: see OccupancyCoarse.
+uniform highp sampler3D occCoarse;
+bool blockEmpty(ivec3 b) { return texelFetch(occCoarse, b & ivec3(${OCC_COARSE_SIZE - 1}), 0).r == 0.0; }
 layout(location = 0) out vec4 oA;
 layout(location = 1) out vec4 oB;
 int wrapBy(int v, int n) { return v - n * int(floor(float(v) / float(n))); }
@@ -1070,7 +1077,14 @@ void main() {
 				int steps = min(int(dist / ${OCC_CELL}.0), ${OCC_STEPS});
 				float through = 1.0;
 				for (int q = 1; q < steps; q++) {
-					through *= 1.0 - filled(p + dir * float(q) * ${OCC_CELL}.0);
+					vec3 at = p + dir * float(q) * ${OCC_CELL}.0;
+					ivec3 block = ivec3(floor(at / ${OCC_CELL}.0)) >> 1;
+					// Nothing in its block: on past the block's last step, none read.
+					if (blockEmpty(block)) {
+						while (q + 1 < steps && (ivec3(floor((p + dir * float(q + 1) * ${OCC_CELL}.0) / ${OCC_CELL}.0)) >> 1) == block) q++;
+						continue;
+					}
+					through *= 1.0 - filled(at);
 					if (through < 0.02) break;
 				}
 				k2 *= through;
@@ -2972,13 +2986,15 @@ export class WebGl2View implements ViewRenderer {
 	private gridVao: WebGLVertexArrayObject | null = null;
 	private gridProg: Program | null = null;
 	private gridFill: Record<
-		"size" | "lo" | "count" | "occ" | "occTex",
+		"size" | "lo" | "count" | "occ" | "occTex" | "occCoarse",
 		WebGLUniformLocation | null
 	> | null = null;
 	/** Where each cascade stands, its lowest cell in whole cells; null, not yet filled. */
 	private gridOrigins: (number[] | null)[] = [];
 	/** The lights or their switches changed: every cascade filled again. */
 	private gridStale = true;
+	/** The light grid's steps as the eye moves, filled a budget a frame: see GridFillPlan. */
+	private gridPlan = new GridFillPlan();
 	/** gridC's cascades, then gridInfo: see writeGridUniform. */
 	private gridBlock = new Float32Array(4 * (LIGHT_GRID_CASCADES + 1));
 	private gridLocations = new Map<
@@ -2991,6 +3007,9 @@ export class WebGl2View implements ViewRenderer {
 	private occ: Occupancy | null = null;
 	/** The cells round the finest cascade, on unit 24, wrapped round. */
 	private occTex: WebGLTexture | null = null;
+	/** The window's coarse level, on unit 15, and the mirror it is reduced from: see OccupancyCoarse. */
+	private occCoarseTex: WebGLTexture | null = null;
+	private occCoarse = new OccupancyCoarse();
 	/** The occupancy window's lowest cell; null, to be uploaded whole. */
 	private occAt: number[] | null = null;
 	private occBuilding = false;
@@ -3118,6 +3137,14 @@ export class WebGl2View implements ViewRenderer {
 			gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, n, n, n);
 			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
 			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			// Its coarse level, made with it, on unit 15.
+			const m = OCC_COARSE_SIZE;
+			this.occCoarseTex = gl.createTexture()!;
+			gl.activeTexture(gl.TEXTURE15);
+			gl.bindTexture(gl.TEXTURE_3D, this.occCoarseTex);
+			gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, m, m, m);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 			gl.activeTexture(gl.TEXTURE0);
 		}
 		// Built in a task of its own, never inside a frame: a large place's
@@ -3137,10 +3164,27 @@ export class WebGl2View implements ViewRenderer {
 			}
 			return;
 		}
+		const writes = occupancyWrites(this.occ, this.occAt, at);
+		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+		gl.activeTexture(gl.TEXTURE15);
+		gl.bindTexture(gl.TEXTURE_3D, this.occCoarseTex);
+		for (const piece of this.occCoarse.apply(writes))
+			gl.texSubImage3D(
+				gl.TEXTURE_3D,
+				0,
+				piece.to[0],
+				piece.to[1],
+				piece.to[2],
+				piece.size[0],
+				piece.size[1],
+				piece.size[2],
+				gl.RED,
+				gl.UNSIGNED_BYTE,
+				piece.bytes,
+			);
 		gl.activeTexture(gl.TEXTURE24);
 		gl.bindTexture(gl.TEXTURE_3D, this.occTex);
-		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-		for (const piece of occupancyWrites(this.occ, this.occAt, at))
+		for (const piece of writes)
 			gl.texSubImage3D(
 				gl.TEXTURE_3D,
 				0,
@@ -3172,20 +3216,46 @@ export class WebGl2View implements ViewRenderer {
 		const gl = this.gl;
 		const stale = this.gridStale;
 		this.gridStale = false;
+		if (stale) this.gridPlan.reset();
 		const jobs: { k: number; region: LightGridRegion }[] = [];
 		let whole = 0;
+		// A step's cells a budget a frame, the finest cascade's first: see GridFillPlan.
+		let budget = GRID_FILL_BUDGET;
 		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			// Filled whole instead (the parts changed): its step is forgotten.
+			if (!this.gridOrigins[k]) this.gridPlan.drop(k);
+			if (this.gridPlan.busy(k)) {
+				const part = this.gridPlan.take(k, budget);
+				budget -= part.cells;
+				for (const region of part.jobs) jobs.push({ k, region });
+				if (part.done) this.gridOrigins[k] = part.done;
+				else this.onRedraw?.();
+				continue;
+			}
 			const was = stale ? null : (this.gridOrigins[k] ?? null);
 			const move = lightGridMove(camera.eye, cell * 2 ** k, was);
 			if (move.fill.length === 0) continue;
 			const all = move.fill[0].count.every((c) => c === LIGHT_GRID_CELLS);
+			// Once filled, one whole cascade a frame, and only in a frame with no
+			// other whole-place work (see the frame's catching up): the rest after.
 			if (all && was && (whole > 0 || !wholeAllowed)) {
 				this.onRedraw?.();
 				continue;
 			}
-			if (all) whole++;
-			this.gridOrigins[k] = move.origin;
-			for (const region of move.fill) jobs.push({ k, region });
+			if (all || !was) {
+				if (all) whole++;
+				this.gridOrigins[k] = move.origin;
+				for (const region of move.fill) jobs.push({ k, region });
+				continue;
+			}
+			// A step: the cells it takes in over this frame and the next few, the
+			// cascade read where it was until they are all filled.
+			this.gridPlan.start(k, move.origin, move.fill);
+			const part = this.gridPlan.take(k, budget);
+			budget -= part.cells;
+			for (const region of part.jobs) jobs.push({ k, region });
+			if (part.done) this.gridOrigins[k] = part.done;
+			else this.onRedraw?.();
 		}
 		// What changed lights reach, in the cascades as they now stand.
 		const dirty = stale ? [] : this.gridDirty;
@@ -3197,8 +3267,9 @@ export class WebGl2View implements ViewRenderer {
 				if (region) jobs.push({ k, region });
 			}
 		if (jobs.length === 0) return false;
-		// What parts fill round the finest cascade, before its cells are filled.
-		const finest = this.gridOrigins[0];
+		// What parts fill round the finest cascade, before its cells are filled:
+		// round where it is going, while it steps.
+		const finest = this.gridPlan.target(0) ?? this.gridOrigins[0];
 		const occAt = finest
 			? [finest[0] - OCC_MARGIN, finest[1] - OCC_MARGIN, finest[2] - OCC_MARGIN]
 			: null;
@@ -3214,6 +3285,7 @@ export class WebGl2View implements ViewRenderer {
 				count: at("gCount"),
 				occ: at("gOcc"),
 				occTex: at("occ"),
+				occCoarse: at("occCoarse"),
 			};
 		}
 		const u = this.gridFill!;
@@ -3226,6 +3298,9 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniform1i(u.occTex, 24);
 		gl.activeTexture(gl.TEXTURE24);
 		gl.bindTexture(gl.TEXTURE_3D, this.occTex);
+		gl.uniform1i(u.occCoarse, 15);
+		gl.activeTexture(gl.TEXTURE15);
+		gl.bindTexture(gl.TEXTURE_3D, this.occCoarseTex);
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.gridFbo);
 		gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);

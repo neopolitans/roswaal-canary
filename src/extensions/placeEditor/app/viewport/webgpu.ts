@@ -50,10 +50,13 @@ import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import {
 	OCC_CELL,
+	OCC_COARSE_SIZE,
 	OCC_MARGIN,
 	OCC_SIZE,
 	OCC_STEPS,
 	Occupancy,
+	OccupancyCoarse,
+	type OccupancyWrite,
 	occupancyWrites,
 } from "./occupancy.js";
 import { lightGridFor } from "./prepare.js";
@@ -110,6 +113,8 @@ import {
 	type ImageQuad,
 	imageOrder,
 	imageQuads,
+	GRID_FILL_BUDGET,
+	GridFillPlan,
 	LIGHT_CELL,
 	LIGHT_CHANGES_MOST,
 	LIGHT_GRID_CASCADES,
@@ -391,6 +396,12 @@ struct GridP { origin: vec4f, info: vec4f, region: vec4f, occ: vec4f };
 @group(0) @binding(4) var gridA: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(5) var gridB: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(6) var occ: texture_3d<f32>;
+// Its coarse level: each 2 x 2 x 2 cells' most, so a path steps past an
+// empty block unread (see OccupancyCoarse).
+@group(0) @binding(7) var occCoarse: texture_3d<f32>;
+fn blockEmpty(b: vec3i) -> bool {
+	return textureLoad(occCoarse, b & vec3i(${OCC_COARSE_SIZE - 1}), 0).r == 0.0;
+}
 // What parts fill of the cell at p, 0 to 1: wrapped round as the grid is,
 // and nothing outside the window the GPU holds.
 fn filled(p: vec3f) -> f32 {
@@ -475,7 +486,20 @@ fn lightCell(p: vec3f) -> u32 {
 				let steps = min(i32(dist / ${OCC_CELL}.0), ${OCC_STEPS});
 				var through = 1.0;
 				for (var s = 1; s < steps; s++) {
-					through = through * (1.0 - filled(p + dir * f32(s) * ${OCC_CELL}.0));
+					let q = p + dir * f32(s) * ${OCC_CELL}.0;
+					let block = vec3i(floor(q / ${OCC_CELL}.0)) >> vec3u(1u);
+					// Nothing in its block: on past the block's last step, none read,
+					// each of which would let all the light through.
+					if (blockEmpty(block)) {
+						loop {
+							if (s + 1 >= steps) { break; }
+							let next = vec3i(floor((p + dir * f32(s + 1) * ${OCC_CELL}.0) / ${OCC_CELL}.0)) >> vec3u(1u);
+							if (any(next != block)) { break; }
+							s++;
+						}
+						continue;
+					}
+					through = through * (1.0 - filled(q));
 					if (through < 0.02) { break; }
 				}
 				k2 = k2 * through;
@@ -5870,6 +5894,9 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private occ: Occupancy | null = null;
 	/** The cells round the finest cascade on the GPU, wrapped across. */
 	private occTex: GPUTexture | null = null;
+	/** The window's coarse level, and the mirror it is reduced from: see OccupancyCoarse. */
+	private occCoarseTex: GPUTexture | null = null;
+	private occCoarse = new OccupancyCoarse();
 	/** The occupancy window's lowest cell; null, to be uploaded whole. */
 	private occAt: number[] | null = null;
 	private occBuilding = false;
@@ -5884,6 +5911,14 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const n = OCC_SIZE;
 		this.occTex ??= d.createTexture({
 			size: [n, n, n],
+			dimension: "3d",
+			format: "r8unorm",
+			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST,
+		});
+		// Its coarse level, made with it: the fill binds both from its first frame.
+		const m = OCC_COARSE_SIZE;
+		this.occCoarseTex ??= d.createTexture({
+			size: [m, m, m],
 			dimension: "3d",
 			format: "r8unorm",
 			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST,
@@ -5906,13 +5941,18 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			}
 			return;
 		}
-		for (const piece of occupancyWrites(this.occ, this.occAt, at))
-			d.queue.writeTexture(
-				{ texture: this.occTex, origin: piece.to },
-				piece.bytes,
-				{ bytesPerRow: piece.size[0], rowsPerImage: piece.size[1] },
-				piece.size,
-			);
+		const writes = occupancyWrites(this.occ, this.occAt, at);
+		const upload = (texture: GPUTexture, pieces: readonly OccupancyWrite[]) => {
+			for (const piece of pieces)
+				d.queue.writeTexture(
+					{ texture, origin: piece.to },
+					piece.bytes,
+					{ bytesPerRow: piece.size[0], rowsPerImage: piece.size[1] },
+					piece.size,
+				);
+		};
+		upload(this.occTex, writes);
+		upload(this.occCoarseTex, this.occCoarse.apply(writes));
 		this.occAt = [...at];
 	}
 
@@ -5929,6 +5969,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private gridOrigins: (number[] | null)[] = [];
 	/** The lights or their switches changed: every cascade filled again. */
 	private gridStale = true;
+	/** The light grid's steps as the eye moves, filled a budget a frame: see GridFillPlan. */
+	private gridPlan = new GridFillPlan();
 
 	setLightGrid(setting: number | null | "auto"): void {
 		this.gridSetting = setting;
@@ -6028,9 +6070,22 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		if (cell === null || !this.gridA || !this.gridB || !this.hasLights) return false;
 		const stale = this.gridStale;
 		this.gridStale = false;
+		if (stale) this.gridPlan.reset();
 		const jobs: { k: number; region: LightGridRegion }[] = [];
 		let whole = 0;
+		// A step's cells a budget a frame, the finest cascade's first: see GridFillPlan.
+		let budget = GRID_FILL_BUDGET;
 		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			// Filled whole instead (the parts changed): its step is forgotten.
+			if (!this.gridOrigins[k]) this.gridPlan.drop(k);
+			if (this.gridPlan.busy(k)) {
+				const part = this.gridPlan.take(k, budget);
+				budget -= part.cells;
+				for (const region of part.jobs) jobs.push({ k, region });
+				if (part.done) this.gridOrigins[k] = part.done;
+				else this.onRedraw?.();
+				continue;
+			}
 			const was = stale ? null : (this.gridOrigins[k] ?? null);
 			const move = lightGridMove(eye, cell * 2 ** k, was);
 			if (move.fill.length === 0) continue;
@@ -6041,9 +6096,20 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				this.onRedraw?.();
 				continue;
 			}
-			if (all) whole++;
-			this.gridOrigins[k] = move.origin;
-			for (const region of move.fill) jobs.push({ k, region });
+			if (all || !was) {
+				if (all) whole++;
+				this.gridOrigins[k] = move.origin;
+				for (const region of move.fill) jobs.push({ k, region });
+				continue;
+			}
+			// A step: the cells it takes in over this frame and the next few, the
+			// cascade read where it was until they are all filled.
+			this.gridPlan.start(k, move.origin, move.fill);
+			const part = this.gridPlan.take(k, budget);
+			budget -= part.cells;
+			for (const region of part.jobs) jobs.push({ k, region });
+			if (part.done) this.gridOrigins[k] = part.done;
+			else this.onRedraw?.();
 		}
 		// What changed lights reach, in the cascades as they now stand.
 		const dirty = stale ? [] : this.gridDirty;
@@ -6056,8 +6122,9 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			}
 		if (jobs.length === 0) return false;
 		const d = this.device;
-		// What parts fill round the finest cascade, before its cells are filled.
-		const finest = this.gridOrigins[0];
+		// What parts fill round the finest cascade, before its cells are filled:
+		// round where it is going, while it steps.
+		const finest = this.gridPlan.target(0) ?? this.gridOrigins[0];
 		const occAt = finest
 			? [finest[0] - OCC_MARGIN, finest[1] - OCC_MARGIN, finest[2] - OCC_MARGIN]
 			: null;
@@ -6106,6 +6173,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 						{ binding: 4, resource: this.gridA!.createView({ dimension: "3d" }) },
 						{ binding: 5, resource: this.gridB!.createView({ dimension: "3d" }) },
 						{ binding: 6, resource: this.occTex!.createView({ dimension: "3d" }) },
+						{ binding: 7, resource: this.occCoarseTex!.createView({ dimension: "3d" }) },
 					],
 				}),
 			);

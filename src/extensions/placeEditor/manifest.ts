@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.75.0",
+	version: "0.76.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.76.0",
+			roswaal: "1.1.0-canary.115",
+			date: "2026-11-25",
+			text: "Automatic light grid on a touch screen is TOUCH_LIGHT_CELL (8 studs) for either style (lightGridCell). A step's slabs fill GRID_FILL_BUDGET cells a frame (GridFillPlan, splitRegion), the cascade read where it was until they are done. The occupancy window has a coarse level of 2 x 2 x 2 blocks (OccupancyCoarse), and a path to a light steps past an empty block unread.",
+		},
 		{
 			version: "0.75.0",
 			roswaal: "1.1.0-canary.114",

@@ -285,7 +285,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Light object grid",
-						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. **Off** has every pixel work out its own. WebGPU, and WebGL2 where it draws to float textures.",
+						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. On a touch screen, Automatic is **8-stud** cells for either, which a tablet keeps up with at Native. **Off** has every pixel work out its own. WebGPU, and WebGL2 where it draws to float textures.",
 					],
 					[
 						"Sky light resolution",

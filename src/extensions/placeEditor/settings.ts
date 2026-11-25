@@ -322,7 +322,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Light object grid",
 				help: "Light objects worked out once in cells round the camera.",
 				detail:
-					"Rather than each pixel working out each light again every frame, the light is worked out into three grids round the camera, of cells 8, 16 or 32 studs as set and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size. It costs the same however many lights there are. Automatic follows the place's LightingStyle: Soft, 4-stud cells, flat as Studio draws it; Realistic, every pixel works out its own. Off, every pixel's own (Light objects resolution). WebGPU, and WebGL2 where it draws to float textures.",
+					"Rather than each pixel working out each light again every frame, the light is worked out into three grids round the camera, of cells 8, 16 or 32 studs as set and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size. It costs the same however many lights there are. Automatic follows the place's LightingStyle: Soft, 4-stud cells, flat as Studio draws it; Realistic, every pixel works out its own. On a touch screen, Automatic is 8-stud cells for either, which a tablet keeps up with at Native. Off, every pixel's own (Light objects resolution). WebGPU, and WebGL2 where it draws to float textures.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LIGHT_GRIDS,

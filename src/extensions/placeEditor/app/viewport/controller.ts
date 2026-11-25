@@ -3067,14 +3067,10 @@ export class ViewportController {
 	private applyLampMode(): void {
 		this.view?.setLampMode?.(this.lampModeNow());
 		this.view?.setSkyMode?.(this.skyModeNow());
-		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid));
+		const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid, touch));
 		this.view?.setParticleHalf?.(this.options.particleResolution === "half");
-		this.view?.setReflectionGrid?.(
-			reflectionGrid(
-				this.options.reflectionUpdates,
-				typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
-			),
-		);
+		this.view?.setReflectionGrid?.(reflectionGrid(this.options.reflectionUpdates, touch));
 	}
 
 	/** The sky's share as drawn now: Settings', or half where Dynamic optimization has taken that, never more pixels. */

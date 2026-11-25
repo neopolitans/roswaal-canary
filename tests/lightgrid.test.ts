@@ -14,6 +14,7 @@ import {
 	lightGridMove,
 	lightGridSamples,
 	SOFT_LIGHT_CELL,
+	TOUCH_LIGHT_CELL,
 } from "../src/extensions/placeEditor/app/viewport/view.js";
 
 describe("the light grid", () => {
@@ -23,6 +24,13 @@ describe("the light grid", () => {
 		expect(lightGridCell("auto")).toBe("auto");
 		expect(lightGridCell("4")).toBe(4);
 		expect(lightGridCell("32")).toBe(32);
+	});
+
+	it("is 8-stud cells when Automatic on a touch screen, whatever the style; as set otherwise", () => {
+		expect(lightGridCell("auto", true)).toBe(TOUCH_LIGHT_CELL);
+		expect(lightGridCell(undefined, true)).toBe(8);
+		expect(lightGridCell("4", true)).toBe(4);
+		expect(lightGridCell("off", true)).toBeNull();
 	});
 
 	it("is Soft's 4-stud cells when Automatic and the place is Soft, otherwise as set", () => {

@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.115",
+		date: "2026-11-25",
+		headline: "A tablet keeps up at Native with light objects: a coarser grid by default, filled more cheaply as you move.",
+		changed: [
+			"**On a touch screen, Light object grid Automatic is 8-stud cells** for Soft and Realistic places alike: an iPad Mini kept 60 Hz at Native with it. On a computer, Automatic stays 4-stud cells for Soft and light at every pixel for Realistic.",
+			"**Moving fills the light grid's new cells over a few frames** rather than all in one, so crossing a cell does not cost a frame; until they are filled, the grid is read where it was.",
+			"**Light objects' paths through the parts skip empty space** 8 studs at a time, so filling the grid costs less where the place is open.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.114",
 		date: "2026-11-25",
 		headline: "WebGL2 leaves out what is switched off, and draws the place without copying it.",

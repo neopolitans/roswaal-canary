@@ -909,14 +909,24 @@ export const LIGHT_GRID_CELLS = 32;
 export const LIGHT_GRID_CASCADES = 3;
 
 /**
- * The Light object grid setting's finest cell, in studs; null, off;
- * "auto", as the place's LightingStyle says (see autoLightGrid).
+ * Automatic's grid on a touch screen, whatever the place's style: 8-stud
+ * cells. A tablet at Native could not keep 60 Hz with Soft's 4-stud cells,
+ * which fill four times as many cells as the camera moves, or with
+ * Realistic's light worked out at every pixel; at 8 studs an iPad Mini (A15)
+ * did (25 Nov 2026).
  */
-export function lightGridCell(setting: string | undefined): number | null | "auto" {
+export const TOUCH_LIGHT_CELL = 8;
+
+/**
+ * The Light object grid setting's finest cell, in studs; null, off;
+ * "auto", as the place's LightingStyle says (see autoLightGrid); on a touch
+ * screen, Automatic is TOUCH_LIGHT_CELL.
+ */
+export function lightGridCell(setting: string | undefined, touch = false): number | null | "auto" {
 	if (setting === "4" || setting === "8" || setting === "16" || setting === "32")
 		return Number(setting);
 	if (setting === "off") return null;
-	return "auto";
+	return touch ? TOUCH_LIGHT_CELL : "auto";
 }
 
 /** Soft's cells: as Studio's own Soft lights in, 4 studs a side (25 Nov 2026 captures). */
@@ -972,6 +982,89 @@ export function lightGridMove(
 		fill.push({ min, count });
 	}
 	return { origin: at, fill };
+}
+
+/**
+ * Cells of the light grid filled in a frame as the eye moves on: a step's
+ * slabs past it are filled over the frames after (GridFillPlan), so a tablet
+ * does not lose a frame each time the camera crosses a cell. Two thirds of
+ * the usual slab, three cells thick.
+ */
+export const GRID_FILL_BUDGET = 2048;
+
+/** A region cut across its longest side into pieces of at most `most` cells. */
+export function splitRegion(region: LightGridRegion, most: number): LightGridRegion[] {
+	const { min, count } = region;
+	const axis = count.indexOf(Math.max(...count));
+	const across = count.reduce((n, c) => n * c, 1) / count[axis];
+	const layers = Math.max(1, Math.floor(most / across));
+	const out: LightGridRegion[] = [];
+	for (let at = 0; at < count[axis]; at += layers) {
+		const piece = { min: [...min], count: [...count] };
+		piece.min[axis] = min[axis] + at;
+		piece.count[axis] = Math.min(layers, count[axis] - at);
+		out.push(piece);
+	}
+	return out;
+}
+
+/**
+ * The light grid's steps as the eye moves, filled a budget at a time: each
+ * cascade goes on being read where it was until the cells it newly takes in
+ * are all filled, then moves. Meanwhile a pixel past it reads the coarser
+ * cascade, which is right; only the cells it gives up, at its far side
+ * (behind the camera as it goes on), are filled over before it lets go.
+ */
+export class GridFillPlan {
+	private pending: ({ origin: number[]; jobs: LightGridRegion[] } | null)[] = [];
+
+	/** Nothing pending: the grid is filled again whole. */
+	reset(): void {
+		this.pending = [];
+	}
+
+	/** Forget cascade `k`'s step: it is filled whole instead. */
+	drop(k: number): void {
+		this.pending[k] = null;
+	}
+
+	/** Whether cascade `k` is part way through a step. */
+	busy(k: number): boolean {
+		return !!this.pending[k];
+	}
+
+	/** Where cascade `k` is moving to, while it is: for what the fill reads round it. */
+	target(k: number): number[] | null {
+		return this.pending[k]?.origin ?? null;
+	}
+
+	/** Cascade `k` steps to `origin`, these regions to fill first. */
+	start(k: number, origin: number[], regions: readonly LightGridRegion[]): void {
+		this.pending[k] = { origin, jobs: regions.flatMap((r) => splitRegion(r, GRID_FILL_BUDGET)) };
+	}
+
+	/**
+	 * Up to `budget` cells of cascade `k`'s step, and where it stands once
+	 * none are left (null while some are).
+	 */
+	take(
+		k: number,
+		budget: number,
+	): { jobs: LightGridRegion[]; cells: number; done: number[] | null } {
+		const step = this.pending[k];
+		if (!step) return { jobs: [], cells: 0, done: null };
+		const jobs: LightGridRegion[] = [];
+		let cells = 0;
+		while (step.jobs.length > 0) {
+			const size = step.jobs[0].count.reduce((n, c) => n * c, 1);
+			if (cells + size > budget) break;
+			cells += size;
+			jobs.push(step.jobs.shift() as LightGridRegion);
+		}
+		if (step.jobs.length > 0) return { jobs, cells, done: null };
+		this.pending[k] = null;
+		return { jobs, cells, done: step.origin };
+	}
 }
 
 /** Changed lights a refill covers cell by cell; past this many, the grid is filled again whole. */

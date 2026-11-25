@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.42.0",
+	version: "0.43.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.43.0",
+			roswaal: "1.1.0-canary.73",
+			date: "2026-11-25",
+			text: "Rendering panel for touch: an i (InfoButton) on every setting and switch in place of the hover hint; Scene view settings carry a one-line help and a detail; 44-point rows, segmented choices and a Dynamic optimization switch under pointer: coarse; Needs on a held switch.",
+		},
 		{
 			version: "0.42.0",
 			roswaal: "1.1.0-canary.69",

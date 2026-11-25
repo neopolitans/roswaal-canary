@@ -24,8 +24,13 @@ export type SettingDecl = {
 	/** Its name in the extension's store: `outlineWidth`. */
 	key: string;
 	title: string;
-	/** One or two sentences under the title. */
+	/** One line under the title: what the setting is. */
 	help: string;
+	/**
+	 * The rest, behind an "i" beside the title: what each choice does and what
+	 * it costs. Left out where the line says it all.
+	 */
+	detail?: string;
 	/**
 	 * The `Preferences` field it was kept in before it was the extension's,
 	 * read once into the extension's store the first time that is read.

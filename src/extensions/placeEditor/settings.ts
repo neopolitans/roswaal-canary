@@ -161,7 +161,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "renderer",
 				legacy: "viewportRenderer",
 				title: "Renderer",
-				help: "Automatic draws with WebGPU where the browser has it, and WebGL2 where it does not. WebGPU falls back to WebGL2 where there is none.",
+				help: "WebGPU where the browser has it, WebGL2 where it does not.",
+				detail:
+					"Automatic draws with WebGPU where the browser has it, and WebGL2 where it does not. WebGPU falls back to WebGL2 on a device that has none. Upscaling, half-size light and the measured choices are WebGPU's.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDERERS,
@@ -169,7 +171,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "quality",
 				title: "Quality",
-				help: "As Studio's quality levels: each sets how far parts are drawn, the sun's shadows, which effects are on, and the render scale and antialiasing where those are Automatic. Automatic starts from the device and moves a level down or up with how fast frames are drawn. Level 21 draws everything, as Studio does.",
+				help: "How much of Studio's picture is drawn, Level 1 to 21.",
+				detail:
+					"As Studio's quality levels: each sets how far parts are drawn, the sun's shadows, which effects are on, and the render scale and antialiasing where those are Automatic. Automatic starts from the device and moves a level down or up with how fast frames are drawn. Level 21 draws everything, as Studio does.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_QUALITIES,
@@ -178,7 +182,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "frameRate",
 				legacy: "viewportFrameRate",
 				title: "Frame rate",
-				help: "The most the view is drawn a second while it moves. VSync matches the display; Steady is VSync at half the display's rate while frames cannot keep up with it, smooth where VSync stutters; Unlimited draws as fast as it can, which a variable-refresh display can follow. The view is drawn only when something changes.",
+				help: "The most frames a second while the view moves.",
+				detail:
+					"VSync matches the display. Steady is VSync at half the display's rate while frames cannot keep up, smooth where VSync stutters. 24 to 240 cap it; on a 60 Hz display, 24 alternates two and three refreshes. Unlimited draws as fast as it can, which a variable-refresh display can follow. The view is drawn only when something changes.",
 				type: "choice",
 				default: "vsync",
 				choices: VIEWPORT_FRAME_RATES,
@@ -186,7 +192,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "renderScale",
 				title: "Render scale",
-				help: "How many pixels the place is drawn at, across and down, as a share of the page's own. Native is every pixel your screen has: the number beside it is what that comes to on this screen, 200% on a Retina screen and 100% on an ordinary one; browser zoom counts too, so at 110% zoom it is 110% on an ordinary screen. Fewer is faster where filling pixels is the cost, as it is on a tablet. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19. Dynamic draws fewer pixels while frames do not fit the display and more once they fit, from Native down to half of it, and on WebGPU gathers a still view back up to Native",
+				help: "Pixels drawn, as a share of the screen's.",
+				detail:
+					"Native is every pixel your screen has: the number beside it is what that comes to here, 200% on a Retina screen and 100% on an ordinary one; browser zoom counts too. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19. Dynamic draws fewer while frames do not fit and more once they do, from Native down to half of it. Fewer is faster where filling pixels is the cost, as on a tablet.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDER_SCALES,
@@ -199,7 +207,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "upscale",
 				title: "Upscaling",
-				help: "Where the render scale draws fewer pixels than the screen has, the view brings them up itself rather than the browser stretching them. When still: once the view stops, frames drawn a fraction of a pixel apart are gathered to the screen's own detail, about Native's, at the render scale's cost; moving, it is stretched. Always: moving frames are sharpened as well. WebGPU only.",
+				help: "Brings a lower render scale up to the screen's detail.",
+				detail:
+					"Where the render scale draws fewer pixels than the screen has, the view brings them up itself rather than the browser stretching them. When still: once the view stops, frames a fraction of a pixel apart are gathered to about Native's detail, at the render scale's cost; moving, it is stretched. Always: moving frames are sharpened too. WebGPU.",
 				type: "choice",
 				default: "off",
 				choices: VIEWPORT_UPSCALES,
@@ -207,7 +217,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "dynamicOptimization",
 				title: "Dynamic optimization",
-				help: "While frames do not fit the display, the view takes savings whatever the quality level, the least visible first: today, the lights worked out at half the pixels. It gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
+				help: "Takes savings while frames do not fit.",
+				detail:
+					"Whatever the quality level, the view takes savings while frames do not fit the display, the least visible first (today, the lights at half the pixels), and gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
 				type: "boolean",
 				default: false,
 				on: "Takes savings while frames do not fit",
@@ -216,7 +228,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "lampResolution",
 				title: "Light objects resolution",
-				help: "How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. Automatic measures, as the view moves, whether half the pixels is faster in this place, and keeps it only if so: it pays where many lights reach the same pixels. Full, Half or Quarter set it. WebGPU.",
+				help: "Pixels the lights are worked out at.",
+				detail:
+					"The light of PointLights, SpotLights and SurfaceLights. Automatic measures, as the view moves, whether half the pixels is faster in this place and keeps it only if so; it pays where many lights reach the same pixels. Full, Half or Quarter set it. WebGPU.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LAMP_RESOLUTIONS,
@@ -224,7 +238,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			{
 				key: "antialiasing",
 				title: "Antialiasing",
-				help: "Smooths parts' edges. FXAA and SMAA are a pass over the finished frame, cheap on a tablet; MSAA draws 2, 4 or 8 samples a pixel, as the renderer allows; Still-frame TAA averages 16 frames a fraction of a pixel apart once the view is still. Automatic is the quality level's: off below Level 10, FXAA to 12, then SMAA; no level multisamples, so MSAA is chosen here. The view is made again when it changes.",
+				help: "Smooths parts' edges.",
+				detail:
+					"FXAA and SMAA are a pass over the finished frame, cheap on a tablet. MSAA draws 2, 4 or 8 samples a pixel, as the renderer allows, and makes the view again when chosen. Still-frame TAA averages 16 frames a fraction of a pixel apart once the view is still. Automatic is the quality level's: off below Level 10, FXAA to 12, then SMAA.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_ANTIALIAS,
@@ -238,7 +254,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "outlineWidth",
 				legacy: "outlineWidth",
 				title: "Selection outline",
-				help: "How wide the outline round what is picked is drawn.",
+				help: "Width of the outline round what is picked.",
 				type: "choice",
 				default: "medium",
 				choices: [
@@ -251,7 +267,8 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "outlineThrough",
 				legacy: "outlineThrough",
 				title: "Hidden edges",
-				help: "Whether the outline shows through the parts in front of it, as Studio's does.",
+				help: "The outline shows through parts in front.",
+				detail: "As Studio's does. Off, parts in front hide the outline.",
 				type: "boolean",
 				default: true,
 				on: "Shown through parts",
@@ -261,7 +278,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "altClickSteps",
 				legacy: "altClickSteps",
 				title: "Alt-click",
-				help: "What Alt and a click on a part picks, and a long press: the part, as in Studio, or one Model further in each time. Shift and a click always picks the part.",
+				help: "What Alt-click and a long press pick.",
+				detail:
+					"The part, as in Studio, or one Model further in each time. Shift and a click always picks the part.",
 				type: "boolean",
 				default: false,
 				on: "Steps in a Model at a time",
@@ -276,7 +295,8 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "glassHides",
 				legacy: "glassHides",
 				title: "Glass",
-				help: "Whether see-through Glass hides the see-through parts behind it, as Studio's does. Places are often built around it.",
+				help: "Glass hides see-through parts behind it.",
+				detail: "As Studio's does; places are often built around it. Off, they show through.",
 				type: "boolean",
 				default: true,
 				on: "Hides see-through parts behind it",
@@ -291,7 +311,8 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				key: "postEffects",
 				legacy: "postEffects",
 				title: "Post effects",
-				help: "The place's own ColorCorrection and Blur, under Lighting or its Camera. Off shows the place as it is underneath.",
+				help: "The place's ColorCorrection and Blur.",
+				detail: "Under Lighting or its Camera. Off shows the place as it is underneath.",
 				type: "boolean",
 				default: true,
 				on: "Drawn",

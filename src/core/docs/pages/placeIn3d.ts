@@ -294,7 +294,8 @@ export function placeEditorRenderingPage(): DocPage {
 				text:
 					"Every part of the picture has its own switch, in groups: surfaces, light, shadows, " +
 					"lights, glow and effects, sky and air, post effects. A switch changes only itself. A " +
-					"dot marks one changed from the preset; **Reset** puts them back.",
+					"dot marks one changed from the preset; **Reset** puts them back. The **i** beside a " +
+					"switch or a setting opens what it does in full; a switch held off by another says which.",
 			},
 			{ t: "h", level: 2, text: "View" },
 			{

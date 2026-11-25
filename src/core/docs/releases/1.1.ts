@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.73",
+		date: "2026-11-25",
+		headline: "The Rendering panel fits a finger, and says what each switch does on a tap.",
+		changed: [
+			"**Every setting and switch in the Rendering panel has an i** that opens what it does in full, where the panel said it only under a pointer. Scene view's settings say what they are in one line, in Settings and the panel, with the rest behind the same i.",
+			"**On a touch screen, every row, choice and button in the Rendering panel is 44 points**, and a tap anywhere on a switch's row turns it on or off.",
+			"**Upscaling, Light objects resolution and Renderer show all their choices side by side**, and Dynamic optimization is a switch.",
+			"**A switch held off by another says which**: Needs Sky reflections.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.72",
 		date: "2026-11-25",
 		headline: "Other sites cannot load the daemon's pages.",

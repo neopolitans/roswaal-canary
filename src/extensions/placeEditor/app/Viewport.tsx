@@ -8,8 +8,10 @@
 
 import {
 	Fragment,
+	type ReactNode,
 	type PointerEvent as ReactPointerEvent,
 	useEffect,
+	useId,
 	useMemo,
 	useRef,
 	useState,
@@ -20,6 +22,7 @@ import { PanelHead } from "../../../app/Cards.jsx";
 import { cx } from "../../../app/cx.js";
 import { Icon, type IconName } from "../../../app/icons.jsx";
 import { Ident, SectionHead, useFold } from "../../../app/PanelParts.jsx";
+import { InfoButton } from "../../../app/settingsParts.jsx";
 import { useWorkspaceControls } from "../../../app/Workspace.jsx";
 import { errorMessage } from "../../../core/errorMessage.js";
 import { startBenchmark } from "../benchmarkEvent.js";
@@ -27,6 +30,7 @@ import {
 	antialiasSetting,
 	type PlaceEditorSettings,
 	renderScaleLabels,
+	SCENE_VIEW,
 	VIEWPORT_ANTIALIAS,
 	VIEWPORT_FRAME_RATES,
 	VIEWPORT_LAMP_RESOLUTIONS,
@@ -860,10 +864,75 @@ function AssetCard({ assets }: { assets: AssetProgress | null }) {
 	);
 }
 
+/** Settings' own words for a Scene view setting, by key: the panel says what Settings says. */
+const SCENE_WORDS = new Map(
+	SCENE_VIEW.flatMap((group) => group.settings).map((decl) => [decl.key, decl] as const),
+);
+
+/** What View is, which is the panel's own and not a setting. */
+const VIEW_WORDS = {
+	help: "A quality level, one feature alone, or what the frame costs.",
+	detail:
+		"A quality level sets the switches as Settings' Quality does; Automatic moves with how fast " +
+		"frames are drawn. Final output, one feature shows one part of the picture alone. The views " +
+		"under Inspect show the place as the switches leave it: its wireframe, heatmaps and overdraw.",
+};
+
+/**
+ * A setting in the panel: its name with an "i" for the rest, its one line, and
+ * its control beside the name, or with `below`, across the panel under it.
+ */
+function PanelSetting({
+	settingKey,
+	words,
+	label,
+	below = false,
+	children,
+}: {
+	settingKey?: string;
+	/** Words of the panel's own, for what is not a setting. */
+	words?: { help: string; detail?: string };
+	label?: string;
+	below?: boolean;
+	children: ReactNode;
+}) {
+	const decl = settingKey ? SCENE_WORDS.get(settingKey) : undefined;
+	const said = words ?? decl;
+	const name = label ?? decl?.title ?? settingKey ?? "";
+	const [open, setOpen] = useState(false);
+	const detailId = useId();
+	return (
+		<div className="render-setting">
+			<div className="render-setting-head">
+				<span className="render-setting-name">
+					{name}
+					{said?.detail && (
+						<InfoButton
+							label={name}
+							open={open}
+							controls={detailId}
+							onToggle={() => setOpen((was) => !was)}
+						/>
+					)}
+				</span>
+				{!below && children}
+			</div>
+			{said && <span className="render-setting-line">{said.help}</span>}
+			{open && said?.detail && (
+				<p className="render-detail" id={detailId}>
+					{said.detail}
+				</p>
+			)}
+			{below && children}
+		</div>
+	);
+}
+
 /**
  * The Scene view settings the Rendering panel offers beside Quality and
  * Antialiasing, so they are at hand while looking at the view: each saved
- * as Settings saves it.
+ * as Settings saves it. Three or four short choices are side by side, so all
+ * of them show and each is one tap.
  */
 function SceneSettings({
 	scene,
@@ -876,17 +945,18 @@ function SceneSettings({
 		typeof devicePixelRatio === "number" ? devicePixelRatio : 1,
 		typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent),
 	);
+	const valueOf = (key: keyof PlaceEditorSettings, choices: readonly { value: string }[]) =>
+		String(scene[key] ?? choices[0].value);
 	const choice = (
 		key: keyof PlaceEditorSettings,
-		label: string,
 		choices: readonly { value: string; label: string }[],
 		labels: Record<string, string> = {},
 	) => (
-		<label className="render-heat" key={key}>
-			<span>{label}</span>
+		<PanelSetting settingKey={key} key={key}>
 			<select
 				className="tb place-edit-field"
-				value={String(scene[key] ?? choices[0].value)}
+				aria-label={SCENE_WORDS.get(key)?.title}
+				value={valueOf(key, choices)}
 				onChange={(e) => onScene(key, e.target.value)}
 			>
 				{choices.map((c) => (
@@ -895,26 +965,52 @@ function SceneSettings({
 					</option>
 				))}
 			</select>
-		</label>
+		</PanelSetting>
 	);
+	const segmented = (
+		key: keyof PlaceEditorSettings,
+		choices: readonly { value: string; label: string }[],
+	) => {
+		const value = valueOf(key, choices);
+		return (
+			<PanelSetting settingKey={key} key={key} below>
+				<div
+					className="segmented render-segmented"
+					role="group"
+					aria-label={SCENE_WORDS.get(key)?.title}
+				>
+					{choices.map((c) => (
+						<button
+							key={c.value}
+							type="button"
+							className={value === c.value ? "on" : ""}
+							aria-pressed={value === c.value}
+							onClick={() => onScene(key, c.value)}
+						>
+							{c.label}
+						</button>
+					))}
+				</div>
+			</PanelSetting>
+		);
+	};
 	return (
 		<>
-			{choice("frameRate", "Frame rate", VIEWPORT_FRAME_RATES)}
-			{choice("renderScale", "Render scale", VIEWPORT_RENDER_SCALES, scaleLabels)}
-			{choice("upscale", "Upscaling", VIEWPORT_UPSCALES)}
-			{choice("renderer", "Renderer", VIEWPORT_RENDERERS)}
-			{choice("lampResolution", "Light objects resolution", VIEWPORT_LAMP_RESOLUTIONS)}
-			<label className="render-heat">
-				<span>Dynamic optimization</span>
-				<select
-					className="tb place-edit-field"
-					value={scene.dynamicOptimization ? "on" : "off"}
-					onChange={(e) => onScene("dynamicOptimization", e.target.value === "on")}
-				>
-					<option value="off">Off</option>
-					<option value="on">On</option>
-				</select>
-			</label>
+			{choice("frameRate", VIEWPORT_FRAME_RATES)}
+			{choice("renderScale", VIEWPORT_RENDER_SCALES, scaleLabels)}
+			{segmented("upscale", VIEWPORT_UPSCALES)}
+			{segmented("lampResolution", VIEWPORT_LAMP_RESOLUTIONS)}
+			<PanelSetting settingKey="dynamicOptimization">
+				<input
+					type="checkbox"
+					role="switch"
+					className="render-toggle"
+					aria-label="Dynamic optimization"
+					checked={scene.dynamicOptimization === true}
+					onChange={(e) => onScene("dynamicOptimization", e.target.checked)}
+				/>
+			</PanelSetting>
+			{segmented("renderer", VIEWPORT_RENDERERS)}
 		</>
 	);
 }
@@ -1153,7 +1249,12 @@ function RenderToolSwitch({
 	return (
 		<label className="render-switch">
 			<span>{label}</span>
-			<input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+			<input
+				type="checkbox"
+				role="switch"
+				checked={on}
+				onChange={(e) => onChange(e.target.checked)}
+			/>
 		</label>
 	);
 }
@@ -1652,7 +1753,15 @@ export function RenderPanel({
 	const setFeatures = (next: RenderFeatures) => apply({ ...render, features: next });
 	const { step, exact } = stepOf(features);
 	const [shut, setShut] = useState<ReadonlySet<string>>(() => new Set(["Post effects"]));
-	const [hint, setHint] = useState<string | null>(null);
+	// The switches whose "i" is open: what each does, under it.
+	const [told, setTold] = useState<ReadonlySet<string>>(() => new Set());
+	const tell = (key: string) =>
+		setTold((was) => {
+			const next = new Set(was);
+			if (!next.delete(key)) next.add(key);
+			return next;
+		});
+	const uid = useId();
 	const [toolsOpen, toggleTools] = useFold(false);
 	const base = presetById(render.preset);
 	const changed = changedFrom(features, base.features).length;
@@ -1684,10 +1793,10 @@ export function RenderPanel({
 			<div className="place-props">
 				<div className="place-groups">
 					<div className="place-group">
-						<label className="render-heat">
-							<span>View</span>
+						<PanelSetting label="View" words={VIEW_WORDS}>
 							<select
 								className="tb place-edit-field"
+								aria-label="View"
 								value={
 									render.mode !== "lit"
 										? `mode:${render.mode}`
@@ -1724,11 +1833,11 @@ export function RenderPanel({
 									))}
 								</optgroup>
 							</select>
-						</label>
-						<label className="render-heat">
-							<span>Antialiasing</span>
+						</PanelSetting>
+						<PanelSetting settingKey="antialiasing">
 							<select
 								className="tb place-edit-field"
+								aria-label="Antialiasing"
 								value={antialias}
 								onChange={(e) => onAntialias(e.target.value)}
 							>
@@ -1744,7 +1853,7 @@ export function RenderPanel({
 									</option>
 								))}
 							</select>
-						</label>
+						</PanelSetting>
 						{scene && onScene && <SceneSettings scene={scene} onScene={onScene} />}
 						{render.mode === "lit" && (
 							<div className="render-step">
@@ -1827,36 +1936,70 @@ export function RenderPanel({
 									</span>
 								</SectionHead>
 								{open &&
-									group.features.map((info) => (
-										<label
-											key={info.key}
-											className={cx(
-												"render-switch",
-												info.parent && "render-switch-under",
-												!featureOn(features, info.key) &&
-													features[info.key] &&
-													"render-switch-held",
-											)}
-											onPointerEnter={() => setHint(info.hint)}
-										>
-											<span>
-												{features[info.key] !== base.features[info.key] && (
-													<span
-														className="render-switch-changed"
-														title={`Changed from ${base.label}`}
+									group.features.map((info) => {
+										const id = `${uid}-${info.key}`;
+										const needs =
+											info.parent && !featureOn(features, info.parent)
+												? FEATURE_LABEL.get(info.parent)
+												: undefined;
+										const saying = told.has(info.key);
+										return (
+											<Fragment key={info.key}>
+												<label
+													htmlFor={id}
+													className={cx(
+														"render-switch",
+														info.parent && "render-switch-under",
+														!featureOn(features, info.key) &&
+															features[info.key] &&
+															"render-switch-held",
+													)}
+												>
+													<span className="render-switch-name">
+														{features[info.key] !== base.features[info.key] && (
+															<span
+																className="render-switch-changed"
+																title={`Changed from ${base.label}`}
+															/>
+														)}
+														{info.label}
+														<InfoButton
+															label={info.label}
+															open={saying}
+															controls={`${id}-what`}
+															onToggle={() => tell(info.key)}
+														/>
+														{needs && (
+															<span className="render-switch-needs" id={`${id}-needs`}>
+																Needs {needs}
+															</span>
+														)}
+													</span>
+													<input
+														id={id}
+														type="checkbox"
+														role="switch"
+														checked={features[info.key]}
+														disabled={needs !== undefined}
+														aria-label={info.label}
+														aria-describedby={
+															[needs ? `${id}-needs` : "", saying ? `${id}-what` : ""]
+																.filter(Boolean)
+																.join(" ") || undefined
+														}
+														onChange={(e) =>
+															setFeatures({ ...features, [info.key]: e.target.checked })
+														}
 													/>
+												</label>
+												{saying && (
+													<p className="render-detail render-detail-switch" id={`${id}-what`}>
+														{info.hint}
+													</p>
 												)}
-												{info.label}
-											</span>
-											<input
-												type="checkbox"
-												checked={features[info.key]}
-												disabled={!!info.parent && !featureOn(features, info.parent)}
-												onFocus={() => setHint(info.hint)}
-												onChange={(e) => setFeatures({ ...features, [info.key]: e.target.checked })}
-											/>
-										</label>
-									))}
+											</Fragment>
+										);
+									})}
 							</div>
 						);
 					})}
@@ -1880,7 +2023,6 @@ export function RenderPanel({
 					</div>
 				</div>
 			</div>
-			<p className="render-hint">{hint ?? "Point at a switch to see what it does."}</p>
 			<div className="render-foot">
 				<span>{presetLine(render)}</span>
 				<button
@@ -1895,6 +2037,11 @@ export function RenderPanel({
 		</div>
 	);
 }
+
+/** A switch's name, by key: what a switch held off waits for. */
+const FEATURE_LABEL = new Map(
+	FEATURE_GROUPS.flatMap((group) => group.features).map((info) => [info.key, info.label] as const),
+);
 
 /**
  * The preset chosen, and how many switches are changed from it: "Level 10",

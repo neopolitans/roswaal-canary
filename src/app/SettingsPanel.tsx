@@ -1727,6 +1727,7 @@ function DeclaredSetting({
 		<Row
 			label={decl.title}
 			help={decl.help}
+			detail={decl.detail}
 			changed={isChanged(decl, value)}
 			onReset={onReset}
 			resetTitle={`Reset to ${resetTo}`}

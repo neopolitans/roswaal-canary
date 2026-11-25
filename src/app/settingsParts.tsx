@@ -6,7 +6,7 @@
  * editor's, and read the same while searching.
  */
 
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext, useId, useState } from "react";
 
 import { Icon } from "./icons.jsx";
 
@@ -37,13 +37,46 @@ export function Group({ title, children }: { title: string; children: ReactNode 
 }
 
 /**
- * One setting: its name and what it does, its control at the right. While
- * searching, shown only when it matches. `changed` marks one not at its
- * default, with `onReset` to put it back.
+ * The "i" beside a name that opens what it does in full. A tap, never a
+ * hover, so it works on a touch screen; its target is 44 points there.
+ */
+export function InfoButton({
+	label,
+	open,
+	controls,
+	onToggle,
+}: {
+	/** What it is about: read out as "More about {label}". */
+	label: string;
+	open: boolean;
+	/** The id of what it opens. */
+	controls: string;
+	onToggle: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			className="info-button"
+			aria-label={`More about ${label}`}
+			aria-expanded={open}
+			aria-controls={controls}
+			onClick={onToggle}
+		>
+			<span aria-hidden="true">i</span>
+		</button>
+	);
+}
+
+/**
+ * One setting: its name and what it is, its control at the right, and with
+ * `detail`, an "i" that opens the rest. While searching, shown only when it
+ * matches. `changed` marks one not at its default, with `onReset` to put it
+ * back.
  */
 export function Row({
 	label,
 	help,
+	detail,
 	children,
 	changed,
 	onReset,
@@ -51,18 +84,36 @@ export function Row({
 }: {
 	label: string;
 	help: string;
+	detail?: string;
 	children?: ReactNode;
 	changed?: boolean;
 	onReset?: () => void;
 	resetTitle?: string;
 }) {
 	const { query, page } = useContext(Search);
-	if (query && !page && !matches(query, label, help)) return null;
+	const [open, setOpen] = useState(false);
+	const detailId = useId();
+	if (query && !page && !matches(query, label, help, detail ?? "")) return null;
 	return (
 		<div className={changed ? "setting is-changed" : "setting"}>
 			<div className="setting-label">
-				<strong>{label}</strong>
+				<span className="setting-name">
+					<strong>{label}</strong>
+					{detail && (
+						<InfoButton
+							label={label}
+							open={open}
+							controls={detailId}
+							onToggle={() => setOpen((was) => !was)}
+						/>
+					)}
+				</span>
 				<span>{help}</span>
+				{detail && open && (
+					<span className="setting-detail" id={detailId}>
+						{detail}
+					</span>
+				)}
 			</div>
 			{(children || (changed && onReset)) && (
 				<div className="setting-control">

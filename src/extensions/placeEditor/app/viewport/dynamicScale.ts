@@ -11,23 +11,69 @@
 /** Each step's share of the screen's own pixels across, largest first. */
 export const DYNAMIC_STEPS = [1, 0.875, 0.75, 0.625, 0.5] as const;
 
-/** Moving frames looked at before a step is decided. */
+/** Moving frames looked at before a change is decided. */
 const SAMPLES = 20;
-/** The least time between two steps, in ms. */
+/** The least time between two changes, in ms. */
 const SETTLE_MS = 500;
-/** Down a step when the typical frame takes more than this share of its budget. */
+/** The frame taken as typical: the one three quarters of the way up, slow ones counted. */
+const TYPICAL = 0.75;
+/** Over budget when the typical frame takes more than this share of it, by the GPU's own times. */
 const OVER = 0.92;
+/** Without the GPU's times, the time between frames: missed when over this share of the budget. */
+const MISSED = 1.5;
 /** Up a step when the typical frame at the bigger step would take less than this share. */
 const UNDER = 0.8;
 /** Without the GPU's times: how long without a missed frame before a step up is tried, in ms. */
 const TRY_UP_MS = 3000;
 
+/**
+ * What Dynamic's render scale and Dynamic optimization both read of moving
+ * frames: a window of them, the typical one once it is full, whether that is
+ * over budget, and when a frame was last missed. Each decides for itself what
+ * to change.
+ */
+export class FrameWindow {
+	/** When the last change was made, in ms. */
+	changed = Number.NEGATIVE_INFINITY;
+	/** When a frame was last missed, where the GPU's times are not to be had. */
+	lastMiss = Number.NEGATIVE_INFINITY;
+	private work: number[] = [];
+
+	/**
+	 * A moving frame, as `DynamicScale.frame` takes it. The typical frame once
+	 * the window is full and the last change has settled, and the window
+	 * started again; null until then.
+	 */
+	note(now: number, ms: number, budget: number, timed: boolean): number | null {
+		if (!timed && ms > budget * MISSED) this.lastMiss = now;
+		this.work.push(ms);
+		if (this.work.length < SAMPLES || now - this.changed < SETTLE_MS) return null;
+		const sorted = [...this.work].sort((a, b) => a - b);
+		this.work = [];
+		return sorted[Math.floor(sorted.length * TYPICAL)];
+	}
+
+	/** Whether a typical frame is over its budget. */
+	over(typical: number, budget: number, timed: boolean): boolean {
+		return typical > budget * (timed ? OVER : MISSED);
+	}
+
+	/** A change was made: the next waits for it to settle. */
+	moved(now: number): void {
+		this.changed = now;
+	}
+
+	/** Started again: the window and the last change. The last missed frame stands. */
+	reset(): void {
+		this.work = [];
+		this.changed = Number.NEGATIVE_INFINITY;
+	}
+}
+
 export class DynamicScale {
 	/** The step drawn now: 0 the screen's own pixels. */
 	step = 0;
-	private work: number[] = [];
-	private changed = Number.NEGATIVE_INFINITY;
-	private lastMiss = Number.NEGATIVE_INFINITY;
+	private frames = new FrameWindow();
 
 	/** The share of the screen's own pixels across drawn now. */
 	share(): number {
@@ -45,16 +91,12 @@ export class DynamicScale {
 	 * True when the step changed, for the view to be sized again.
 	 */
 	frame(now: number, ms: number, budget: number, timed: boolean): boolean {
-		if (!timed && ms > budget * 1.5) this.lastMiss = now;
-		this.work.push(ms);
-		if (this.work.length < SAMPLES || now - this.changed < SETTLE_MS) return false;
-		const sorted = [...this.work].sort((a, b) => a - b);
-		const typical = sorted[Math.floor(sorted.length * 0.75)];
-		this.work = [];
-		const last = DYNAMIC_STEPS.length - 1;
-		if (typical > budget * (timed ? OVER : 1.5) && this.step < last) {
+		const frames = this.frames;
+		const typical = frames.note(now, ms, budget, timed);
+		if (typical === null) return false;
+		if (frames.over(typical, budget, timed) && this.step < DYNAMIC_STEPS.length - 1) {
 			this.step++;
-			this.changed = now;
+			frames.moved(now);
 			return true;
 		}
 		if (this.step === 0) return false;
@@ -62,18 +104,17 @@ export class DynamicScale {
 		const ratio = (DYNAMIC_STEPS[this.step - 1] / DYNAMIC_STEPS[this.step]) ** 2;
 		const fits = timed
 			? typical * ratio < budget * UNDER
-			: now - this.lastMiss > TRY_UP_MS && now - this.changed > TRY_UP_MS;
+			: now - frames.lastMiss > TRY_UP_MS && now - frames.changed > TRY_UP_MS;
 		if (!fits) return false;
 		this.step--;
-		this.changed = now;
+		frames.moved(now);
 		return true;
 	}
 
 	/** Back to the screen's own pixels: Dynamic turned off, or the view made again. */
 	reset(): void {
 		this.step = 0;
-		this.work = [];
-		this.changed = Number.NEGATIVE_INFINITY;
+		this.frames.reset();
 	}
 }
 
@@ -93,9 +134,7 @@ const SAVINGS_SETTLE_MS = 3000;
 /** Dynamic optimization: how many of DYNAMIC_SAVINGS are taken now. */
 export class DynamicSavings {
 	taken = 0;
-	private work: number[] = [];
-	private changed = Number.NEGATIVE_INFINITY;
-	private lastMiss = Number.NEGATIVE_INFINITY;
+	private frames = new FrameWindow();
 
 	/** The switches turned off now. */
 	off(): readonly DynamicSaving[] {
@@ -113,30 +152,26 @@ export class DynamicSavings {
 	 * True when what is taken changed.
 	 */
 	frame(now: number, ms: number, budget: number, timed: boolean, mayGiveBack = true): boolean {
-		if (!timed && ms > budget * 1.5) this.lastMiss = now;
-		this.work.push(ms);
-		if (this.work.length < 20 || now - this.changed < 500) return false;
-		const sorted = [...this.work].sort((a, b) => a - b);
-		const typical = sorted[Math.floor(sorted.length * 0.75)];
-		this.work = [];
-		if (typical > budget * (timed ? 0.92 : 1.5) && !this.full()) {
+		const frames = this.frames;
+		const typical = frames.note(now, ms, budget, timed);
+		if (typical === null) return false;
+		if (frames.over(typical, budget, timed) && !this.full()) {
 			this.taken++;
-			this.changed = now;
+			frames.moved(now);
 			return true;
 		}
-		if (this.taken === 0 || !mayGiveBack || now - this.changed < SAVINGS_SETTLE_MS) return false;
+		if (this.taken === 0 || !mayGiveBack || now - frames.changed < SAVINGS_SETTLE_MS) return false;
 		const room = timed
 			? typical < budget * SAVINGS_ROOM
-			: now - this.lastMiss > SAVINGS_SETTLE_MS * 2;
+			: now - frames.lastMiss > SAVINGS_SETTLE_MS * 2;
 		if (!room) return false;
 		this.taken--;
-		this.changed = now;
+		frames.moved(now);
 		return true;
 	}
 
 	reset(): void {
 		this.taken = 0;
-		this.work = [];
-		this.changed = Number.NEGATIVE_INFINITY;
+		this.frames.reset();
 	}
 }

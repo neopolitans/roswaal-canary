@@ -66,6 +66,8 @@ export interface FeatureInfo {
 	parent?: FeatureKey;
 	/** A Roswaal fix: a change from Studio's picture on purpose, off to begin with. */
 	fix?: boolean;
+	/** Off at every quality level, and turned on by hand: where it is faster in some places only. */
+	optIn?: boolean;
 }
 
 /** The ten steps a frame is built in, in order: each turns on its own switches. */
@@ -89,7 +91,8 @@ const f = (
 	hint: string,
 	parent?: FeatureKey,
 	fix?: boolean,
-): FeatureInfo => ({ key, label, step, hint, parent, fix });
+	optIn?: boolean,
+): FeatureInfo => ({ key, label, step, hint, parent, fix, ...(optIn ? { optIn } : {}) });
 
 /** The panel's groups of switches, in the order it shows them. */
 export const FEATURE_GROUPS: readonly { title: string; features: readonly FeatureInfo[] }[] = [
@@ -216,7 +219,10 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 				"occlusionCulling",
 				"Occlusion culling",
 				0,
-				"Parts hidden behind solid parts are not drawn, tested against the last frame. The wireframe shows what is left.",
+				"Parts hidden behind solid parts are not drawn, tested against the last frame. Off at every level: the depth pass it needs measured slower than what it saved on an iPad and on desktop GPUs. Turn it on where a place hides much behind walls; the wireframe shows what is left.",
+				undefined,
+				false,
+				true,
 			),
 		],
 	},
@@ -251,9 +257,9 @@ export function isFeatureKey(key: string): key is FeatureKey {
 }
 const BY_KEY = new Map(FEATURES.map((i) => [i.key, i]));
 
-/** Everything on: the picture as Studio draws it. */
+/** Everything on: the picture as Studio draws it. Roswaal's fixes and the switches turned on by hand are off. */
 export const STUDIO_FEATURES: RenderFeatures = Object.fromEntries(
-	FEATURES.map((i) => [i.key, !i.fix]),
+	FEATURES.map((i) => [i.key, !i.fix && !i.optIn]),
 ) as unknown as RenderFeatures;
 
 /** Switches a quality level leaves off on this device, whatever the level: see setOffOnThisDevice. */
@@ -378,7 +384,7 @@ export const LEVEL_ADDS: Partial<Record<FeatureKey, number>> = {
 /** The switches at a quality level, 1 to 21. */
 export function featuresAtLevel(level: number): RenderFeatures {
 	return Object.fromEntries(
-		FEATURES.map((i) => [i.key, !i.fix && level >= (LEVEL_ADDS[i.key] ?? 1)]),
+		FEATURES.map((i) => [i.key, !i.fix && !i.optIn && level >= (LEVEL_ADDS[i.key] ?? 1)]),
 	) as unknown as RenderFeatures;
 }
 

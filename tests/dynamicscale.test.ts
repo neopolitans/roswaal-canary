@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
 	DYNAMIC_STEPS,
 	DynamicScale,
+	FrameWindow,
 } from "../src/extensions/placeEditor/app/viewport/dynamicScale.js";
 
 const BUDGET = 1000 / 60;
@@ -118,5 +119,42 @@ describe("Dynamic optimization", () => {
 		// Room, and not before three seconds since it was taken.
 		run(8, 300);
 		expect(savings.taken).toBe(0);
+	});
+});
+
+/** What Dynamic's render scale and Dynamic optimization both read of moving frames. */
+describe("the frame window", () => {
+	it("says nothing until twenty frames are in, then the one three quarters up", () => {
+		const frames = new FrameWindow();
+		for (let i = 1; i < 20; i++) expect(frames.note(i * 16, i, BUDGET, true)).toBeNull();
+		// Frames of 1 to 20 ms: the sixteenth slowest, three quarters up, is 16.
+		expect(frames.note(20 * 16, 20, BUDGET, true)).toBe(16);
+		// And the window starts again.
+		expect(frames.note(21 * 16, 5, BUDGET, true)).toBeNull();
+	});
+
+	it("waits for a change to settle before saying again", () => {
+		const frames = new FrameWindow();
+		frames.moved(0);
+		for (let i = 0; i < 25; i++) expect(frames.note(i * 16, 10, BUDGET, true)).toBeNull();
+		expect(frames.note(600, 10, BUDGET, true)).toBe(10);
+	});
+
+	it("is over budget past 92% by the GPU's times, or 150% between frames", () => {
+		const frames = new FrameWindow();
+		expect(frames.over(BUDGET * 0.93, BUDGET, true)).toBe(true);
+		expect(frames.over(BUDGET * 0.9, BUDGET, true)).toBe(false);
+		expect(frames.over(BUDGET * 1.4, BUDGET, false)).toBe(false);
+		expect(frames.over(BUDGET * 1.6, BUDGET, false)).toBe(true);
+	});
+
+	/** A reset starts the window and the settling again; when a frame was last missed stands. */
+	it("keeps the last missed frame through a reset", () => {
+		const frames = new FrameWindow();
+		frames.note(100, BUDGET * 2, BUDGET, false);
+		frames.moved(100);
+		frames.reset();
+		expect(frames.lastMiss).toBe(100);
+		expect(frames.changed).toBe(Number.NEGATIVE_INFINITY);
 	});
 });

@@ -371,7 +371,7 @@ export function placeEditorRenderingPage(): DocPage {
 					],
 					[
 						"**Performance**",
-						"Frustum and occlusion culling: parts out of view, or behind solid parts, are not drawn",
+						"Frustum culling: parts out of view are not drawn. Occlusion culling, off at every level, leaves out parts behind solid ones: turn it on where a place hides much behind walls",
 					],
 					[
 						"**Light ranges**",

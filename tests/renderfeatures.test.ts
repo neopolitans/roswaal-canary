@@ -57,8 +57,10 @@ const lighting = {
 
 describe("the Rendering panel's switches", () => {
 	it("are all on as Studio draws the place, each in one group, every step with its own", () => {
-		// Every switch on as Studio draws the place, but the Roswaal fixes, which are off.
-		expect(FEATURES.every((i) => STUDIO_FEATURES[i.key] === !i.fix)).toBe(true);
+		// Every switch on as Studio draws the place, but the Roswaal fixes and the
+		// switches turned on by hand (Occlusion culling), which are off.
+		expect(FEATURES.every((i) => STUDIO_FEATURES[i.key] === (!i.fix && !i.optIn))).toBe(true);
+		expect(FEATURES.filter((i) => i.optIn).map((i) => i.key)).toEqual(["occlusionCulling"]);
 		expect(FEATURES.some((i) => i.fix)).toBe(true);
 		expect(new Set(FEATURES.map((i) => i.key)).size).toBe(FEATURES.length);
 		for (let s = 1; s <= RENDER_STEPS.length; s++)
@@ -137,8 +139,10 @@ describe("the Rendering panel's switches", () => {
 			particles: true,
 			thinParts: true,
 			frustum: true,
-			occlusion: true,
+			occlusion: false,
 		});
+		// Occlusion culling's pass, once it is turned on by hand.
+		expect(passesOf({ ...STUDIO_FEATURES, occlusionCulling: true }).occlusion).toBe(true);
 		expect(passesOf({ ...STUDIO_FEATURES, neonGlow: false }).glow).toBe(true);
 		expect(passesOf({ ...STUDIO_FEATURES, neonGlow: false, lavaGlow: false }).glow).toBe(false);
 		expect(passesOf({ ...STUDIO_FEATURES, skyShadows: false }).thinParts).toBe(false);
@@ -165,23 +169,36 @@ describe("the Rendering panel's switches", () => {
 });
 
 describe("switches a device leaves off", () => {
-	it("leave Occlusion culling off at every level on Apple's GPUs, without calling the level changed", () => {
-		setOffOnThisDevice(["occlusionCulling"]);
+	it("leave a switch off at every level on a device, without calling the level changed", () => {
+		setOffOnThisDevice(["softEdges"]);
 		try {
 			const level21 = presetById("level-21");
-			expect(level21.features.occlusionCulling).toBe(false);
+			expect(level21.features.softEdges).toBe(false);
 			expect(changedFrom(level21.features)).toEqual([]);
 			expect(changedFrom(onThisDevice(STUDIO_FEATURES))).toEqual([]);
 			// Turned on by hand, it is a change from the level.
-			expect(
-				changedFrom({ ...level21.features, occlusionCulling: true }, level21.features),
-			).toEqual(["occlusionCulling"]);
+			expect(changedFrom({ ...level21.features, softEdges: true }, level21.features)).toEqual([
+				"softEdges",
+			]);
 			// The debug views keep their own switches.
 			expect(presetById(DEBUG_PRESETS[0].id).features).toBe(DEBUG_PRESETS[0].features);
 		} finally {
 			setOffOnThisDevice([]);
 		}
-		expect(presetById("level-21").features.occlusionCulling).toBe(true);
+		expect(presetById("level-21").features.softEdges).toBe(true);
+	});
+
+	/**
+	 * Off at every level on every GPU since 1.1.0-canary.78: slower than what
+	 * it saved on an iPad Mini and on an RTX 40. A place that hides much behind
+	 * walls turns it on by hand, which is a change from the level.
+	 */
+	it("leave Occlusion culling off at every level, on any GPU, until it is turned on", () => {
+		for (const p of QUALITY_PRESETS) expect(p.features.occlusionCulling).toBe(false);
+		const level21 = presetById("level-21");
+		expect(changedFrom({ ...level21.features, occlusionCulling: true }, level21.features)).toEqual([
+			"occlusionCulling",
+		]);
 	});
 });
 

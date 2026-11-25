@@ -2162,11 +2162,11 @@ export class ViewportController {
 	private gpuSeen: string | null = null;
 
 	/**
-	 * A quality level's switches on this device. On Apple's GPUs, Occlusion
-	 * culling is off: they already skip what is hidden, tile by tile, and the
-	 * depth pass occlusion needs cost an iPad Mini 0.7 to 2.6 ms at every
-	 * Benchmark 3 station and saved nothing at any (its A/B run, 22 Nov
-	 * 2026). It can still be turned on by hand.
+	 * A quality level's switches on this device. Occlusion culling is off at
+	 * every level (renderFeatures' optIn): the depth pass it needs cost an iPad
+	 * Mini 0.7 to 2.6 ms at every Benchmark 3 station and saved nothing at any
+	 * (22 Nov 2026), and was slower at 37 of 40 stations on an RTX 40 (a
+	 * developer's A/B, 25 Nov). It can still be turned on by hand.
 	 */
 	private levelFeatures(q: QualityLevel): RenderFeatures {
 		return onThisDevice(q.features);

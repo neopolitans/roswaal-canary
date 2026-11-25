@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.78",
+		date: "2026-11-25",
+		headline: "Occlusion culling is off at every level.",
+		changed: [
+			"**Occlusion culling is off at every quality level, on every GPU**: the depth pass it needs measured slower than what it saved on an iPad Mini and on an RTX 40. It stays in Rendering › Switches › Performance, for a place that hides much behind walls.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.77",
 		date: "2026-11-25",
 		headline: "Probe a spot in the view, and find what is costly at this view.",

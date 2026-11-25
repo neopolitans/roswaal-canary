@@ -131,6 +131,8 @@ export interface ViewRenderer {
 	setTextureDetail(step: number): void;
 	/** Scene reflections drawn following the camera (null), or cached on a grid of `cell` studs. WebGPU. */
 	setReflectionGrid?(cell: number | null): void;
+	/** Light objects from a grid round the camera, its finest cell in studs; null, every pixel's own. */
+	setLightGrid?(cell: number | null): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
 	readonly genericFrame?: boolean;
 	/**
@@ -182,7 +184,7 @@ export interface ViewRenderer {
 	 * reflection cube's faces, the near sky maps and the sun's maps. For the
 	 * profile's moving camera; where the renderer counts them.
 	 */
-	redraws?(): { probeFaces: number; nearMaps: number; sunMaps: number };
+	redraws?(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid?: number };
 	/**
 	 * Resolves once the GPU has finished everything drawn so far: a frame's
 	 * whole cost, for a profile. WebGL2 waits there and then.
@@ -878,6 +880,42 @@ export function halfPassStep(share: number, renderWidth: number, pointsWidth: nu
 	if (share !== 2) return share;
 	const perPoint = pointsWidth > 0 ? renderWidth / pointsWidth : 1;
 	return perPoint > 1 ? Math.min(2, perPoint) : 2;
+}
+
+/** Cells a side of each of the light grid's three cascades. */
+export const LIGHT_GRID_CELLS = 32;
+/** The light grid's cascades: the finest cell, then twice it, then four times. */
+export const LIGHT_GRID_CASCADES = 3;
+
+/** The Light object grid setting's finest cell, in studs; null, off. */
+export function lightGridCell(setting: string | undefined): number | null {
+	if (setting === "8" || setting === "16" || setting === "32") return Number(setting);
+	return null;
+}
+
+/**
+ * Where a light grid cascade of `size`-stud cells stands for an eye at
+ * `eye`: kept at `was` while the eye is in its middle half, otherwise
+ * centred on the eye again, its corner on whole cells.
+ */
+export function lightGridOrigin(
+	eye: readonly number[],
+	size: number,
+	was: readonly number[] | null,
+): number[] {
+	const extent = size * LIGHT_GRID_CELLS;
+	if (was && eye.every((e, a) => Math.abs(e - (was[a] + extent / 2)) <= extent / 4))
+		return [...was];
+	return eye.map((e) => Math.floor((e - extent / 2) / size) * size);
+}
+
+/**
+ * The samples a light grid cell of `size` studs averages, a side: each a
+ * lighting cell (LIGHT_CELL, 16 studs) or less, so each reads only its own
+ * cell's lights and none is counted twice.
+ */
+export function lightGridSamples(size: number): number {
+	return Math.max(1, Math.round(size / Math.min(size, LIGHT_CELL)));
 }
 
 /** Cubes kept on the reflection grid, the latest used: about 1 MB each. */

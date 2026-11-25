@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.92",
+		date: "2026-11-25",
+		headline: "Light object grid: light objects worked out once round the camera.",
+		added: [
+			"**Light object grid**, in Settings › Scene view and the Rendering panel: light objects worked out into three grids round the camera, of cells 8, 16 or 32 studs and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and the cost no longer grows with the lights. Off by default. WebGPU.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.91",
 		date: "2026-11-25",
 		headline: "Thin Neon's glow flickers less as the camera moves.",

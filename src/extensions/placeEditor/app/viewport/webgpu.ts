@@ -101,7 +101,11 @@ import {
 	type ImageQuad,
 	imageOrder,
 	imageQuads,
+	LIGHT_CELL,
+	LIGHT_GRID_CASCADES,
+	LIGHT_GRID_CELLS,
 	LIGHTS_FULL,
+	lightGridOrigin,
 	METAL_DIFFUSE_CUT,
 	METAL_SEEN,
 	type MeshGeometry,
@@ -316,6 +320,95 @@ const HALF = {
 	on: "enable f16;\nalias hf = f16;\nalias hv3 = vec3<f16>;\n",
 	off: "alias hf = f32;\nalias hv3 = vec3f;\n",
 };
+/**
+ * The light grid's fill (see gridLamps): each cell of a cascade, the light
+ * the light objects bring it, averaged over samples a lighting cell apart
+ * (lightGridSamples), each reading its own cell's lights as partLights
+ * does, without the face's turn, which each pixel works out for itself. A
+ * light smaller than a sample's cube is spread over it, its total kept, so
+ * it does not fall between samples; a larger one falls off where it does.
+ */
+const GRID_FILL = /* wgsl */ `
+@group(0) @binding(0) var<storage, read> lightData: array<vec4f>;
+@group(0) @binding(1) var<storage, read> lightTable: array<vec2u>;
+@group(0) @binding(2) var<storage, read> lightIndex: array<u32>;
+// origin: the cascade's corner and its cell in studs; info: its index and the switches.
+struct GridP { origin: vec4f, info: vec4f };
+@group(0) @binding(3) var<uniform> gp: GridP;
+@group(0) @binding(4) var gridA: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(5) var gridB: texture_storage_3d<rgba16float, write>;
+fn lightCell(p: vec3f) -> u32 {
+	let c = vec3i(floor(p / ${LIGHT_CELL}.0));
+	let h = (bitcast<u32>(c.x) * 73856093u) ^ (bitcast<u32>(c.y) * 19349663u) ^ (bitcast<u32>(c.z) * 83492791u);
+	return h & 65535u;
+}
+@compute @workgroup_size(4, 4, 4) fn fill(@builtin(global_invocation_id) id: vec3u) {
+	let cells = ${LIGHT_GRID_CELLS}u;
+	if (any(id >= vec3u(cells))) { return; }
+	let size = gp.origin.w;
+	let step = min(size, ${LIGHT_CELL}.0);
+	let m = u32(round(size / step));
+	let r = step * 0.5;
+	let bits = u32(gp.info.y);
+	let corner = gp.origin.xyz + vec3f(id) * size;
+	var light = vec3f(0.0);
+	var weighted = vec3f(0.0);
+	var weight = 0.0;
+	for (var s = 0u; s < m * m * m; s++) {
+		let p = corner + (vec3f(f32(s % m), f32((s / m) % m), f32(s / (m * m))) + 0.5) * step;
+		let b = lightTable[lightCell(p)];
+		for (var j = 0u; j < min(b.y, 64u); j++) {
+			let k = lightIndex[b.x + j] * 5u;
+			let a = lightData[k];
+			let col = lightData[k + 1u];
+			let d = lightData[k + 2u];
+			let kind = select(select(${FEATURE_BIT.pointLights}u, ${FEATURE_BIT.spotLights}u, col.w > 0.5), ${FEATURE_BIT.surfaceLights}u, col.w > 1.5);
+			if ((bits & kind) == 0u) { continue; }
+			var at = a.xyz;
+			if (col.w > 1.5) {
+				// Wholly behind its face: none of its light.
+				if (dot(p - a.xyz, d.xyz) < -r) { continue; }
+				let u = lightData[k + 3u].xyz;
+				let v = lightData[k + 4u].xyz;
+				let off = p - a.xyz;
+				at = a.xyz + u * clamp(dot(off, u) / max(dot(u, u), 1e-6), -1.0, 1.0) + v * clamp(dot(off, v) / max(dot(v, v), 1e-6), -1.0, 1.0);
+			}
+			let to = at - p;
+			let dist = length(to);
+			// A light smaller than the cube reaches its middle from anywhere in
+			// it; a larger one falls off where it does.
+			let reach = max(dist - max(r - a.w, 0.0), 0.0);
+			if (reach >= a.w) { continue; }
+			var k2 = 1.0 - smoothstep(0.7, 1.0, reach / a.w);
+			if (col.w > 0.5 && dist > r) {
+				let l = to / dist;
+				let c = dot(-l, d.xyz);
+				if (c <= 0.0) { continue; }
+				k2 = k2 * (1.0 - smoothstep(0.0, 1.0, atan2(length(cross(-l, d.xyz)), c) / max(d.w, 1e-3)));
+			}
+			// A light smaller than the sample's cube: spread over it, its total kept.
+			k2 = k2 * min(1.0, 0.52 * pow(a.w / r, 3.0));
+			let lit = col.rgb * k2;
+			let lum = dot(lit, vec3f(0.2126, 0.7152, 0.0722));
+			light = light + lit;
+			weighted = weighted + at * lum;
+			weight = weight + lum;
+		}
+	}
+	let n = f32(m * m * m);
+	light = light / n;
+	let w = weight / n;
+	// Where it comes from, from the cascade's middle over its extent, times its weight.
+	let extent = f32(cells) * size;
+	let mid = gp.origin.xyz + vec3f(extent * 0.5);
+	var source = vec3f(0.0);
+	if (weight > 0.0) { source = (weighted / weight - mid) / extent * w; }
+	let z = id.z + u32(gp.info.x) * cells;
+	textureStore(gridA, vec3u(id.xy, z), vec4f(light, w));
+	textureStore(gridB, vec3u(id.xy, z), vec4f(source, 0.0));
+}
+`;
+
 const SHADER = /* wgsl */ `
 struct U {
 	viewProj: mat4x4f, invViewProj: mat4x4f,
@@ -456,6 +549,51 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 // The half-size pass's surface direction, as n * 0.5 + 0.5: a sample is read
 // only where it faces as the pixel does (lampAgrees).
 @group(0) @binding(20) var lampNormal: texture_2d<f32>;
+// The light grid (Light object grid): three cascades round the camera, each
+// LIGHT_GRID_CELLS a side, stacked along z. Each cell holds the light that
+// arrives there from the light objects, alpha its luminance, and in gridB
+// the luminance-weighted middle of where it comes from, from the cascade's
+// middle over its extent, times that luminance, so cells blend as weights.
+struct GridU { cascades: array<vec4f, ${LIGHT_GRID_CASCADES}>, info: vec4f };
+@group(0) @binding(21) var<uniform> gridU: GridU;
+@group(0) @binding(22) var gridA: texture_3d<f32>;
+@group(0) @binding(23) var gridB: texture_3d<f32>;
+// A cascade's light at p, its cells blended, and where it comes from: the
+// direction is worked out from p itself, so near one light each pixel has
+// its own, and faces and corners keep their edges however large the cells.
+fn gridLight(k: u32, p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
+	let g = gridU.cascades[k];
+	let cells = f32(${LIGHT_GRID_CELLS});
+	let extent = g.w * cells;
+	let t = clamp((p - g.xyz) / extent, vec3f(0.5 / cells), vec3f(1.0 - 0.5 / cells));
+	let uvw = vec3f(t.xy, (t.z + f32(k)) / f32(${LIGHT_GRID_CASCADES}));
+	let a = textureSampleLevel(gridA, skyCellSampler, uvw, 0.0);
+	if (a.a <= 1e-5) { return Lamps(vec3f(0.0), vec3f(0.0)); }
+	let b = textureSampleLevel(gridB, skyCellSampler, uvw, 0.0);
+	let source = g.xyz + vec3f(extent * 0.5) + extent * b.xyz / a.a;
+	let to = source - p;
+	let l = to / max(length(to), 1e-3);
+	let ndl = max(dot(n, l), 0.0);
+	let lit = a.rgb * ndl;
+	return Lamps(lit * 1.25, lit * pow(max(dot(n, normalize(l + v)), 0.0), gloss) * 1.25);
+}
+// The finest cascade p is a cell inside, eased into the next over two
+// cells before its edge; past the coarsest, every light worked out here.
+fn gridLamps(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
+	for (var k = 0u; k < ${LIGHT_GRID_CASCADES}u; k++) {
+		let g = gridU.cascades[k];
+		let half = g.w * f32(${LIGHT_GRID_CELLS}) * 0.5;
+		let off = abs(p - (g.xyz + vec3f(half)));
+		let edge = half - max(off.x, max(off.y, off.z));
+		if (edge <= g.w) { continue; }
+		let here = gridLight(k, p, n, v, gloss);
+		let ease = clamp(1.0 - (edge - g.w) / (2.0 * g.w), 0.0, 1.0);
+		if (ease <= 0.0 || k + 1u >= ${LIGHT_GRID_CASCADES}u) { return here; }
+		let next = gridLight(k + 1u, p, n, v, gloss);
+		return Lamps(mix(here.diffuse, next.diffuse, ease), mix(here.spec, next.spec, ease));
+	}
+	return partLights(p, n, v, gloss);
+}
 // Whether the half-size pass's sample at p stands for this pixel: at its
 // distance from the eye, and facing within about 25 degrees of it. On
 // distance alone, where two faces met a pixel took the light worked out for
@@ -468,6 +606,7 @@ fn lampAgrees(p: vec2i, dist: f32, near: f32, n: vec3f) -> bool {
 // bilinear filtering would, each only where it stands for this pixel
 // (lampAgrees); where none does, as at an edge or a corner, worked out here.
 fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
+	if (gridU.info.x > 0.5) { return gridLamps(i.world, n, v, gloss); }
 	if (has(${FEATURE_BIT.halfLamps}u)) {
 		let size = vec2i(textureDimensions(lampLight));
 		// Half or a quarter of the frame across and down: its share from the two sizes.
@@ -1876,7 +2015,10 @@ export class WebGpuView implements ViewRenderer {
 		const held = (r: RenderSettings) =>
 			`${passesOf(r.features).thinParts} ${featureBits(r.features) & (FEATURE_BIT.skyShadows | FEATURE_BIT.nearSky)}`;
 		if (held(render) !== held(this.render)) this.nearCentre = null;
-		if (render.features !== this.render.features) this.reflStale();
+		if (render.features !== this.render.features) {
+			this.reflStale();
+			this.gridStale = true;
+		}
 		this.render = render;
 	}
 
@@ -2403,6 +2545,9 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 18, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
 				{ binding: 19, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
 				{ binding: 20, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+				{ binding: 21, visibility: STAGE.FRAGMENT, buffer: {} },
+				{ binding: 22, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } },
+				{ binding: 23, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } },
 			],
 		});
 		this.layout = layout;
@@ -3904,6 +4049,7 @@ fn at(c: vec2i) -> u32 {
 		// While the stages are profiled, the sun's maps are drawn every frame,
 		// as when the camera moves: a still camera draws them only once.
 		this.drawCascades(encoder, camera, partsMoved || this.clock !== null);
+		this.fillLightGrid(encoder, camera.eye);
 		// The parts moved or the light changed: the cube shows them again. Not
 		// when only the near maps moved with the camera: the cube follows it
 		// by PROBE_STEP, and the near maps changed what it showed by little.
@@ -5299,8 +5445,149 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				{ binding: 18, resource: light.createView() },
 				{ binding: 19, resource: shine.createView() },
 				{ binding: 20, resource: facing.createView() },
+				...this.gridEntries(),
 			],
 		});
+	}
+
+	// -- the light grid: see gridLamps ---------------------------------------------------
+
+	/** The Light object grid's finest cell, in studs; null, off. */
+	private gridCell: number | null = null;
+	private gridA: GPUTexture | null = null;
+	private gridB: GPUTexture | null = null;
+	private gridBlank: GPUTexture | null = null;
+	private gridUniform: GPUBuffer | null = null;
+	private gridParams: GPUBuffer[] = [];
+	private gridPipe: GPUComputePipeline | null = null;
+	/** Where each cascade stands now; null, not yet filled. */
+	private gridOrigins: (number[] | null)[] = [];
+	/** The lights or their switches changed: every cascade filled again. */
+	private gridStale = true;
+
+	setLightGrid(cell: number | null): void {
+		if (cell === this.gridCell || !this.device) return;
+		this.gridCell = cell;
+		this.gridOrigins = [];
+		this.gridStale = true;
+		if (cell !== null && !this.gridA) {
+			const size = [LIGHT_GRID_CELLS, LIGHT_GRID_CELLS, LIGHT_GRID_CELLS * LIGHT_GRID_CASCADES];
+			const make = () =>
+				this.device.createTexture({
+					size,
+					dimension: "3d",
+					format: "rgba16float",
+					usage: TEXTURE.STORAGE_BINDING | TEXTURE.TEXTURE_BINDING,
+				});
+			this.gridA = make();
+			this.gridB = make();
+		}
+		this.writeGridUniform();
+		if (this.bind) this.rebind();
+		this.onRedraw?.();
+	}
+
+	/** Group 0's grid entries: the cascades, or blanks while the grid is off. */
+	private gridEntries(): GPUBindGroupEntry[] {
+		const d = this.device;
+		this.gridUniform ??= d.createBuffer({
+			size: 16 * (LIGHT_GRID_CASCADES + 1),
+			usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
+		});
+		this.gridBlank ??= d.createTexture({
+			size: [1, 1, 1],
+			dimension: "3d",
+			format: "rgba16float",
+			usage: TEXTURE.TEXTURE_BINDING,
+		});
+		const a = this.gridA ?? this.gridBlank;
+		const b = this.gridB ?? this.gridBlank;
+		return [
+			{ binding: 21, resource: { buffer: this.gridUniform } },
+			{ binding: 22, resource: a.createView({ dimension: "3d" }) },
+			{ binding: 23, resource: b.createView({ dimension: "3d" }) },
+		];
+	}
+
+	/** Where the cascades stand, and whether the grid is read: only once each is filled. */
+	private writeGridUniform(): void {
+		if (!this.gridUniform) return;
+		const block = new Float32Array(4 * (LIGHT_GRID_CASCADES + 1));
+		const cell = this.gridCell;
+		let filled = cell !== null && this.hasLights;
+		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			const at = this.gridOrigins[k];
+			if (!at || cell === null) {
+				filled = false;
+				continue;
+			}
+			block.set([...at, cell * 2 ** k], k * 4);
+		}
+		block[LIGHT_GRID_CASCADES * 4] = filled ? 1 : 0;
+		this.device.queue.writeBuffer(this.gridUniform, 0, block);
+	}
+
+	/**
+	 * The light grid's cascades that are due, filled by a compute pass: all
+	 * when the lights or their switches changed, otherwise the one the eye
+	 * has left the middle half of, one a frame.
+	 */
+	private fillLightGrid(encoder: GPUCommandEncoder, eye: number[]): void {
+		const cell = this.gridCell;
+		if (cell === null || !this.gridA || !this.gridB || !this.hasLights) return;
+		const stale = this.gridStale;
+		this.gridStale = false;
+		const due: number[] = [];
+		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			const was = stale ? null : (this.gridOrigins[k] ?? null);
+			const at = lightGridOrigin(eye, cell * 2 ** k, was);
+			if (was && at.every((v, a) => v === was[a])) continue;
+			due.push(k);
+			this.gridOrigins[k] = at;
+			// Once each is filled, one a frame: the rest the frames after.
+			if (!stale && this.gridOrigins.length >= LIGHT_GRID_CASCADES) break;
+		}
+		if (due.length === 0) return;
+		const d = this.device;
+		if (!this.gridPipe) {
+			this.gridPipe = d.createComputePipeline({
+				layout: "auto",
+				compute: { module: d.createShaderModule({ code: GRID_FILL }), entryPoint: "fill" },
+			});
+			this.gridParams = Array.from({ length: LIGHT_GRID_CASCADES }, () =>
+				d.createBuffer({ size: 32, usage: BUFFER.UNIFORM | BUFFER.COPY_DST }),
+			);
+		}
+		const bits = this.render ? renderDebug(this.render)[1] : 0;
+		const pass = encoder.beginComputePass();
+		pass.setPipeline(this.gridPipe);
+		for (const k of due) {
+			const at = this.gridOrigins[k]!;
+			d.queue.writeBuffer(
+				this.gridParams[k],
+				0,
+				new Float32Array([...at, cell * 2 ** k, k, bits, 0, 0]),
+			);
+			pass.setBindGroup(
+				0,
+				d.createBindGroup({
+					layout: this.gridPipe.getBindGroupLayout(0),
+					entries: [
+						{ binding: 0, resource: { buffer: this.lightBuffers.data } },
+						{ binding: 1, resource: { buffer: this.lightBuffers.table } },
+						{ binding: 2, resource: { buffer: this.lightBuffers.index } },
+						{ binding: 3, resource: { buffer: this.gridParams[k] } },
+						{ binding: 4, resource: this.gridA.createView({ dimension: "3d" }) },
+						{ binding: 5, resource: this.gridB.createView({ dimension: "3d" }) },
+					],
+				}),
+			);
+			const groups = LIGHT_GRID_CELLS / 4;
+			pass.dispatchWorkgroups(groups, groups, groups);
+		}
+		pass.end();
+		this.redrawn.lightGrid += due.length;
+		this.writeGridUniform();
 	}
 
 	// -- the lamp light at half size: see lampsAt ---------------------------------------
@@ -5358,7 +5645,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	 */
 	private lampBit(bits: number): number {
 		let out = bits & ~(FEATURE_BIT.halfLamps | FEATURE_BIT.halfSky);
-		if (this.lampModeNow !== "full" && this.hasLights) out |= FEATURE_BIT.halfLamps;
+		if (this.lampModeNow !== "full" && this.hasLights && this.gridCell === null)
+			out |= FEATURE_BIT.halfLamps;
 		if (this.skyModeNow !== "full" && bits & FEATURE_BIT.skyShadows) out |= FEATURE_BIT.halfSky;
 		return out;
 	}
@@ -5452,9 +5740,9 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** Whether any cube has been drawn yet: the first is drawn whole. */
 	private reflEver = false;
 	/** What has been drawn again, counted: see ViewRenderer.redraws. */
-	private redrawn = { probeFaces: 0, nearMaps: 0, sunMaps: 0 };
+	private redrawn = { probeFaces: 0, nearMaps: 0, sunMaps: 0, lightGrid: 0 };
 
-	redraws(): { probeFaces: number; nearMaps: number; sunMaps: number } {
+	redraws(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid: number } {
 		return { ...this.redrawn };
 	}
 	private reflGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
@@ -5975,6 +6263,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			index: store(grid.index),
 		};
 		if (old) for (const b of [old.data, old.table, old.index]) b.destroy();
+		this.gridStale = true;
 	}
 
 	private makeSkyMaps(buffers: GPUVertexBufferLayout[]): void {

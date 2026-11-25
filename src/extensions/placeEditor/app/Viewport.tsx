@@ -37,6 +37,7 @@ import {
 	VIEWPORT_BLOOM_RESOLUTIONS,
 	VIEWPORT_FRAME_RATES,
 	VIEWPORT_LAMP_RESOLUTIONS,
+	VIEWPORT_LIGHT_GRIDS,
 	VIEWPORT_REFLECTION_UPDATES,
 	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
@@ -1074,6 +1075,7 @@ function SceneSettings({
 			{choice("renderScale", VIEWPORT_RENDER_SCALES, scaleLabels)}
 			{segmented("upscale", VIEWPORT_UPSCALES)}
 			{segmented("lampResolution", VIEWPORT_LAMP_RESOLUTIONS)}
+			{choice("lightGrid", VIEWPORT_LIGHT_GRIDS)}
 			{segmented("skyResolution", VIEWPORT_SKY_RESOLUTIONS)}
 			{segmented("bloomResolution", VIEWPORT_BLOOM_RESOLUTIONS)}
 			{choice("shadowMapSize", VIEWPORT_SHADOW_MAPS)}

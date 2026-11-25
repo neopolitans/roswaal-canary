@@ -38,6 +38,7 @@ describe("an extension's settings", () => {
 			upscale: "off",
 			dynamicOptimization: false,
 			lampResolution: "auto",
+			lightGrid: "off",
 			bloomResolution: "auto",
 			shadowMapSize: "auto",
 			textureResolution: "full",

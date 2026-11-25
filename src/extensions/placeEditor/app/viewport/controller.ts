@@ -131,6 +131,7 @@ import {
 	DEFAULT_RENDER,
 	type EffectSteps,
 	FOV,
+	lightGridCell,
 	type MeshGeometry,
 	madeGeometry,
 	meshGeometry,
@@ -179,6 +180,8 @@ export interface ViewportOptions {
 	dynamicOptimization?: boolean;
 	/** Light objects' resolution: measured in use, or as set. See depthChoice.ts's lampMode. */
 	lampResolution?: LampResolution;
+	/** Light objects from a grid round the camera, its finest cell: see view.ts's lightGridCell. */
+	lightGrid?: "off" | "8" | "16" | "32";
 	/** Neon's glow and BloomEffect: the quality level's, or as set. See viewQualityFor. */
 	bloomResolution?: "auto" | "full" | "half" | "quarter";
 	/** The sun's shadow maps, texels a side, or the quality level's. */
@@ -3037,6 +3040,7 @@ export class ViewportController {
 	private applyLampMode(): void {
 		this.view?.setLampMode?.(this.lampModeNow());
 		this.view?.setSkyMode?.(this.skyModeNow());
+		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid));
 		this.view?.setReflectionGrid?.(
 			reflectionGrid(
 				this.options.reflectionUpdates,

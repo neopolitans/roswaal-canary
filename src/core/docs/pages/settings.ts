@@ -284,6 +284,10 @@ export function settingsPage(): DocPage {
 						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU.",
 					],
 					[
+						"Light object grid",
+						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Off**, the default, has every pixel work out its own. WebGPU.",
+					],
+					[
 						"Sky light resolution",
 						"How many pixels the sky's light and shadow, Sky shadows' work, are worked out at. **Full**, the default, is every pixel; **Half** or **Quarter** works it out at fewer, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. It saves most on a tablet at a high render scale. WebGPU.",
 					],

@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.58.0",
+	version: "0.59.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.59.0",
+			roswaal: "1.1.0-canary.92",
+			date: "2026-11-25",
+			text: "lightGrid (Light object grid): GRID_FILL compute pass fills three cascades (LIGHT_GRID_CELLS 32 a side, the finest cell 8/16/32, then x2, x4; lightGridOrigin, lightGridSamples) of light and its luminance-weighted source; gridLamps (bindings 21-23) blends cells and cascades and turns the light to each pixel's face from that source. No half-size light pass while it is on.",
+		},
 		{
 			version: "0.58.0",
 			roswaal: "1.1.0-canary.91",

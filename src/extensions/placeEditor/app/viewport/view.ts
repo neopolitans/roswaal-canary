@@ -122,6 +122,11 @@ export interface ViewRenderer {
 	setLookLayers?(layers: readonly number[]): boolean;
 	/** Light objects' resolution, as the controller resolves it: see depthChoice.ts's lampMode. */
 	setLampMode?(mode: "full" | "half" | "quarter"): void;
+	/**
+	 * The material textures read `step` mip levels smaller: 0 their own size,
+	 * 1 half, 2 a quarter. On WebGPU, Decals and Textures too.
+	 */
+	setTextureDetail(step: number): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
 	readonly genericFrame?: boolean;
 	/**
@@ -821,6 +826,9 @@ export const FULL_QUALITY: ViewQuality = {
 	blobWidth: null,
 	glowHalf: false,
 };
+
+/** Texture resolution's mip levels smaller than the textures' own: see ViewRenderer.setTextureDetail. */
+export const TEXTURE_STEPS = { full: 0, half: 1, quarter: 2 } as const;
 
 /** Pixels a screen point from which the glow is sized to the screen: see ViewQuality.glowCoarse. */
 export const GLOW_COARSE_RATIO = 1.25;

@@ -284,6 +284,18 @@ export function settingsPage(): DocPage {
 						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. WebGPU.",
 					],
 					[
+						"Bloom resolution",
+						"How many pixels Neon's glow and the place's BloomEffect are worked out at. **Automatic**, the default, is the quality level's: half the pixels at Level 12 and below, and a quarter where the view has more pixels than the screen has points. **Full**, **Half** or **Quarter** set it; fewer pixels are a little softer.",
+					],
+					[
+						"Shadow map size",
+						"How many texels a side the maps the sun's shadows are drawn into have. **Automatic**, the default, is the quality level's: 512 to Level 9, 1,024 to 12, then 2,048. **512** to **4,096** set it: bigger is sharper and costs time and memory, 64 MB a map at 4,096.",
+					],
+					[
+						"Texture resolution",
+						"The detail the material textures are read at. **Full**, the default, is their own size; **Half** and **Quarter** read their smaller copies, which a GPU short of memory bandwidth reads faster. On WebGPU, Decals and Textures too.",
+					],
+					[
 						"Dynamic optimization",
 						"Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first (today, the lights worked out at half the pixels), and gives them back once frames fit with room. With Render scale **Dynamic**, the savings go first. WebGPU. The Rendering panel offers it too, with Frame rate, Render scale, Upscaling and Renderer.",
 					],

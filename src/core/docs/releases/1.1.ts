@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.80",
+		date: "2026-11-25",
+		headline: "Bloom, shadow maps and textures each have a resolution of their own.",
+		added: [
+			"**Bloom resolution**, in Settings › Scene view and the Rendering panel: Neon's glow and BloomEffect at the quality level's pixels, or at Full, Half or Quarter.",
+			"**Shadow map size**: the sun's maps at the quality level's size, or at 512 to 4,096 texels a side.",
+			"**Texture resolution**: the material textures read at their own size, or at Half or Quarter, which a GPU short of memory bandwidth reads faster.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.79",
 		date: "2026-11-25",
 		headline: "Occlusion culling costs nothing where it cannot help, and Auto where Automatic does not fit.",

@@ -34,10 +34,13 @@ import {
 	renderScaleLabels,
 	SCENE_VIEW,
 	VIEWPORT_ANTIALIAS,
+	VIEWPORT_BLOOM_RESOLUTIONS,
 	VIEWPORT_FRAME_RATES,
 	VIEWPORT_LAMP_RESOLUTIONS,
 	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
+	VIEWPORT_SHADOW_MAPS,
+	VIEWPORT_TEXTURE_RESOLUTIONS,
 	VIEWPORT_UPSCALES,
 	type ViewportFrameRate,
 	type ViewportRenderer,
@@ -1061,6 +1064,9 @@ function SceneSettings({
 			{choice("renderScale", VIEWPORT_RENDER_SCALES, scaleLabels)}
 			{segmented("upscale", VIEWPORT_UPSCALES)}
 			{segmented("lampResolution", VIEWPORT_LAMP_RESOLUTIONS)}
+			{segmented("bloomResolution", VIEWPORT_BLOOM_RESOLUTIONS)}
+			{choice("shadowMapSize", VIEWPORT_SHADOW_MAPS)}
+			{segmented("textureResolution", VIEWPORT_TEXTURE_RESOLUTIONS)}
 			<PanelSetting settingKey="dynamicOptimization">
 				<input
 					type="checkbox"

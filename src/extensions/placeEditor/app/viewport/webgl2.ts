@@ -1176,6 +1176,23 @@ export class WebGl2View implements ViewRenderer {
 	/** A pipeline or table the view waited on is ready: draw again. */
 	onRedraw?: () => void;
 
+	/** Texture resolution's levels smaller: the material textures' base mip level. */
+	private lookStep = 0;
+
+	setTextureDetail(step: number): void {
+		const level = Math.min(step, TEXTURE_LEVELS - 1);
+		if (level === this.lookStep) return;
+		this.lookStep = level;
+		const gl = this.gl;
+		if (gl && this.looks) {
+			gl.activeTexture(gl.TEXTURE1);
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.looks);
+			gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_BASE_LEVEL, level);
+			gl.activeTexture(gl.TEXTURE0);
+		}
+		this.onRedraw?.();
+	}
+
 	/**
 	 * The antialiasing asked for (see antialias.ts), and each sun shadow
 	 * map's side, in texels, as the quality level sets them.
@@ -4007,6 +4024,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
 		const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
 		if (aniso) gl.texParameterf(gl.TEXTURE_2D_ARRAY, aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+		gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_BASE_LEVEL, this.lookStep);
 		gl.activeTexture(gl.TEXTURE0);
 		this.loaded = new Set();
 	}

@@ -497,6 +497,12 @@ export function App() {
 				antialias: antialiasSetting(sceneView.antialiasing),
 				dynamicOptimization: sceneView.dynamicOptimization === true,
 				lampResolution: sceneView.lampResolution ?? "auto",
+				bloomResolution: sceneView.bloomResolution ?? "auto",
+				shadowMapSize:
+					sceneView.shadowMapSize === undefined || sceneView.shadowMapSize === "auto"
+						? "auto"
+						: Number(sceneView.shadowMapSize),
+				textureResolution: sceneView.textureResolution ?? "full",
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
@@ -517,6 +523,9 @@ export function App() {
 			sceneView.quality,
 			sceneView.dynamicOptimization,
 			sceneView.lampResolution,
+			sceneView.bloomResolution,
+			sceneView.shadowMapSize,
+			sceneView.textureResolution,
 		],
 	);
 	useEffect(() => viewport?.setOptions(viewOptions), [viewport, viewOptions]);

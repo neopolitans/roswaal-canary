@@ -105,6 +105,30 @@ export const VIEWPORT_LAMP_RESOLUTIONS = [
 	{ value: "quarter", label: "Quarter" },
 ] as const;
 
+/** Bloom resolution: Neon's glow and BloomEffect, the quality level's or as set. */
+export const VIEWPORT_BLOOM_RESOLUTIONS = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "full", label: "Full" },
+	{ value: "half", label: "Half" },
+	{ value: "quarter", label: "Quarter" },
+] as const;
+
+/** Shadow map size: the sun's maps, texels a side, the quality level's or as set. */
+export const VIEWPORT_SHADOW_MAPS = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "512", label: "512" },
+	{ value: "1024", label: "1,024" },
+	{ value: "2048", label: "2,048" },
+	{ value: "4096", label: "4,096" },
+] as const;
+
+/** Texture resolution: the material textures read at their own size, or smaller. */
+export const VIEWPORT_TEXTURE_RESOLUTIONS = [
+	{ value: "full", label: "Full" },
+	{ value: "half", label: "Half" },
+	{ value: "quarter", label: "Quarter" },
+] as const;
+
 /**
  * Antialiasing: the quality level's, or a mode (see antialias.ts). MSAA's
  * values are its counts, as canary.7's 4× was stored.
@@ -139,6 +163,12 @@ export interface PlaceEditorSettings {
 	dynamicOptimization: boolean;
 	/** Light objects' resolution: see depthChoice.ts's lampMode. */
 	lampResolution: "auto" | "full" | "half" | "quarter";
+	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
+	bloomResolution: "auto" | "full" | "half" | "quarter";
+	/** The sun's shadow maps, texels a side, or the quality level's. */
+	shadowMapSize: "auto" | "512" | "1024" | "2048" | "4096";
+	/** The material textures read at their own size, or one or two mip levels smaller. */
+	textureResolution: "full" | "half" | "quarter";
 	/** Stored as `antialiasing`: 1.1.0-canary.6 saved `antialias` as "4" for everyone. */
 	antialiasing: ViewportAntialias;
 	outlineWidth: OutlineWidth;
@@ -234,6 +264,36 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LAMP_RESOLUTIONS,
+			},
+			{
+				key: "bloomResolution",
+				title: "Bloom resolution",
+				help: "Pixels Neon's glow and bloom are worked out at.",
+				detail:
+					"Neon's glow and the place's BloomEffect. Automatic is the quality level's: half the pixels at Level 12 and below, and a quarter where the view has more pixels than the screen has points. Full, Half or Quarter set it; fewer pixels are a little softer. WebGL2 draws Half as Full.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_BLOOM_RESOLUTIONS,
+			},
+			{
+				key: "shadowMapSize",
+				title: "Shadow map size",
+				help: "Texels a side of the maps the sun's shadows are drawn into.",
+				detail:
+					"Bigger is sharper, and costs time and memory: each of the three maps takes 64 MB at 4,096. Automatic is the quality level's: 512 to Level 9, 1,024 to 12, then 2,048.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_SHADOW_MAPS,
+			},
+			{
+				key: "textureResolution",
+				title: "Texture resolution",
+				help: "Detail the material textures are read at.",
+				detail:
+					"Full reads each material's texture at its own size, 512 pixels a side, or 256 on a touch screen; Half and Quarter read its smaller copies, which a GPU short of memory bandwidth reads faster. On WebGPU, Decals and Textures too. What is kept is the same either way.",
+				type: "choice",
+				default: "full",
+				choices: VIEWPORT_TEXTURE_RESOLUTIONS,
 			},
 			{
 				key: "antialiasing",

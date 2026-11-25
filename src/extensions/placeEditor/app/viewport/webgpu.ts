@@ -3605,6 +3605,14 @@ fn at(c: vec2i) -> u32 {
 
 	/** The textures' mip bias: see U.lod. */
 	private lodBias = 0;
+	/** Texture resolution's levels smaller, added to the bias: see setTextureDetail. */
+	private lookStep = 0;
+
+	setTextureDetail(step: number): void {
+		if (step === this.lookStep) return;
+		this.lookStep = step;
+		this.onRedraw?.();
+	}
 
 	private setCamera(camera: Camera): void {
 		const vp = jitterClip(
@@ -3627,7 +3635,7 @@ fn at(c: vec2i) -> u32 {
 		const debug = renderDebug(this.render);
 		debug[1] = this.lampBit(debug[1]);
 		u.set(debug, 84);
-		u.set([this.lodBias, 0, 0, 0], 88);
+		u.set([this.lodBias + this.lookStep, 0, 0, 0], 88);
 		this.device.queue.writeBuffer(this.uniform, 0, u);
 	}
 

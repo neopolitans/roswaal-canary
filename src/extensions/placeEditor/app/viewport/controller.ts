@@ -130,7 +130,9 @@ import {
 	type RenderSettings,
 	type RenderStats,
 	splitByMesh,
+	TEXTURE_STEPS,
 	tintedOutline,
+	type ViewQuality,
 	type ViewRenderer,
 } from "./view.js";
 import { DEFAULT_GIZMOS, type GizmoSettings, gizmosOn, visualGizmoLines } from "./visualGizmos.js";
@@ -168,6 +170,12 @@ export interface ViewportOptions {
 	dynamicOptimization?: boolean;
 	/** Light objects' resolution: measured in use, or as set. See depthChoice.ts's lampMode. */
 	lampResolution?: LampResolution;
+	/** Neon's glow and BloomEffect: the quality level's, or as set. See viewQualityFor. */
+	bloomResolution?: "auto" | "full" | "half" | "quarter";
+	/** The sun's shadow maps, texels a side, or the quality level's. */
+	shadowMapSize?: "auto" | number;
+	/** The material textures, one or two mip levels smaller. See setTextureDetail. */
+	textureResolution?: "full" | "half" | "quarter";
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -790,6 +798,10 @@ export class ViewportController {
 		}
 		if (was.lampResolution !== options.lampResolution) this.lamps.reset();
 		this.applyLampMode();
+		// Bloom, the shadow maps and the textures, each changed in place.
+		this.view.setQuality(this.viewQualityFor(this.level(), this.pixelRatio()));
+		this.view.setShadowMap(this.shadowMapFor(this.level()));
+		this.view.setTextureDetail(TEXTURE_STEPS[options.textureResolution ?? "full"]);
 		if (was.renderScale !== options.renderScale || was.upscale !== options.upscale) this.fit();
 		this.redraw();
 	}
@@ -1966,7 +1978,7 @@ export class ViewportController {
 			logStep("Level chosen", `Level ${level}`);
 		}
 		const samples = this.antialiasMode();
-		const map = this.level().shadowMap;
+		const map = this.shadowMapFor(this.level());
 		let view: ViewRenderer;
 		if (gl2) view = new WebGl2View(samples, map);
 		else {
@@ -2006,7 +2018,8 @@ export class ViewportController {
 		view.setOutline(this.options.outlineWidth, this.options.hideBehind);
 		view.setGlassHides(this.options.glassHides);
 		view.setPostEffects(this.options.postEffects);
-		view.setQuality(viewQuality(this.level(), this.pixelRatio()));
+		view.setQuality(this.viewQualityFor(this.level(), this.pixelRatio()));
+		view.setTextureDetail(TEXTURE_STEPS[this.options.textureResolution ?? "full"]);
 		view.setRender(this.withSavings(this.state.render));
 		// A new view starts on the full path: Automatic's is measured for it afresh.
 		this.depth.reset();
@@ -2170,6 +2183,31 @@ export class ViewportController {
 	 */
 	private levelFeatures(q: QualityLevel): RenderFeatures {
 		return onThisDevice(q.features);
+	}
+
+	/**
+	 * A quality level's view settings, with Settings' Bloom resolution over
+	 * the level's own: Full finds and blurs the glow at the view's size and
+	 * half; Half finds it at half; Quarter blurs it at a quarter as well.
+	 */
+	private viewQualityFor(q: QualityLevel, ratio: number): ViewQuality {
+		const quality = viewQuality(q, ratio);
+		switch (this.options.bloomResolution) {
+			case "full":
+				return { ...quality, glowHalf: false, glowCoarse: false };
+			case "half":
+				return { ...quality, glowHalf: true, glowCoarse: false };
+			case "quarter":
+				return { ...quality, glowHalf: true, glowCoarse: true };
+			default:
+				return quality;
+		}
+	}
+
+	/** The sun's shadow maps' side: Settings', or the quality level's. */
+	private shadowMapFor(q: QualityLevel): number {
+		const size = this.options.shadowMapSize;
+		return size === undefined || size === "auto" ? q.shadowMap : size;
 	}
 
 	/** Antialiasing: Settings', or the quality level's. */
@@ -2864,8 +2902,8 @@ export class ViewportController {
 			await this.restartView();
 			return;
 		}
-		view.setShadowMap(q.shadowMap);
-		view.setQuality(viewQuality(q, this.pixelRatio()));
+		view.setShadowMap(this.shadowMapFor(q));
+		view.setQuality(this.viewQualityFor(q, this.pixelRatio()));
 		this.fit();
 		this.redraw();
 	}
@@ -2943,7 +2981,7 @@ export class ViewportController {
 			canvas.width = cw;
 			canvas.height = ch;
 			// The glow sized for the screen at this scale: see ViewQuality.glowCoarse.
-			view.setQuality(viewQuality(this.level(), dpr));
+			view.setQuality(this.viewQualityFor(this.level(), dpr));
 			view.resize(w, h);
 			// Another size: the depth paths and light resolutions compare afresh.
 			this.depth.reset();

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.98",
+		date: "2026-11-25",
+		headline: "SpotLights in a Soft place light as Studio's do.",
+		fixed: [
+			"**SpotLights in a Soft place light as Studio's do**: their light goes every way, as a PointLight's, dimmed by how much of the sphere their cone covers, so the parts beside one are lit and the floor under a narrow one hardly is. Fitted to Studio's screen captures at 60, 120 and 180 degrees.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.97",
 		date: "2026-11-25",
 		headline: "Soft light objects as bright as Studio's, and falling off as theirs do.",

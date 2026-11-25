@@ -340,6 +340,12 @@ const SOFT_FALL = /* wgsl */ `
 fn softFall(x: f32) -> f32 {
 	return clamp(1.0 - 1.53 * (x - 0.5), 0.0, 1.0) * (1.0 - smoothstep(0.92, 1.0, x)) * 0.72;
 }
+// A SpotLight under Soft: its light every way, as a PointLight's, by the
+// share of the sphere its cone covers, half its Angle across (Studio's
+// captures at 60, 120 and 180 degrees: 0.05, 0.29 and 0.52 of a PointLight's).
+fn softSpot(half: f32) -> f32 {
+	return (1.0 - cos(half)) * 0.5;
+}
 `;
 
 const GRID_FILL = /* wgsl */ `${SOFT_FALL}
@@ -395,7 +401,10 @@ fn lightCell(p: vec3f) -> u32 {
 			if (reach >= a.w) { continue; }
 			// Soft (info.z): its own fall, as Studio's Soft lights.
 			var k2 = select(1.0 - smoothstep(0.7, 1.0, reach / a.w), softFall(reach / a.w), gp.info.z > 0.5);
-			if (col.w > 0.5 && dist > r) {
+			let soft = gp.info.z > 0.5;
+			if (soft && col.w > 0.5 && col.w < 1.5) {
+				k2 = k2 * softSpot(d.w);
+			} else if (col.w > 0.5 && dist > r) {
 				let l = to / dist;
 				let c = dot(-l, d.xyz);
 				if (c <= 0.0) { continue; }
@@ -585,7 +594,9 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 			softFall(dist / a.w),
 			gridU.info.y > 0.5,
 		);
-		if (col.w > 0.5) {
+		if (gridU.info.y > 0.5 && col.w > 0.5 && col.w < 1.5) {
+			k2 = k2 * softSpot(d.w);
+		} else if (col.w > 0.5) {
 			let c = dot(-l, d.xyz);
 			if (c <= 0.0) { continue; }
 			k2 = k2 * (1.0 - smoothstep(0.0, 1.0, atan2(length(cross(-l, d.xyz)), c) / max(d.w, 1e-3)));

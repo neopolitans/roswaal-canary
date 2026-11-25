@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.64.0",
+	version: "0.65.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.65.0",
+			roswaal: "1.1.0-canary.98",
+			date: "2026-11-25",
+			text: "softSpot: under Soft a SpotLight lights every way, scaled by (1 - cos(half its Angle)) / 2, in the grid fill and partLights; SurfaceLights keep their cone.",
+		},
 		{
 			version: "0.64.0",
 			roswaal: "1.1.0-canary.97",

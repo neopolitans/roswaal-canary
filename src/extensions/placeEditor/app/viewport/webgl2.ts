@@ -743,11 +743,65 @@ ${DENSITY_GLSL}
 // Invariant: the depth pre-pass and the lit pass must land on the very same depths.
 invariant gl_Position;
 #endif
+#ifdef GLOW_PASS
+// A Neon part thin on the screen, in the glow's source, as WebGpuView's
+// vsGlow: its edges that lie across the screen and are thinner than thin.x
+// of the source's pixels (thin.yz, its size) are widened to that, across the
+// screen only, and it is dimmed by the area it gained (vK), so it gives off
+// the light it did; it no longer flickers in and out as the camera moves.
+// Only a part thin on the screen: a Neon panel is left as it is.
+uniform vec4 M[${MATERIALS.length * 3}];
+uniform vec3 thin;
+flat out float vK;
+vec3 screenPx(vec3 q) {
+	vec4 c = viewProj * vec4(q, 1.0);
+	return vec3(c.xy / max(c.w, 1e-6) * 0.5 * thin.yz, c.w);
+}
+float crossArea(vec2 a, vec2 b) { return abs(a.x * b.y - a.y * b.x); }
+#endif
 void main() {
 	mat3 m = mat3(c0, c1, c2);
 	vec3 s = vec3(length(c0), length(c1), length(c2));
 	vNormal = normalize(m * (nrm / max(s * s, vec3(1e-6))));
-	vWorld = m * pos + p;
+	vec3 origin = p;
+#ifdef GLOW_PASS
+	vK = 1.0;
+	float shadeKind = M[int(look & 255u) * 3 + 1].y;
+	if (shadeKind > 0.5 && shadeKind < 1.5 && thin.x > 0.0) {
+		vec3 o0 = screenPx(p);
+		vec3 e0 = screenPx(p + c0);
+		vec3 e1 = screenPx(p + c1);
+		vec3 e2 = screenPx(p + c2);
+		if (o0.z > 0.1 && e0.z > 0.1 && e1.z > 0.1 && e2.z > 0.1) {
+			vec2 a0 = e0.xy - o0.xy;
+			vec2 a1 = e1.xy - o0.xy;
+			vec2 a2 = e2.xy - o0.xy;
+			vec3 len = vec3(length(a0), length(a1), length(a2));
+			float area = crossArea(a0, a1) + crossArea(a1, a2) + crossArea(a2, a0);
+			float longest = max(len.x, max(len.y, len.z));
+			// How long each edge would be across the screen, were it square to the eye.
+			vec3 away = normalize(eye - p);
+			vec3 along = vec3(dot(c0, away) / max(s.x, 1e-6), dot(c1, away) / max(s.y, 1e-6), dot(c2, away) / max(s.z, 1e-6));
+			vec3 across = sqrt(max(vec3(1.0) - along * along, vec3(0.0)));
+			if (longest > 0.0 && area / longest < thin.x) {
+				bvec3 grows = bvec3(len.x < thin.x && across.x > 0.5, len.y < thin.x && across.y > 0.5, len.z < thin.x && across.z > 0.5);
+				vec3 grow = mix(vec3(1.0), clamp(vec3(thin.x) / max(len, vec3(1e-3)), vec3(1.0), vec3(8.0)), vec3(grows));
+				// Across the screen only, at its distance from the eye: a strip set
+				// into a surface spreads beside it rather than coming out of it.
+				vec3 flat0 = c0 - away * dot(c0, away);
+				vec3 flat1 = c1 - away * dot(c1, away);
+				vec3 flat2 = c2 - away * dot(c2, away);
+				origin = p + pos.x * (grow.x - 1.0) * flat0 + pos.y * (grow.y - 1.0) * flat1 + pos.z * (grow.z - 1.0) * flat2;
+				vec2 b0 = a0 * grow.x;
+				vec2 b1 = a1 * grow.y;
+				vec2 b2 = a2 * grow.z;
+				float wide = crossArea(b0, b1) + crossArea(b1, b2) + crossArea(b2, b0);
+				vK = clamp(area / max(wide, 1e-6), 0.0, 1.0);
+			}
+		}
+	}
+#endif
+	vWorld = m * pos + origin;
 	gl_Position = viewProj * vec4(vWorld, 1.0);
 	// An outline's edge as a band, as WebGpuView's vsLine draws it.
 	vColour = pow(colour.rgb, vec3(2.2));
@@ -1394,6 +1448,8 @@ in vec3 vColour; in vec3 vWorld; in vec3 vNormal; flat in uint vId; in float vAl
 uniform vec4 M[${MATERIALS.length * 3}];
 uniform mediump sampler2DArray looks;
 uniform float seen;
+// A thin Neon part's share of the light it gives off, widened: see VS's GLOW_PASS.
+flat in float vK;
 uniform vec4 R;
 bool has(int bit) { return (int(R.y + 0.5) & bit) != 0; }
 // Neon's glow: see glowShape's gate.
@@ -1426,8 +1482,10 @@ void main() {
 	bool neon = b.y > 0.5 && b.y < 1.5;
 	float a = neon ? neonAlpha(vAlpha) : vAlpha;
 	// A solid part's alpha, 0, clears what images cover, as WebGpuView's fsGlow.
-	o = seen > 0.5 ? vec4(e * (neon ? 1.0 : vAlpha), a) : vec4(e, 0.0);
+	o = seen > 0.5 ? vec4(e * (neon ? 1.0 : vAlpha), a) * vK : vec4(e * vK, 0.0);
 }`;
+/** The scene's vertex shader for the glow's source: thin Neon parts widened. */
+const VS_GLOW = VS.replace("#version 300 es\n", "#version 300 es\n#define GLOW_PASS\n");
 const FS_ID = `#version 300 es
 precision highp float; precision highp int; in vec3 vColour; flat in uint vId; out uint o;
 ${LOG_DEPTH}
@@ -2802,7 +2860,7 @@ export class WebGl2View implements ViewRenderer {
 		});
 		gl.useProgram(this.imageProgram.program);
 		gl.uniform1i(gl.getUniformLocation(this.imageProgram.program, "image"), 2);
-		this.glowProgram = this.link(VS, FS_GLOW);
+		this.glowProgram = this.link(VS_GLOW, FS_GLOW);
 		this.makeSkyMaps();
 		this.makeCascades();
 		this.setLights(undefined);
@@ -3372,7 +3430,7 @@ export class WebGl2View implements ViewRenderer {
 		[VS_OVER, FS_OVER],
 		[VS_SKY, FS_SKY],
 		[VS_IMAGE, FS_IMAGE],
-		[VS, FS_GLOW],
+		[VS_GLOW, FS_GLOW],
 		[VS_FULL, FS_BLUR],
 		[VS_FULL, FS_DOWN],
 		[VS_FULL, FS_COMPOSITE],
@@ -3632,6 +3690,13 @@ export class WebGl2View implements ViewRenderer {
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		this.use(this.glowProgram, camera, false);
 		gl.uniform4fv(gl.getUniformLocation(this.glowProgram.program, "bloom"), this.shape.gate);
+		// The pixels a thin Neon part is drawn no thinner than, of the source's size.
+		gl.uniform3f(
+			gl.getUniformLocation(this.glowProgram.program, "thin"),
+			1.5,
+			this.width,
+			this.height,
+		);
 		const seen = gl.getUniformLocation(this.glowProgram.program, "seen");
 		gl.uniform1f(seen, 0);
 		this.solids();

@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.95",
+		date: "2026-11-25",
+		headline: "Light objects follow the place's LightingStyle: Soft or Realistic.",
+		added: [
+			"**Light objects follow the place's LightingStyle**, which replaced Technology: Soft, the default for a new place in Studio, lights them flat in 4-stud cells, a face lit whichever way it turns, as Studio draws it; Realistic, each pixel works out its own. A place from before LightingStyle follows its Technology: Voxel and Compatibility as Soft, ShadowMap and Future as Realistic.",
+			"**Light object grid** has Automatic, now the default, which follows LightingStyle, and 4 studs.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.94",
 		date: "2026-11-25",
 		headline: "Properties leaves out deprecated properties; the place's panel shows what it draws.",

@@ -497,7 +497,7 @@ export function App() {
 				antialias: antialiasSetting(sceneView.antialiasing),
 				dynamicOptimization: sceneView.dynamicOptimization === true,
 				lampResolution: sceneView.lampResolution ?? "auto",
-				lightGrid: sceneView.lightGrid ?? "off",
+				lightGrid: sceneView.lightGrid ?? "auto",
 				bloomResolution: sceneView.bloomResolution ?? "auto",
 				shadowMapSize:
 					sceneView.shadowMapSize === undefined || sceneView.shadowMapSize === "auto"

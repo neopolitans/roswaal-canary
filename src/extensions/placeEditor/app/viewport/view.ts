@@ -132,7 +132,7 @@ export interface ViewRenderer {
 	/** Scene reflections drawn following the camera (null), or cached on a grid of `cell` studs. WebGPU. */
 	setReflectionGrid?(cell: number | null): void;
 	/** Light objects from a grid round the camera, its finest cell in studs; null, every pixel's own. */
-	setLightGrid?(cell: number | null): void;
+	setLightGrid?(cell: number | null | "auto"): void;
 	/** Beams and particles at half size, where the frame has a glow pass: see Particle resolution. */
 	setParticleHalf?(on: boolean): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
@@ -889,10 +889,24 @@ export const LIGHT_GRID_CELLS = 32;
 /** The light grid's cascades: the finest cell, then twice it, then four times. */
 export const LIGHT_GRID_CASCADES = 3;
 
-/** The Light object grid setting's finest cell, in studs; null, off. */
-export function lightGridCell(setting: string | undefined): number | null {
-	if (setting === "8" || setting === "16" || setting === "32") return Number(setting);
-	return null;
+/**
+ * The Light object grid setting's finest cell, in studs; null, off;
+ * "auto", as the place's LightingStyle says (see autoLightGrid).
+ */
+export function lightGridCell(setting: string | undefined): number | null | "auto" {
+	if (setting === "4" || setting === "8" || setting === "16" || setting === "32")
+		return Number(setting);
+	if (setting === "off") return null;
+	return "auto";
+}
+
+/** Soft's cells: as Studio's own Soft lights in, 4 studs a side (25 Nov 2026 captures). */
+export const SOFT_LIGHT_CELL = 4;
+
+/** Automatic's grid: Soft's cells where the place is Soft; Realistic, every pixel's own. */
+export function autoLightGrid(setting: number | null | "auto", soft: boolean): number | null {
+	if (setting !== "auto") return setting;
+	return soft ? SOFT_LIGHT_CELL : null;
 }
 
 /**

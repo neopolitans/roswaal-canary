@@ -69,6 +69,7 @@ import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
 import { MOVING_DECAY, UPSCALE_WGSL, type UpscaleMode } from "./upscale.js";
 import {
+	autoLightGrid,
 	BLOOM_STEEP,
 	BLOOM_STRENGTH,
 	backToFront,
@@ -564,7 +565,8 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		let dist = length(to);
 		if (dist >= a.w) { continue; }
 		let l = to / max(dist, 1e-4);
-		var k2 = max(dot(n, l), 0.0) * (1.0 - smoothstep(0.7, 1.0, dist / a.w));
+		// Soft (gridU.info.y): flat, a face lit whichever way it turns.
+		var k2 = select(max(dot(n, l), 0.0), 1.0, gridU.info.y > 0.5) * (1.0 - smoothstep(0.7, 1.0, dist / a.w));
 		if (col.w > 0.5) {
 			let c = dot(-l, d.xyz);
 			if (c <= 0.0) { continue; }
@@ -572,7 +574,7 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		}
 		let lit = hv3(col.rgb * k2);
 		sum = sum + lit;
-		shine = shine + lit * hf(pow(max(dot(n, normalize(l + v)), 0.0), gloss));
+		shine = shine + lit * hf(select(pow(max(dot(n, normalize(l + v)), 0.0), gloss), 0.0, gridU.info.y > 0.5));
 	}
 	return Lamps(vec3f(sum) * 1.25, vec3f(shine) * 1.25);
 }
@@ -588,6 +590,7 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 // arrives there from the light objects, alpha its luminance, and in gridB
 // the luminance-weighted middle of where it comes from, from the cascade's
 // middle over its extent, times that luminance, so cells blend as weights.
+// info: x, whether the grid is read; y, Soft: light objects flat (partLights too).
 struct GridU { cascades: array<vec4f, ${LIGHT_GRID_CASCADES}>, info: vec4f };
 @group(0) @binding(21) var<uniform> gridU: GridU;
 @group(0) @binding(22) var gridA: texture_3d<f32>;
@@ -607,9 +610,12 @@ fn gridLight(k: u32, p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	let source = g.xyz + vec3f(extent * 0.5) + extent * b.xyz / a.a;
 	let to = source - p;
 	let l = to / max(length(to), 1e-3);
-	let ndl = max(dot(n, l), 0.0);
+	// Soft (info.y): flat, as Studio's, and no highlight.
+	let flat = gridU.info.y > 0.5;
+	let ndl = select(max(dot(n, l), 0.0), 1.0, flat);
 	let lit = a.rgb * ndl;
-	return Lamps(lit * 1.25, lit * pow(max(dot(n, normalize(l + v)), 0.0), gloss) * 1.25);
+	let shine = select(pow(max(dot(n, normalize(l + v)), 0.0), gloss), 0.0, flat);
+	return Lamps(lit * 1.25, lit * shine * 1.25);
 }
 // The finest cascade p is a cell inside, eased into the next over two
 // cells before its edge; past the coarsest, every light worked out here.
@@ -3174,6 +3180,7 @@ export class WebGpuView implements ViewRenderer {
 	setLighting(lighting: LightingParams): void {
 		this.lighting = lighting;
 		this.reflStale();
+		this.applyLightGrid();
 		const sun = lighting.sun.join(",");
 		if (sun !== this.sunKey) {
 			this.sunKey = sun;
@@ -5631,6 +5638,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
 	/** The Light object grid's finest cell, in studs; null, off. */
 	private gridCell: number | null = null;
+	/** The setting, Automatic resolved against the place's style: see autoLightGrid. */
+	private gridSetting: number | null | "auto" = null;
 	private gridA: GPUTexture | null = null;
 	private gridB: GPUTexture | null = null;
 	private gridBlank: GPUTexture | null = null;
@@ -5642,8 +5651,18 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** The lights or their switches changed: every cascade filled again. */
 	private gridStale = true;
 
-	setLightGrid(cell: number | null): void {
-		if (cell === this.gridCell || !this.device) return;
+	setLightGrid(setting: number | null | "auto"): void {
+		this.gridSetting = setting;
+		this.applyLightGrid();
+	}
+
+	/** The grid the setting and the place's style come to, and whether its light is flat. */
+	private applyLightGrid(): void {
+		const cell = autoLightGrid(this.gridSetting, this.lighting?.soft === true);
+		if (cell === this.gridCell || !this.device) {
+			this.writeGridUniform();
+			return;
+		}
 		this.gridCell = cell;
 		this.gridOrigins = [];
 		this.gridStale = true;
@@ -5701,6 +5720,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			block.set([...at, cell * 2 ** k], k * 4);
 		}
 		block[LIGHT_GRID_CASCADES * 4] = filled ? 1 : 0;
+		block[LIGHT_GRID_CASCADES * 4 + 1] = this.lighting?.soft ? 1 : 0;
 		this.device.queue.writeBuffer(this.gridUniform, 0, block);
 	}
 

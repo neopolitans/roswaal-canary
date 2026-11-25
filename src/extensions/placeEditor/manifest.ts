@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.61.0",
+	version: "0.62.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.62.0",
+			roswaal: "1.1.0-canary.95",
+			date: "2026-11-25",
+			text: "LightingParams.soft (lightingSoft: LightingStyle, else Technology <= 2). lightGrid auto (default) and 4; the view resolves Automatic (autoLightGrid: Soft, SOFT_LIGHT_CELL 4; Realistic, off). gridU.info.y flat: partLights and gridLight without the face's turn or highlight.",
+		},
 		{
 			version: "0.61.0",
 			roswaal: "1.1.0-canary.94",

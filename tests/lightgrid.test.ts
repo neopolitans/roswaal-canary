@@ -6,19 +6,29 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	autoLightGrid,
 	LIGHT_CELL,
 	LIGHT_GRID_CELLS,
 	lightGridCell,
 	lightGridOrigin,
 	lightGridSamples,
+	SOFT_LIGHT_CELL,
 } from "../src/extensions/placeEditor/app/viewport/view.js";
 
 describe("the light grid", () => {
-	it("is off unless a cell is chosen", () => {
+	it("is off, a cell, or Automatic", () => {
 		expect(lightGridCell("off")).toBeNull();
-		expect(lightGridCell(undefined)).toBeNull();
-		expect(lightGridCell("8")).toBe(8);
+		expect(lightGridCell(undefined)).toBe("auto");
+		expect(lightGridCell("auto")).toBe("auto");
+		expect(lightGridCell("4")).toBe(4);
 		expect(lightGridCell("32")).toBe(32);
+	});
+
+	it("is Soft's 4-stud cells when Automatic and the place is Soft, otherwise as set", () => {
+		expect(autoLightGrid("auto", true)).toBe(SOFT_LIGHT_CELL);
+		expect(autoLightGrid("auto", false)).toBeNull();
+		expect(autoLightGrid(16, true)).toBe(16);
+		expect(autoLightGrid(null, true)).toBeNull();
 	});
 
 	it("centres a cascade on the eye, its corner on whole cells", () => {

@@ -27,6 +27,12 @@ export interface LightingParams {
 	indoor?: number[];
 	/** The sky's fill that reaches even closed rooms, linear: see SKY_INDOOR. */
 	skyIndoor?: number[];
+	/**
+	 * LightingStyle Soft: light objects flat, a face lit whichever way it
+	 * turns, from cells round the camera (see lightingSoft). Realistic: each
+	 * pixel's own, turned to its face.
+	 */
+	soft?: boolean;
 	/** GlobalShadows: whether the sun casts shadows at all. */
 	sunShadows?: boolean;
 	/** ShadowSoftness, 0 to 1: how soft the sun's shadows' edges are. */
@@ -72,6 +78,20 @@ const mix = (a: number[], b: number[], t: number) => a.map((v, i) => v + (b[i] -
 function prop<T>(inst: RbxInstance | undefined, name: string, fallback: T): T {
 	const v = inst?.props.get(name)?.value;
 	return v === undefined ? fallback : (v as T);
+}
+
+/**
+ * Whether a place's Lighting asks for Soft: LightingStyle, which replaced
+ * Technology (deprecated), Soft 1 and Realistic 0. A file from before it
+ * has Technology alone: Legacy, Voxel and Compatibility light their light
+ * objects in voxels, as Soft does; ShadowMap and Future per pixel, as
+ * Realistic. Neither, Realistic.
+ */
+export function lightingSoft(lighting: RbxInstance | undefined): boolean {
+	const style = lighting?.props.get("LightingStyle")?.value;
+	if (typeof style === "number") return style === 1;
+	const technology = lighting?.props.get("Technology")?.value;
+	return typeof technology === "number" && technology <= 2;
 }
 
 /** "14:30:00" as hours, as TimeOfDay stores it. */
@@ -268,6 +288,7 @@ export function readLighting(doc: RbxDocument): LightingParams {
 		// closed room with Ambient black and mid grey (16 Nov 2026).
 		indoor: linRgb(prop(lighting, "Ambient", [0.275, 0.275, 0.275])).map((v) => v * 1.63),
 		skyIndoor: skyLight.map((v) => v * SKY_INDOOR),
+		soft: lightingSoft(lighting),
 		sunShadows: prop(lighting, "GlobalShadows", true),
 		shadowSoftness: prop(lighting, "ShadowSoftness", 0.2),
 		skyFill,

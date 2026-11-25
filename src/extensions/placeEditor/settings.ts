@@ -107,7 +107,9 @@ export const VIEWPORT_LAMP_RESOLUTIONS = [
 
 /** Light object grid: light objects from cascades of cells round the camera, the finest as set. */
 export const VIEWPORT_LIGHT_GRIDS = [
+	{ value: "auto", label: "Automatic" },
 	{ value: "off", label: "Off" },
+	{ value: "4", label: "4 studs" },
 	{ value: "8", label: "8 studs" },
 	{ value: "16", label: "16 studs" },
 	{ value: "32", label: "32 studs" },
@@ -203,7 +205,7 @@ export interface PlaceEditorSettings {
 	/** Light objects' resolution: see depthChoice.ts's lampMode. */
 	lampResolution: "auto" | "full" | "half" | "quarter";
 	/** Light objects from a grid round the camera, its finest cell: see view.ts's lightGridCell. */
-	lightGrid: "off" | "8" | "16" | "32";
+	lightGrid: "auto" | "off" | "4" | "8" | "16" | "32";
 	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
 	reflectionUpdates: "auto" | "follow" | "32" | "64" | "128";
 	/** Effects' frames with the camera still, every display frame or fewer: see view.ts's stillSkip. */
@@ -319,9 +321,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Light object grid",
 				help: "Light objects worked out once in cells round the camera.",
 				detail:
-					"Rather than each pixel working out each light again every frame, the light is worked out into three grids round the camera, of cells 8, 16 or 32 studs as set and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size. It costs the same however many lights there are. Off, every pixel works out its own (Light objects resolution). WebGPU.",
+					"Rather than each pixel working out each light again every frame, the light is worked out into three grids round the camera, of cells 8, 16 or 32 studs as set and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size. It costs the same however many lights there are. Automatic follows the place's LightingStyle: Soft, 4-stud cells, flat as Studio draws it; Realistic, every pixel works out its own. Off, every pixel's own (Light objects resolution). WebGPU.",
 				type: "choice",
-				default: "off",
+				default: "auto",
 				choices: VIEWPORT_LIGHT_GRIDS,
 			},
 			{

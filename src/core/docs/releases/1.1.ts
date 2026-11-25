@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.70",
+		date: "2026-11-25",
+		headline: "Reports go to Roswaal's own issues.",
+		changed: [
+			"**Report this, Report something and every docs page's edit button open an issue on Roswaal**, where they opened one on the separate feedback repository.",
+		],
+		added: [
+			"**A Code of Conduct and a security policy**, linked from Contributing: security problems are reported privately through GitHub.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.69",
 		date: "2026-11-25",
 		headline: "Light objects resolution: measured per place, or Full, Half or Quarter.",

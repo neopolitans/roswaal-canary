@@ -1,5 +1,5 @@
 /**
- * Roswaal Benchmark 4: the places the benchmark draws, generated here from a
+ * Roswaal Benchmark 5: the places the benchmark draws, generated here from a
  * fixed seed rather than stored, a station at a time, with the models and
  * textures it carries (see assets.ts).
  *
@@ -28,7 +28,7 @@ import { loadTanks, loadTextures, TANK_NAMES, TEXTURE_NAMES } from "./assets.js"
  * flight) rather than one frame at a time: an iPad's GPU set its clock by
  * the gaps, so its timers timed the clock as much as the scenes.
  */
-export const BENCHMARK_VERSION = 4;
+export const BENCHMARK_VERSION = 5;
 /**
  * 3: Benchmark 2, with two stations of real assets: Textures (Kenney's
  * prototype textures as Texture instances) and Meshes (96 tanks of
@@ -37,6 +37,12 @@ export const BENCHMARK_VERSION = 4;
 /**
  * 4: Benchmark 3, the tanks' skirts and tracks DoubleSided, as their models
  * have them: the Meshes station draws their back faces too.
+ */
+/**
+ * 5: Benchmark 4 with two stations for 1.1's lighting work: Reflections
+ * (Metal, Glass and Reflectance over a reflective floor, what the
+ * reflection cube and the per-pixel reflection reads cost) and Bloom (a
+ * BloomEffect over bright parts in the sun, with no Neon, apart from Glow's).
  */
 /** How Benchmarks 2 to 4 time their frames: see ViewportController.busyFrames. */
 export const BENCHMARK_MEASURE = "busy" as const;
@@ -425,6 +431,78 @@ function glowPlace(): ViewportPlace {
 	return placeOf(parts);
 }
 
+/**
+ * Reflections: a reflective floor, and rows of Metal blocks, Glass panes and
+ * balls at Reflectance 0.25 to 1, among coloured columns for them to show.
+ */
+function reflectionsPlace(): ViewportPlace {
+	const parts = [
+		part({ at: [0, -0.5, 0], size: [400, 1, 400], colour: [60, 62, 70], reflectance: 0.3 }),
+	];
+	// Coloured columns round the rows: something for the reflections to show.
+	for (let i = 0; i < 16; i++) {
+		const a = (i / 16) * Math.PI * 2;
+		parts.push(
+			part({
+				at: [Math.cos(a) * 70, 15, Math.sin(a) * 70 - 10],
+				size: [6, 30, 6],
+				colour: hue(i / 16),
+			}),
+		);
+	}
+	for (let x = 0; x < 8; x++) {
+		// Metal blocks.
+		parts.push(
+			part({
+				at: [-42 + x * 12, 3, -20],
+				size: [6, 6, 6],
+				material: "Metal",
+				colour: [200 - x * 12, 200, 210],
+			}),
+		);
+		// Glass panes.
+		parts.push(
+			part({ at: [-42 + x * 12, 5, 0], size: [8, 10, 0.4], material: "Glass", transparency: 0.3 }),
+		);
+		// Balls, more reflective along the row.
+		parts.push(
+			part({
+				at: [-42 + x * 12, 3, 20],
+				size: [6, 6, 6],
+				shape: 0,
+				reflectance: 0.25 + (x / 7) * 0.75,
+				colour: [90, 95, 105],
+			}),
+		);
+	}
+	return placeOf(parts);
+}
+
+/** Bloom: a BloomEffect over bright white parts in the sun, and no Neon. */
+function bloomPlace(): ViewportPlace {
+	const rand = seeded(BENCHMARK_SEED + 13);
+	const parts = [baseplate()];
+	for (let i = 0; i < 60; i++)
+		parts.push(
+			part({
+				at: [(rand() - 0.5) * 140, 2 + rand() * 20, -rand() * 120],
+				size: [2 + rand() * 6, 2 + rand() * 6, 2 + rand() * 6],
+				colour: [250, 248, 240],
+			}),
+		);
+	return placeOf(
+		parts,
+		[
+			inst("BloomEffect", "Bloom", {
+				Intensity: ["Float32", 1],
+				Size: ["Float32", 24],
+				Threshold: ["Float32", 0.8],
+			}),
+		],
+		{ Brightness: ["Float32", 3] },
+	);
+}
+
 function effectsPlace(particles: number): ViewportPlace {
 	const rand = seeded(BENCHMARK_SEED + 9);
 	const parts = [baseplate()];
@@ -788,6 +866,22 @@ export const STATIONS: readonly Station[] = [
 	},
 	{
 		n: 14,
+		id: "reflections",
+		name: "Reflections",
+		measures: "The reflection cube, and what reflects reading it",
+		pose: { eye: [0, 22, 70], at: [0, 3, 0] },
+		variants: one(reflectionsPlace),
+	},
+	{
+		n: 15,
+		id: "bloom",
+		name: "Bloom",
+		measures: "A BloomEffect over bright parts, no Neon",
+		pose: { eye: [0, 30, 80], at: [0, 8, -50] },
+		variants: one(bloomPlace),
+	},
+	{
+		n: 16,
 		id: "dense",
 		name: "Dense",
 		measures: "Draw counts, culling, many shadow casters",
@@ -795,7 +889,7 @@ export const STATIONS: readonly Station[] = [
 		variants: one(densePlace),
 	},
 	{
-		n: 15,
+		n: 17,
 		id: "moving",
 		name: "Moving",
 		measures: "What each control's motion costs",

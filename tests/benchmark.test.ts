@@ -40,9 +40,9 @@ beforeAll(() => {
 afterAll(() => vi.unstubAllGlobals());
 
 describe("Roswaal Benchmark's places", () => {
-	it("is version 4, with fifteen stations in run order", () => {
-		expect(BENCHMARK_VERSION).toBe(4);
-		expect(STATIONS.map((s) => s.n)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+	it("is version 5, with seventeen stations in run order", () => {
+		expect(BENCHMARK_VERSION).toBe(5);
+		expect(STATIONS.map((s) => s.n)).toEqual(Array.from({ length: 17 }, (_, i) => i + 1));
 		expect(STATIONS.map((s) => s.id).slice(0, 5)).toEqual([
 			"empty",
 			"materials",
@@ -81,6 +81,12 @@ describe("Roswaal Benchmark's places", () => {
 		const air = (await place("air")).lighting;
 		expect(air.post.bloom).toBeDefined();
 		expect(air.post.blur).toBe(4);
+		// Benchmark 5's two: what reflects, and bloom alone.
+		const reflections = await place("reflections");
+		expect(parts(reflections)).toBe(1 + 16 + 8 * 3);
+		const bloom = await place("bloom");
+		expect(bloom.lighting.post.bloom).toBeDefined();
+		expect(parts(bloom)).toBe(1 + 60);
 	});
 });
 

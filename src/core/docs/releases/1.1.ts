@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.86",
+		date: "2026-11-25",
+		headline: "Roswaal Benchmark 5: Reflections and Bloom stations.",
+		added: [
+			"**Roswaal Benchmark 5** adds two stations: **Reflections**, Metal blocks, Glass panes and reflective balls over a reflective floor; and **Bloom**, a BloomEffect over bright parts with no Neon. Scores compare with Benchmark 5 runs only.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.85",
 		date: "2026-11-25",
 		headline: "Only what reflects reads reflections, and reflections can be kept on a grid.",

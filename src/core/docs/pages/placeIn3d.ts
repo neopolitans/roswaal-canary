@@ -520,7 +520,7 @@ export function placeEditorPerformancePage(): DocPage {
 			{
 				t: "p",
 				text:
-					"**Roswaal Benchmark 4** draws fifteen test scenes that Roswaal makes for itself, the same on " +
+					"**Roswaal Benchmark 5** draws seventeen test scenes that Roswaal makes for itself, the same on " +
 					"every device, and times each on the GPU and the CPU, with the GPU kept busy, two frames in " +
 					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Scene view or " +
 					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
@@ -547,6 +547,11 @@ export function placeEditorPerformancePage(): DocPage {
 					["Effects", "100 Beams; 1,000, 10,000 and 20,000 particles"],
 					["Highlights", "Both depth modes, a Model, an Adornee, a transparent part"],
 					["Air and post", "Atmosphere, fog, Bloom, ColorCorrection and Blur"],
+					[
+						"Reflections",
+						"Metal blocks, Glass panes and balls at Reflectance 0.25 to 1 over a reflective floor",
+					],
+					["Bloom", "A BloomEffect over bright white parts in the sun, with no Neon"],
 					["Dense", "19,600 parts in a city grid"],
 					["Moving", "The Dense grid with each control's motion"],
 				],

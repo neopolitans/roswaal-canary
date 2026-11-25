@@ -2124,7 +2124,14 @@ export class WebGpuView implements ViewRenderer {
 			return;
 		}
 		const vp = multiply(
-			perspective(FOV, this.width / this.height, camera.near, camera.far, true, true),
+			perspective(
+				camera.fovY ?? FOV,
+				this.width / this.height,
+				camera.near,
+				camera.far,
+				true,
+				true,
+			),
 			lookAt(camera.eye, camera.at),
 		);
 		const planes = sidePlanes(vp);
@@ -3969,7 +3976,14 @@ fn at(c: vec2i) -> u32 {
 	private setCamera(camera: Camera): void {
 		const vp = jitterClip(
 			multiply(
-				perspective(FOV, this.width / this.height, camera.near, camera.far, true, true),
+				perspective(
+					camera.fovY ?? FOV,
+					this.width / this.height,
+					camera.near,
+					camera.far,
+					true,
+					true,
+				),
 				lookAt(camera.eye, camera.at),
 			),
 			this.jitter,

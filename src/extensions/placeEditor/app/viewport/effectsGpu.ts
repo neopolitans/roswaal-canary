@@ -356,7 +356,7 @@ export class GpuEffects {
 		const aspect = width / height;
 		this.uploadMs = 0;
 		const frame = this.sim.frame(
-			{ eye: camera.eye, at: camera.at, aspect, fov: FOV },
+			{ eye: camera.eye, at: camera.at, aspect, fov: camera.fovY ?? FOV },
 			now,
 			show,
 			ready,
@@ -392,7 +392,7 @@ export class GpuEffects {
 		if (frame.drawn > 0 && this.instances) d.queue.writeBuffer(this.instances, 0, frame.instances);
 		this.uploadMs = performance.now() - sending;
 		const viewProj = multiply(
-			perspective(FOV, aspect, camera.near, camera.far, true, true),
+			perspective(camera.fovY ?? FOV, aspect, camera.near, camera.far, true, true),
 			lookAt(camera.eye, camera.at),
 		);
 		d.queue.writeBuffer(

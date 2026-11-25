@@ -130,7 +130,6 @@ import {
 	type Camera,
 	DEFAULT_RENDER,
 	type EffectSteps,
-	FOV,
 	lightGridCell,
 	type MeshGeometry,
 	madeGeometry,
@@ -144,6 +143,7 @@ import {
 	tintedOutline,
 	type ViewQuality,
 	type ViewRenderer,
+	viewFovY,
 } from "./view.js";
 import { DEFAULT_GIZMOS, type GizmoSettings, gizmosOn, visualGizmoLines } from "./visualGizmos.js";
 
@@ -1668,7 +1668,7 @@ export class ViewportController {
 			right[2] * forward[0] - right[0] * forward[2],
 			right[0] * forward[1] - right[1] * forward[0],
 		];
-		const tan = Math.tan(FOV / 2);
+		const tan = Math.tan(this.fovY() / 2);
 		const sx = ((x / box.width) * 2 - 1) * tan * (box.width / box.height);
 		const sy = (1 - (y / box.height) * 2) * tan;
 		return [0, 1, 2].map((a) => forward[a] + right[a] * sx + up[a] * sy);
@@ -1680,7 +1680,15 @@ export class ViewportController {
 			at: this.cam.target,
 			near: Math.min(2, Math.max(0.1, this.cam.dist * 0.01)),
 			far: Math.max(40000, this.cam.dist * 200),
+			fovY: this.fovY(),
 		};
+	}
+
+	/** The vertical field of view the place's Camera gives the view as it is now: see viewFovY. */
+	private fovY(): number {
+		const c = this.canvas;
+		const aspect = c && c.clientHeight > 0 ? c.clientWidth / c.clientHeight : 16 / 9;
+		return viewFovY(this.place?.camera, aspect);
 	}
 
 	/** How the camera sees the view now, for what a box drawn on it holds. */
@@ -1697,7 +1705,7 @@ export class ViewportController {
 			forward,
 			right,
 			up,
-			tan: Math.tan(FOV / 2),
+			tan: Math.tan(this.fovY() / 2),
 			width: box.width,
 			height: box.height,
 		};

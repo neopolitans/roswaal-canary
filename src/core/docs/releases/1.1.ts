@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.96",
+		date: "2026-11-25",
+		headline: "The view takes the place's Camera field of view.",
+		added: [
+			"**The view takes the place's Camera field of view**, as Studio's does: FieldOfView, and the angle FieldOfViewMode holds as the view is resized, Vertical, Diagonal or MaxAxis. A place without a Camera is 70 degrees vertical, as before.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.95",
 		date: "2026-11-25",
 		headline: "Light objects follow the place's LightingStyle: Soft or Realistic.",

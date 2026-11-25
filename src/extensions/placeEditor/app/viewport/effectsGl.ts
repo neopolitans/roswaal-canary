@@ -272,7 +272,7 @@ export class GlEffects {
 		const ready = (asset: string) => this.host.imageTexture(asset) !== undefined;
 		const aspect = width / height;
 		const frame = this.sim.frame(
-			{ eye: camera.eye, at: camera.at, aspect, fov: FOV },
+			{ eye: camera.eye, at: camera.at, aspect, fov: camera.fovY ?? FOV },
 			now,
 			show,
 			ready,
@@ -306,7 +306,7 @@ export class GlEffects {
 		}
 		const reversed = this.host.reversed;
 		const viewProj = multiply(
-			perspective(FOV, aspect, camera.near, camera.far, reversed, reversed),
+			perspective(camera.fovY ?? FOV, aspect, camera.near, camera.far, reversed, reversed),
 			lookAt(camera.eye, camera.at),
 		);
 		const block = effectBlock(

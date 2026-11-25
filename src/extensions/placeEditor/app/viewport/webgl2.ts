@@ -1995,7 +1995,14 @@ export class WebGl2View implements ViewRenderer {
 			return;
 		}
 		const vp = multiply(
-			perspective(FOV, this.width / this.height, camera.near, camera.far, true, true),
+			perspective(
+				camera.fovY ?? FOV,
+				this.width / this.height,
+				camera.near,
+				camera.far,
+				true,
+				true,
+			),
 			lookAt(camera.eye, camera.at),
 		);
 		const planes = sidePlanes(vp);
@@ -3294,7 +3301,14 @@ export class WebGl2View implements ViewRenderer {
 		const reversed = this.clipControl !== null;
 		const projection = (reverse: boolean) =>
 			multiply(
-				perspective(FOV, this.width / this.height, camera.near, camera.far, reverse, reverse),
+				perspective(
+					camera.fovY ?? FOV,
+					this.width / this.height,
+					camera.near,
+					camera.far,
+					reverse,
+					reverse,
+				),
 				lookAt(camera.eye, camera.at),
 			);
 		const vp = jitterClip(projection(reversed), this.jitter, this.width, this.height);

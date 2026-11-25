@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.62.0",
+	version: "0.63.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.63.0",
+			roswaal: "1.1.0-canary.96",
+			date: "2026-11-25",
+			text: "Camera.fovY from the place Camera (viewFovY: FieldOfView, FieldOfViewMode with DiagonalFieldOfView or MaxAxisFieldOfView, 1-120); both renderers, effects, cascades and picking use it in place of FOV.",
+		},
 		{
 			version: "0.62.0",
 			roswaal: "1.1.0-canary.95",

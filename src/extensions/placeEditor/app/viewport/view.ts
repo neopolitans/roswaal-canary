@@ -32,6 +32,8 @@ export interface Camera {
 	near: number;
 	/** How far the view reaches: well past anything in a place, as Studio's view does. */
 	far: number;
+	/** The vertical field of view, in radians, the place's Camera's (viewFovY); FOV without one. */
+	fovY?: number;
 }
 
 /**
@@ -1107,7 +1109,7 @@ export function cascadeBlock(
 	const x = unit(cross(up0, back));
 	const y = cross(back, x);
 	const ahead = unit(camera.at.map((v, i) => v - camera.eye[i]));
-	const tan = Math.tan(FOV / 2);
+	const tan = Math.tan((camera.fovY ?? FOV) / 2);
 	// How far the place reaches along the sun's line, either side of a point.
 	const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((k) => [
 		k & 1 ? box.max[0] : box.min[0],
@@ -1237,6 +1239,35 @@ export function imageOrder(
 }
 
 export const FOV = (70 * Math.PI) / 180;
+
+/**
+ * The view's vertical field of view, in radians, for the place's Camera at
+ * a view `aspect` wide for each unit high, holding the angle Studio's
+ * FieldOfViewMode says as the view is resized: Vertical, FieldOfView;
+ * Diagonal, DiagonalFieldOfView across the corners; MaxAxis,
+ * MaxAxisFieldOfView along the longer side. Without its angle, a mode falls
+ * back to FieldOfView; without a Camera, FOV. Kept within Studio's 1 to 120.
+ */
+export function viewFovY(
+	camera:
+		| {
+				fieldOfView: number;
+				fieldOfViewMode?: number;
+				diagonalFieldOfView?: number;
+				maxAxisFieldOfView?: number;
+		  }
+		| undefined,
+	aspect: number,
+): number {
+	if (!camera) return FOV;
+	const half = (deg: number) => Math.tan((Math.min(120, Math.max(1, deg)) * Math.PI) / 360);
+	let tan = half(camera.fieldOfView);
+	if (camera.fieldOfViewMode === 1 && camera.diagonalFieldOfView !== undefined)
+		tan = half(camera.diagonalFieldOfView) / Math.hypot(1, aspect);
+	else if (camera.fieldOfViewMode === 2 && camera.maxAxisFieldOfView !== undefined)
+		tan = half(camera.maxAxisFieldOfView) / Math.max(1, aspect);
+	return 2 * Math.atan(tan);
+}
 /** How much of a handle shows while it is not held: the place shows through it. */
 export const HANDLE_ALPHA = 0.6;
 

@@ -97,7 +97,20 @@ export interface PlaceScene {
 	/** Parts with Locked on, by row: a drag in the viewer leaves them where they are, as Studio's does. */
 	locked?: number[];
 	/** Where Studio's camera was when the place was saved: Workspace's Camera. */
-	camera?: { id: number; position: number[]; rotation: number[]; fieldOfView: number };
+	/**
+	 * Workspace's Camera, which Studio's view is: where it stands, and its
+	 * field of view, FieldOfView and which angle FieldOfViewMode holds as the
+	 * view is resized (0 Vertical, 1 Diagonal, 2 MaxAxis), with the latter two's.
+	 */
+	camera?: {
+		id: number;
+		position: number[];
+		rotation: number[];
+		fieldOfView: number;
+		fieldOfViewMode?: number;
+		diagonalFieldOfView?: number;
+		maxAxisFieldOfView?: number;
+	};
 	/**
 	 * Decals and Textures, each a quad on its part's face, drawn once its image
 	 * has been downloaded through Sign in with Roblox. See `faceImages`.
@@ -686,11 +699,21 @@ export function buildPlaceScene(
 	const camId = studio && idOf(studio);
 	if (cf && camId !== undefined) {
 		const fov = studio?.props.get("FieldOfView")?.value;
+		const num = (name: string) => {
+			const v = studio?.props.get(name)?.value;
+			return typeof v === "number" ? v : undefined;
+		};
+		const mode = num("FieldOfViewMode");
+		const diagonal = num("DiagonalFieldOfView");
+		const maxAxis = num("MaxAxisFieldOfView");
 		scene.camera = {
 			id: camId,
 			position: [...cf.position],
 			rotation: [...cf.rotation],
 			fieldOfView: typeof fov === "number" ? fov : 70,
+			...(mode !== undefined ? { fieldOfViewMode: mode } : {}),
+			...(diagonal !== undefined ? { diagonalFieldOfView: diagonal } : {}),
+			...(maxAxis !== undefined ? { maxAxisFieldOfView: maxAxis } : {}),
 		};
 	}
 	return scene;

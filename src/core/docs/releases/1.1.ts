@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.105",
+		date: "2026-11-25",
+		headline: "The light grid catches up going up and down as it does going across.",
+		changed: [
+			"**Going up or down fills only the light grid's new layers**, as going across does: about half the cells on a long descent, and no cascade filled whole again.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.104",
 		date: "2026-11-25",
 		headline: "Native code and optimization, for a graph and for its functions.",

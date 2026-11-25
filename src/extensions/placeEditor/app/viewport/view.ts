@@ -923,11 +923,11 @@ export interface LightGridRegion {
 /**
  * Where a light grid cascade of `size`-stud cells stands for an eye at
  * `eye`, as its lowest cell in whole cells of the world, and the cells to
- * fill to get there from `was`. Across (x and z) the grid wraps round, each
- * cell kept where its place in the world falls (WebGpuView's grid sampler
- * repeats), so a step fills only the cells it newly takes in; up and down it
- * does not wrap, and the eye leaving the middle half of its height fills it
- * all again, as does a first fill or a jump past it.
+ * fill to get there from `was`. The grid wraps round along all three axes,
+ * each cell kept where its place in the world falls (across by the grid
+ * sampler, which repeats; up and down by gridLight, which blends its two
+ * layers itself), so a step fills only the cells it newly takes in. A first
+ * fill, or a jump past it, fills it all.
  */
 export function lightGridMove(
 	eye: readonly number[],
@@ -937,18 +937,23 @@ export function lightGridMove(
 	const n = LIGHT_GRID_CELLS;
 	const want = eye.map((e) => Math.floor(e / size) - n / 2);
 	const all = (origin: number[]) => ({ origin, fill: [{ min: [...origin], count: [n, n, n] }] });
-	if (!was || Math.abs(eye[1] / size - (was[1] + n / 2)) > n / 4) return all(want);
+	if (!was) return all(want);
 	const at = [...was];
-	for (const a of [0, 2]) if (Math.abs(want[a] - was[a]) > LIGHT_GRID_SLACK) at[a] = want[a];
-	const dx = at[0] - was[0];
-	const dz = at[2] - was[2];
-	if (dx === 0 && dz === 0) return { origin: [...was], fill: [] };
-	if (Math.abs(dx) >= n || Math.abs(dz) >= n) return all(at);
+	for (const a of [0, 1, 2]) if (Math.abs(want[a] - was[a]) > LIGHT_GRID_SLACK) at[a] = want[a];
+	const step = at.map((c, a) => c - was[a]);
+	if (step.every((d) => d === 0)) return { origin: [...was], fill: [] };
+	if (step.some((d) => Math.abs(d) >= n)) return all(at);
+	// A slab a side for each axis it moved along; where two meet, their
+	// corner is filled twice, which costs little and is the same light.
 	const fill: LightGridRegion[] = [];
-	if (dx !== 0)
-		fill.push({ min: [dx > 0 ? was[0] + n : at[0], at[1], at[2]], count: [Math.abs(dx), n, n] });
-	if (dz !== 0)
-		fill.push({ min: [at[0], at[1], dz > 0 ? was[2] + n : at[2]], count: [n, n, Math.abs(dz)] });
+	for (const a of [0, 1, 2]) {
+		if (step[a] === 0) continue;
+		const min = [...at];
+		const count = [n, n, n];
+		min[a] = step[a] > 0 ? was[a] + n : at[a];
+		count[a] = Math.abs(step[a]);
+		fill.push({ min, count });
+	}
 	return { origin: at, fill };
 }
 

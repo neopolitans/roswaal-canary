@@ -355,9 +355,9 @@ const GRID_FILL = /* wgsl */ `${SOFT_FALL}
 @group(0) @binding(1) var<storage, read> lightTable: array<vec2u>;
 @group(0) @binding(2) var<storage, read> lightIndex: array<u32>;
 // origin: the region's lowest corner and the cell in studs; info: the cascade,
-// the switches, Soft, and the cascade's lowest cell up; region: its cells
-// along x, y and z. Stored wrapped round across (x along u, z along v) and up
-// from the cascade's lowest cell (y along w, each cascade a third).
+// the switches and Soft; region: its cells along x, y and z. Stored wrapped
+// round, each cell where its place in the world falls: x along u, z along v,
+// and y along w within the cascade's third.
 // occ: the occupancy window's lowest cell (x, y, z), and w whether to read it
 // (the finest cascade alone): see occupancy.ts.
 struct GridP { origin: vec4f, info: vec4f, region: vec4f, occ: vec4f };
@@ -365,14 +365,14 @@ struct GridP { origin: vec4f, info: vec4f, region: vec4f, occ: vec4f };
 @group(0) @binding(4) var gridA: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(5) var gridB: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(6) var occ: texture_3d<f32>;
-// What parts fill of the cell at p, 0 to 1: wrapped round across as the grid
-// is, and nothing outside the window the GPU holds.
+// What parts fill of the cell at p, 0 to 1: wrapped round as the grid is,
+// and nothing outside the window the GPU holds.
 fn filled(p: vec3f) -> f32 {
 	let s = ${OCC_SIZE};
 	let c = vec3i(floor(p / ${OCC_CELL}.0));
 	let rel = c - vec3i(gp.occ.xyz);
 	if (any(rel < vec3i(0)) || any(rel >= vec3i(s))) { return 0.0; }
-	return textureLoad(occ, vec3i(((c.x % s) + s) % s, rel.y, ((c.z % s) + s) % s), 0).r;
+	return textureLoad(occ, ((c % vec3i(s)) + vec3i(s)) % vec3i(s), 0).r;
 }
 fn lightCell(p: vec3f) -> u32 {
 	let c = vec3i(floor(p / ${LIGHT_CELL}.0));
@@ -464,7 +464,7 @@ fn lightCell(p: vec3f) -> u32 {
 	let at = vec3u(
 		u32(((c.x % k) + k) % k),
 		u32(((c.z % k) + k) % k),
-		u32(c.y - i32(gp.info.w)) + u32(gp.info.x) * cells,
+		u32(((c.y % k) + k) % k) + u32(gp.info.x) * cells,
 	);
 	textureStore(gridA, at, vec4f(light, w));
 	textureStore(gridB, at, vec4f(source, 0.0));
@@ -662,22 +662,46 @@ struct GridU { cascades: array<vec4f, ${LIGHT_GRID_CASCADES}>, info: vec4f };
 @group(0) @binding(21) var<uniform> gridU: GridU;
 @group(0) @binding(22) var gridA: texture_3d<f32>;
 @group(0) @binding(23) var gridB: texture_3d<f32>;
-// Repeats across (u, v), so the grid wraps round; clamped up and down (w).
+// Repeats across (u, v), so the grid wraps round; up and down (w) it wraps
+// within a cascade's third, which a sampler cannot do: see gridLight.
 @group(0) @binding(24) var gridSampler: sampler;
+// A cascade's two layers either side of p.y, each read at its middle so the
+// sampler blends only across, and their blend: the grid's up and down,
+// wrapped round within the cascade's third.
+struct GridLayers { lo: f32, hi: f32, t: f32 };
+fn gridLayers(k: u32, y: f32, size: f32) -> GridLayers {
+	let n = i32(${LIGHT_GRID_CELLS});
+	let f = y / size - 0.5;
+	let low = i32(floor(f));
+	let third = f32(k) * f32(n);
+	let depth = f32(n * ${LIGHT_GRID_CASCADES});
+	let lo = (f32(((low % n) + n) % n) + third + 0.5) / depth;
+	let hi = (f32((((low + 1) % n) + n) % n) + third + 0.5) / depth;
+	return GridLayers(lo, hi, f - floor(f));
+}
 // A cascade's light at p, its cells blended, and where it comes from: the
 // direction is worked out from p itself, so near one light each pixel has
 // its own, and faces and corners keep their edges however large the cells.
 fn gridLight(k: u32, p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	let g = gridU.cascades[k];
-	let cells = f32(${LIGHT_GRID_CELLS});
-	let extent = g.w * cells;
-	// Across, where p's place in the world falls, wrapped by the sampler; up,
-	// within this cascade's third.
-	let up = clamp((p.y - g.y) / extent, 0.5 / cells, 1.0 - 0.5 / cells);
-	let uvw = vec3f(p.x / extent, p.z / extent, (up + f32(k)) / f32(${LIGHT_GRID_CASCADES}));
-	let a = textureSampleLevel(gridA, gridSampler, uvw, 0.0);
+	let extent = g.w * f32(${LIGHT_GRID_CELLS});
+	// Where p's place in the world falls: across, wrapped by the sampler; up
+	// and down, the two layers either side, wrapped and blended here.
+	// gridLamps reads a cascade only more than a cell inside it, so both
+	// layers are ones it holds.
+	let uv = vec2f(p.x, p.z) / extent;
+	let y = gridLayers(k, p.y, g.w);
+	let a = mix(
+		textureSampleLevel(gridA, gridSampler, vec3f(uv, y.lo), 0.0),
+		textureSampleLevel(gridA, gridSampler, vec3f(uv, y.hi), 0.0),
+		y.t,
+	);
 	if (a.a <= 1e-5) { return Lamps(vec3f(0.0), vec3f(0.0)); }
-	let b = textureSampleLevel(gridB, gridSampler, uvw, 0.0);
+	let b = mix(
+		textureSampleLevel(gridB, gridSampler, vec3f(uv, y.lo), 0.0),
+		textureSampleLevel(gridB, gridSampler, vec3f(uv, y.hi), 0.0),
+		y.t,
+	);
 	// The weighted source, each cell's from its own middle: near enough from p's.
 	let source = p + g.w * b.xyz / a.a;
 	let to = source - p;
@@ -5785,31 +5809,24 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const occ = this.occ;
 		const was = this.occAt;
 		const regions: { min: number[]; count: number[] }[] = [];
-		if (
-			!was ||
-			was[1] !== at[1] ||
-			Math.abs(at[0] - was[0]) >= n ||
-			Math.abs(at[2] - was[2]) >= n
-		) {
+		if (!was || [0, 1, 2].some((a) => Math.abs(at[a] - was[a]) >= n)) {
 			regions.push({ min: [...at], count: [n, n, n] });
 		} else {
-			const dx = at[0] - was[0];
-			const dz = at[2] - was[2];
-			if (dx !== 0)
-				regions.push({
-					min: [dx > 0 ? was[0] + n : at[0], at[1], at[2]],
-					count: [Math.abs(dx), n, n],
-				});
-			if (dz !== 0)
-				regions.push({
-					min: [at[0], at[1], dz > 0 ? was[2] + n : at[2]],
-					count: [n, n, Math.abs(dz)],
-				});
+			// A slab for each axis it moved along, as the light grid's.
+			for (const a of [0, 1, 2]) {
+				const step = at[a] - was[a];
+				if (step === 0) continue;
+				const min = [...at];
+				const count = [n, n, n];
+				min[a] = step > 0 ? was[a] + n : at[a];
+				count[a] = Math.abs(step);
+				regions.push({ min, count });
+			}
 		}
 		this.occAt = [...at];
 		const wrap = (v: number) => ((v % n) + n) % n;
 		for (const { min, count } of regions) {
-			// Split where x or z wraps round, so each piece is one block of the texture.
+			// Split where an axis wraps round, so each piece is one block of the texture.
 			const pieces = (a: number) => {
 				const start = wrap(min[a]);
 				const first = Math.min(count[a], n - start);
@@ -5821,16 +5838,17 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					: [{ from: 0, to: start, len: count[a] }];
 			};
 			for (const px of pieces(0))
-				for (const pz of pieces(2)) {
-					const size = [px.len, count[1], pz.len];
-					const bytes = occ.region([min[0] + px.from, min[1], min[2] + pz.from], size);
-					d.queue.writeTexture(
-						{ texture: this.occTex, origin: [px.to, min[1] - at[1], pz.to] },
-						bytes,
-						{ bytesPerRow: size[0], rowsPerImage: size[1] },
-						size,
-					);
-				}
+				for (const py of pieces(1))
+					for (const pz of pieces(2)) {
+						const size = [px.len, py.len, pz.len];
+						const bytes = occ.region([min[0] + px.from, min[1] + py.from, min[2] + pz.from], size);
+						d.queue.writeTexture(
+							{ texture: this.occTex, origin: [px.to, py.to, pz.to] },
+							bytes,
+							{ bytesPerRow: size[0], rowsPerImage: size[1] },
+							size,
+						);
+					}
 		}
 	}
 
@@ -5938,8 +5956,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/**
 	 * The light grid's cells that are due, filled by a compute pass: every
 	 * cascade when the lights or their switches changed; otherwise only the
-	 * cells a cascade newly takes in as the eye goes across (lightGridMove),
-	 * and a whole cascade when the eye goes up or down out of it, one a frame.
+	 * cells a cascade newly takes in as the eye moves (lightGridMove), and a
+	 * whole cascade when the eye jumps past it, one a frame.
 	 */
 	private fillLightGrid(encoder: GPUCommandEncoder, eye: number[], wholeAllowed: boolean): boolean {
 		const cell = this.gridCell;
@@ -5986,7 +6004,6 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		pass.setPipeline(this.gridPipe);
 		jobs.forEach(({ k, region }, j) => {
 			const size = cell * 2 ** k;
-			const lowest = this.gridOrigins[k]![1];
 			d.queue.writeBuffer(
 				this.gridParams[j],
 				0,
@@ -5996,7 +6013,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					k,
 					bits,
 					soft,
-					lowest,
+					0,
 					...region.count,
 					0,
 					...(occAt ?? [0, 0, 0]),

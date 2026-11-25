@@ -52,11 +52,31 @@ describe("the light grid", () => {
 		expect(back.fill).toEqual([{ min: [was[0], was[1], was[2] - 5], count: [32, 32, 5] }]);
 	});
 
-	it("fills it all again for a jump past it, or the eye going up out of its middle", () => {
+	it("fills only the new layers going up or down, as across", () => {
+		const was = lightGridMove([0, 0, 0], 8, null).origin;
+		expect(lightGridMove([0, 8 * LIGHT_GRID_SLACK, 0], 8, was).fill).toEqual([]);
+		const up = lightGridMove([0, 8 * 9, 0], 8, was);
+		expect(up.origin).toEqual([was[0], was[1] + 9, was[2]]);
+		expect(up.fill).toEqual([
+			{ min: [was[0], was[1] + LIGHT_GRID_CELLS, was[2]], count: [32, 9, 32] },
+		]);
+		const down = lightGridMove([0, -8 * 3, 0], 8, was);
+		expect(down.fill).toEqual([{ min: [was[0], was[1] - 3, was[2]], count: [32, 3, 32] }]);
+	});
+
+	it("fills a slab for each axis a diagonal step moves along", () => {
+		const was = lightGridMove([0, 0, 0], 8, null).origin;
+		const move = lightGridMove([40, -40, 0], 8, was);
+		expect(move.fill.map((r) => r.count)).toEqual([
+			[5, 32, 32],
+			[32, 5, 32],
+		]);
+	});
+
+	it("fills it all again for a jump past it", () => {
 		const was = lightGridMove([0, 0, 0], 8, null).origin;
 		expect(lightGridMove([1000, 0, 0], 8, was).fill[0].count).toEqual([32, 32, 32]);
-		expect(lightGridMove([0, 8 * 9, 0], 8, was).fill[0].count).toEqual([32, 32, 32]);
-		expect(lightGridMove([0, 8 * 7, 0], 8, was).fill).toEqual([]);
+		expect(lightGridMove([0, -1000, 0], 8, was).fill[0].count).toEqual([32, 32, 32]);
 	});
 
 	/** Each sample one lighting cell or less: its lights are never another sample's too. */

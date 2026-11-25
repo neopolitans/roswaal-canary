@@ -1315,6 +1315,29 @@ void main() {
 	o = vec4(c / total, textureLod(tex, uv, 0.0).a);
 }`;
 // The glow's source averaged down to half, as WebGpuView's fsDown.
+// Particle resolution's half-size layer, as WebGpuView's fxHalfDepth and
+// FX_UP: the frame's depth made half size, each pixel the nearest of its
+// four, and the layer laid over the frame, smoothed.
+const FS_FX_DEPTH = `#version 300 es
+precision highp float;
+uniform highp sampler2D depthIn;
+// Whether nearer is greater, as where depth is reversed.
+uniform float greater;
+void main() {
+	ivec2 size = textureSize(depthIn, 0);
+	ivec2 at = ivec2(gl_FragCoord.xy) * 2;
+	float d = greater > 0.5 ? 0.0 : 1.0;
+	for (int k = 0; k < 4; k++) {
+		ivec2 p = min(at + ivec2(k & 1, k >> 1), size - ivec2(1));
+		float s = texelFetch(depthIn, p, 0).r;
+		d = greater > 0.5 ? max(d, s) : min(d, s);
+	}
+	gl_FragDepth = d;
+}`;
+const FS_FX_UP = `#version 300 es
+precision highp float;
+in vec2 uv; uniform sampler2D layer; out vec4 o;
+void main() { o = textureLod(layer, uv, 0.0); }`;
 const FS_DOWN = `#version 300 es
 precision highp float;
 in vec2 uv; uniform sampler2D tex; out vec4 o;
@@ -1879,6 +1902,156 @@ export class WebGl2View implements ViewRenderer {
 
 	/** The place's Beams and ParticleEmitters: see `effectsGl.ts`. */
 	private effects?: GlEffects;
+
+	// -- Particle resolution's half-size layer ---------------------------------------
+
+	/** Particle resolution Half: effects drawn at half size, where the frame has a pass of its own. */
+	private particleHalf = false;
+	/** The layer, its depth, the frame's depth as a texture, and the passes that use them. */
+	private fxLayer: {
+		width: number;
+		height: number;
+		/** The frame's size it was made for. */
+		full: [number, number];
+		fbo: WebGLFramebuffer;
+		colour: WebGLTexture;
+		depth: WebGLRenderbuffer;
+		fullFbo: WebGLFramebuffer;
+		fullDepth: WebGLTexture;
+	} | null = null;
+	private fxPrograms: { down: Program; up: Program; vao: WebGLVertexArrayObject } | null = null;
+
+	setParticleHalf(on: boolean): void {
+		if (on === this.particleHalf) return;
+		this.particleHalf = on;
+		if (!on) this.dropFxLayer();
+		this.onRedraw?.();
+	}
+
+	private dropFxLayer(): void {
+		const l = this.fxLayer;
+		if (!l || !this.gl) return;
+		const gl = this.gl;
+		gl.deleteFramebuffer(l.fbo);
+		gl.deleteFramebuffer(l.fullFbo);
+		gl.deleteTexture(l.colour);
+		gl.deleteTexture(l.fullDepth);
+		gl.deleteRenderbuffer(l.depth);
+		this.fxLayer = null;
+	}
+
+	/** The layer's targets, made again for a new frame size. */
+	private makeFxLayer(): NonNullable<WebGl2View["fxLayer"]> {
+		const gl = this.gl;
+		const width = Math.max(1, Math.ceil(this.width / 2));
+		const height = Math.max(1, Math.ceil(this.height / 2));
+		const was = this.fxLayer;
+		if (was && was.full[0] === this.width && was.full[1] === this.height) return was;
+		this.dropFxLayer();
+		const colour = gl.createTexture()!;
+		gl.bindTexture(gl.TEXTURE_2D, colour);
+		gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, width, height);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		const depth = gl.createRenderbuffer()!;
+		gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+		gl.renderbufferStorage(gl.RENDERBUFFER, this.depthFormat(), width, height);
+		const fbo = gl.createFramebuffer()!;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, colour, 0);
+		gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+		// The frame's depth, resolved where it has samples, to be read.
+		const fullDepth = gl.createTexture()!;
+		gl.bindTexture(gl.TEXTURE_2D, fullDepth);
+		gl.texStorage2D(gl.TEXTURE_2D, 1, this.depthFormat(), this.width, this.height);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		const fullFbo = gl.createFramebuffer()!;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fullFbo);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, fullDepth, 0);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		this.fxLayer = {
+			width,
+			height,
+			full: [this.width, this.height],
+			fbo,
+			colour,
+			depth,
+			fullFbo,
+			fullDepth,
+		};
+		return this.fxLayer;
+	}
+
+	/**
+	 * Beams and particles at half the frame's size across and down, as
+	 * WebGpuView's drawHalfEffects: against the frame's depth made half size,
+	 * the nearest of each four, into a layer of their own, laid over the
+	 * frame, smoothed. Their blend is premultiplied, so one blend lays it over.
+	 */
+	private drawHalfEffects(camera: Camera, into: WebGLFramebuffer | null): void {
+		const gl = this.gl;
+		const l = this.makeFxLayer();
+		this.fxPrograms ??= {
+			down: this.link(VS_FULL, FS_FX_DEPTH),
+			up: this.link(VS_FULL, FS_FX_UP),
+			vao: gl.createVertexArray()!,
+		};
+		const p = this.fxPrograms;
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, into);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, l.fullFbo);
+		gl.blitFramebuffer(
+			0,
+			0,
+			this.width,
+			this.height,
+			0,
+			0,
+			this.width,
+			this.height,
+			gl.DEPTH_BUFFER_BIT,
+			gl.NEAREST,
+		);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, l.fbo);
+		gl.viewport(0, 0, l.width, l.height);
+		gl.disable(gl.BLEND);
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(gl.ALWAYS);
+		gl.depthMask(true);
+		gl.colorMask(false, false, false, false);
+		gl.useProgram(p.down.program);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, l.fullDepth);
+		gl.uniform1i(gl.getUniformLocation(p.down.program, "depthIn"), 0);
+		gl.uniform1f(
+			gl.getUniformLocation(p.down.program, "greater"),
+			this.nearer === gl.GREATER ? 1 : 0,
+		);
+		gl.bindVertexArray(p.vao);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		gl.bindVertexArray(null);
+		gl.colorMask(true, true, true, true);
+		gl.depthFunc(this.nearer);
+		gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]);
+		this.drawEffects(camera);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, into);
+		gl.viewport(0, 0, this.width, this.height);
+		gl.disable(gl.DEPTH_TEST);
+		gl.enable(gl.BLEND);
+		gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+		gl.useProgram(p.up.program);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, l.colour);
+		gl.uniform1i(gl.getUniformLocation(p.up.program, "layer"), 0);
+		gl.bindVertexArray(p.vao);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		gl.bindVertexArray(null);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		gl.disable(gl.BLEND);
+		gl.enable(gl.DEPTH_TEST);
+	}
 
 	private drawEffects(camera: Camera): void {
 		const fx = this.effects;
@@ -4395,7 +4568,21 @@ export class WebGl2View implements ViewRenderer {
 		else this.drawPlace(camera, images, show.seeThrough, heat);
 		clock?.mark("place");
 		// Beams and particles, over everything see-through, farthest first; none in the wireframe.
-		this.drawEffects(camera);
+		// At half size where Particle resolution says so and the frame is drawn
+		// into a target of its own, as WebGpuView's: else into the frame. Not
+		// with MSAA: WebGL2 reads a multisampled depth only by resolving it
+		// every frame, which cost more than half-size particles saved (a
+		// desktop at 4x: 99th percentile frame 8.5 ms against 4.4 ms).
+		if (
+			this.particleHalf &&
+			composite &&
+			this.drawnSamples() <= 1 &&
+			!heat &&
+			!wire &&
+			this.gl.getExtension("EXT_color_buffer_float") !== null
+		)
+			this.drawHalfEffects(camera, this.sceneFbo);
+		else this.drawEffects(camera);
 		clock?.mark("effects");
 		// The glow is part of the place, added once the place is drawn: what
 		// marks the place is drawn over it.

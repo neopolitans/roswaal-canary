@@ -14,6 +14,7 @@ import {
 	benchmarkReport,
 	levelScore,
 	pixelFit,
+	runScore,
 	stationPixelFits,
 	stationScore,
 } from "../src/extensions/placeEditor/app/benchmark/result.js";
@@ -421,6 +422,45 @@ describe("a Pixel cost run", () => {
 		const plain = { ...result, kind: "current" as const, date: "2026-11-23T19:00:00.000Z" };
 		expect(compareRuns(plain, result).levels).toEqual([]);
 		expect(compareRuns(plain, result).warnings[0]).toMatch(/Pixel cost run/);
+	});
+
+	it("ends a Full sweep, left out of its score and its comparison", () => {
+		const level = (n: number, ms: number) => ({
+			label: `Level ${n}`,
+			level: n,
+			canvas: { width: 2266, height: 1316 },
+			antialias: "SMAA",
+			stations: [station(1, ms, ms + 1)],
+		});
+		const sweep: BenchmarkResult = {
+			benchmark: 4,
+			seed: 1,
+			kind: "sweep",
+			release: "1.1.0-canary.106",
+			date: "2026-11-25T20:00:00.000Z",
+			renderer: "WebGPU",
+			gpu: "apple",
+			gpuTimers: true,
+			pixelRatio: 2,
+			userAgent: "Test",
+			levels: [
+				level(17, 4),
+				level(21, 16),
+				{
+					...level(21, 1),
+					label: "Level 21, each render scale",
+					stations: [measured(1.5, 4, 0.6)],
+					pixels: true,
+				},
+			],
+		};
+		// 250 and 62.5 a second: their geometric mean, the render scales not in it.
+		expect(runScore(sweep).gpu).toBeCloseTo(125, 6);
+		const text = benchmarkReport(sweep);
+		expect(text).toContain("Level 21, each render scale · SMAA · 50% 567×329");
+		expect(text).toContain("A shaded pixel:");
+		const again = { ...sweep, date: "2026-11-25T21:00:00.000Z" };
+		expect(compareRuns(sweep, again).levels.map((l) => l.label)).toEqual(["Level 17", "Level 21"]);
 	});
 });
 

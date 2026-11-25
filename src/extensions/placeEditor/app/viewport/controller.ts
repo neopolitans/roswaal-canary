@@ -175,7 +175,7 @@ export interface ViewportOptions {
 	 * at (CSS pixels: a Retina screen has twice as many each way); "native",
 	 * every pixel the screen has; Automatic, the quality level's.
 	 */
-	renderScale?: number | "native" | "auto" | "dynamic";
+	renderScale?: number | "native" | "dynamic";
 	/** Savings taken at any level while frames do not fit: see DynamicSavings. */
 	dynamicOptimization?: boolean;
 	/** Light objects' resolution: measured in use, or as set. See depthChoice.ts's lampMode. */
@@ -2606,10 +2606,16 @@ export class ViewportController {
 		const auto = this.auto;
 		this.auto = null;
 		const startLevel = this.state.quality.level;
-		const levels: (number | null)[] =
-			run.kind === "sweep" && !run.ab ? Array.from({ length: TOP_LEVEL }, (_, i) => i + 1) : [null];
-		const pixels = run.kind === "pixels" && !run.ab;
-		const passes = run.ab || pixels ? 1 : (run.passes ?? 1);
+		// A Full sweep: each level at Native, as the level leaves the render
+		// scale alone, then each render scale at the level the view was at.
+		const sweep = run.kind === "sweep" && !run.ab;
+		const levels: { want: number | null; pixels: boolean }[] = sweep
+			? [
+					...Array.from({ length: TOP_LEVEL }, (_, i) => ({ want: i + 1, pixels: false })),
+					{ want: startLevel, pixels: true },
+				]
+			: [{ want: null, pixels: run.kind === "pixels" && !run.ab }];
+		const passes = run.ab || run.kind === "pixels" ? 1 : (run.passes ?? 1);
 		const busy = run.measure === "busy";
 		const renderWas = this.state.render;
 		const base = run.features ?? renderWas.features;
@@ -2656,17 +2662,19 @@ export class ViewportController {
 		};
 		beginStart("Benchmark", `${run.stations.length} stations`);
 		try {
-			for (const want of levels) {
+			for (const { want, pixels } of levels) {
 				if (run.cancelled()) break;
 				if (want !== null) {
-					this.options = { ...options, antialias: undefined, renderScale: "auto" };
+					this.options = { ...options, antialias: undefined, renderScale: "native" };
 					const made: ViewRenderer | null = this.view;
 					await this.toLevel(want, true);
 					if (this.view !== made) await this.viewSettled();
 				}
 				const level = this.state.quality.level;
 				const label =
-					want === null ? `Level ${level}${auto ? " (Automatic's)" : ""}` : `Level ${level}`;
+					want === null
+						? `Level ${level}${auto ? " (Automatic's)" : ""}`
+						: `Level ${level}${pixels ? ", each render scale" : ""}`;
 				const rows: BenchmarkStationResult[] = [];
 				for (const station of run.stations)
 					for (const variant of station.variants) {
@@ -2767,7 +2775,7 @@ export class ViewportController {
 					}
 				// Again, still frames only, after the whole first pass: what changed
 				// between them is mostly the device warming: said as the warm pass.
-				if (passes > 1) {
+				if (passes > 1 && !pixels) {
 					let i = 0;
 					for (const station of run.stations)
 						for (const variant of station.variants) {
@@ -2793,6 +2801,7 @@ export class ViewportController {
 					canvas: { ...this.drawn },
 					antialias: this.view ? antialiasInfo(this.view.antialias).label : "",
 					stations: rows,
+					...(sweep && pixels ? { pixels: true as const } : {}),
 				});
 			}
 		} finally {
@@ -2801,9 +2810,9 @@ export class ViewportController {
 			this.view?.setProbe(null);
 			this.options = options;
 			this.auto = auto;
-			if (pixels) this.fit();
+			if (levels.some((l) => l.pixels) || sweep) this.fit();
 			if (this.state.render.features !== renderWas.features) this.setRender(renderWas);
-			if (levels[0] !== null && this.state.quality.level !== startLevel)
+			if (levels[0].want !== null && this.state.quality.level !== startLevel)
 				await this.toLevel(startLevel, false);
 		}
 		if (run.cancelled()) result.cancelled = true;
@@ -2977,10 +2986,9 @@ export class ViewportController {
 	 */
 	private pixelRatio(): number {
 		const native = Math.min(2, devicePixelRatio || 1);
-		const setting = this.options.renderScale ?? "auto";
+		const setting = this.options.renderScale ?? "native";
 		if (setting === "dynamic") return native * this.dynamic.share() * this.resolutionScale;
-		const scale = setting === "auto" ? this.level().scale : setting;
-		return Math.min(native, scale === "native" ? native : scale) * this.resolutionScale;
+		return Math.min(native, setting === "native" ? native : setting) * this.resolutionScale;
 	}
 
 	/** The size the place is drawn at: the canvas's, unless it is upscaled. */
@@ -3550,7 +3558,7 @@ export class ViewportController {
 		// Its size on the page, before the antialiasing sweep replaces the canvas.
 		const box = canvas.getBoundingClientRect();
 		// Before the resolution sweep changes it: Settings' scale, as it comes to here.
-		const renderScale = `${options.renderScale === undefined || options.renderScale === "auto" ? "Automatic, " : options.renderScale === "dynamic" ? "Dynamic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)${this.upKey ? `, upscaled ${options.upscale === "always" ? "always" : "when still"} to ${canvas.width}×${canvas.height}` : ""}`;
+		const renderScale = `${options.renderScale === "dynamic" ? "Dynamic, " : ""}${Math.round(this.pixelRatio() * 100)}% of the page's pixels (native ${Math.round(Math.min(2, devicePixelRatio || 1) * 100)}%)${this.upKey ? `, upscaled ${options.upscale === "always" ? "always" : "when still"} to ${canvas.width}×${canvas.height}` : ""}`;
 		const steps = RENDER_STEPS.length;
 		// The level and the camera the profile began from, for its head.
 		const startQ = this.state.quality;
@@ -3742,7 +3750,7 @@ export class ViewportController {
 			// where a level's samples or shadow maps change. Then back.
 			const quality: LevelRow[] = [];
 			this.auto = null;
-			this.options = { ...options, antialias: undefined, renderScale: "auto" };
+			this.options = { ...options, antialias: undefined, renderScale: "native" };
 			for (let n = 1; n <= TOP_LEVEL; n++) {
 				phase(`Quality ${n}`);
 				const made = this.view;

@@ -34,7 +34,7 @@ describe("an extension's settings", () => {
 			renderer: "auto",
 			quality: "auto",
 			frameRate: "vsync",
-			renderScale: "auto",
+			renderScale: "native",
 			upscale: "off",
 			dynamicOptimization: false,
 			lampResolution: "auto",

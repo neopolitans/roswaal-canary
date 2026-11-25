@@ -497,7 +497,7 @@ export function placeEditorPerformancePage(): DocPage {
 					],
 					[
 						"Quality levels",
-						"Each level, 1 to 21, with its own render scale and antialiasing: its frame, its stages (by the GPU's timers where it has them), and what it drew at: the canvas, antialiasing, the sun's map and reach, the glow's size, draw calls, and the switches it adds. The view goes back to its own level after",
+						"Each level, 1 to 21, with its own antialiasing: its frame, its stages (by the GPU's timers where it has them), and what it drew at: the canvas, antialiasing, the sun's map and reach, the glow's size, draw calls, and the switches it adds. The view goes back to its own level after",
 					],
 					[
 						"Device",
@@ -524,7 +524,7 @@ export function placeEditorPerformancePage(): DocPage {
 					"every device, and times each on the GPU and the CPU, with the GPU kept busy, two frames in " +
 					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Scene view or " +
 					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
-					"**Full sweep** runs every quality level, about 40 minutes. The editor is hidden while it runs. " +
+					"**Full sweep** runs every quality level at Native, then every render scale at the level the view was at, about 45 minutes. The editor is hidden while it runs. " +
 					"The Roswaal logo, or Esc, stops it and brings the editor back as it was.",
 			},
 			{

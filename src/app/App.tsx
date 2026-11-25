@@ -518,10 +518,10 @@ export function App() {
 						: Number(sceneView.frameRate),
 				altClickSteps: sceneView.altClickSteps,
 				renderScale:
-					sceneView.renderScale === "auto" || sceneView.renderScale === undefined
-						? "auto"
-						: sceneView.renderScale === "native" || sceneView.renderScale === "dynamic"
-							? sceneView.renderScale
+					sceneView.renderScale === undefined || sceneView.renderScale === "native"
+						? "native"
+						: sceneView.renderScale === "dynamic"
+							? "dynamic"
 							: Number(sceneView.renderScale) / 100,
 				upscale:
 					sceneView.upscale === "still" || sceneView.upscale === "always"

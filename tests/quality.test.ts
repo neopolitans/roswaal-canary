@@ -35,7 +35,6 @@ describe("quality levels", () => {
 		expect(top.features).toEqual(STUDIO_FEATURES);
 		expect(top.distance).toBeNull();
 		expect(top.antialias).toBe("smaa");
-		expect(top.scale).toBe("native");
 		expect(top.reach).toBe(578);
 	});
 
@@ -90,7 +89,7 @@ describe("quality levels", () => {
 		for (const q of QUALITY_LEVELS) expect(q.features.sunShadows).toBe(true);
 	});
 
-	it("antialias by a pass from 10, SMAA from 13 to the top, never MSAA, and draw fewer pixels below 10", () => {
+	it("antialias by a pass from 10, SMAA from 13 to the top, never MSAA", () => {
 		expect([1, 9, 10, 12, 13, 17, 18, 21].map((n) => qualityLevel(n).antialias)).toEqual([
 			"off",
 			"off",
@@ -101,16 +100,10 @@ describe("quality levels", () => {
 			"smaa",
 			"smaa",
 		]);
-		expect([1, 2, 3, 9, 10, 17, 18, 19].map((n) => qualityLevel(n).scale)).toEqual([
-			0.5,
-			0.5,
-			0.75,
-			0.75,
-			1,
-			1,
-			1.5,
-			"native",
-		]);
+	});
+
+	it("leave the render scale to its own setting", () => {
+		expect(QUALITY_LEVELS.every((l) => !("scale" in l))).toBe(true);
 	});
 
 	it("reach as far as Studio's sharp shadows did, the stand-in further and blurred", () => {

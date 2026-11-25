@@ -57,10 +57,11 @@ export type ViewportQuality = "auto" | `${number}`;
 
 /**
  * How many of the screen's pixels the place is drawn at, across and down:
- * 75% is a little over half the pixels. Automatic is the quality level's.
+ * 75% is a little over half the pixels. The quality level does not set it:
+ * Automatic, which did, was taken out in 1.1.0, and a saved one reads as
+ * Native, the default.
  */
 export const VIEWPORT_RENDER_SCALES = [
-	{ value: "auto", label: "Automatic" },
 	{ value: "dynamic", label: "Dynamic" },
 	{ value: "native", label: "Native" },
 	{ value: "150", label: "150%" },
@@ -275,9 +276,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Render scale",
 				help: "Pixels drawn, as a share of the screen's.",
 				detail:
-					"Native is every pixel your screen has: the number beside it is what that comes to here, 200% on a Retina screen and 100% on an ordinary one; browser zoom counts too. Automatic is the quality level's: 50% at Levels 1–2, 75% at 3–9, 100% at 10–17, 150% at 18, Native from 19. Dynamic draws fewer while frames do not fit and more once they do, from Native down to half of it. Fewer is faster where filling pixels is the cost, as on a tablet.",
+					"Native, the default, is every pixel your screen has: the number beside it is what that comes to here, 200% on a Retina screen and 100% on an ordinary one; browser zoom counts too. The quality level leaves it as set. Dynamic draws fewer while frames do not fit and more once they do, from Native down to half of it. Fewer is faster where filling pixels is the cost, as on a tablet.",
 				type: "choice",
-				default: "auto",
+				default: "native",
 				choices: VIEWPORT_RENDER_SCALES,
 				labels: () =>
 					renderScaleLabels(

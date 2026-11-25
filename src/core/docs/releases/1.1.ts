@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.106",
+		date: "2026-11-25",
+		headline: "Render scale is its own setting, and a Full sweep measures each one.",
+		added: [
+			"**A Full sweep ends with every render scale**, from 50% to Native, at the level the view was at: what a pixel costs at each station. It is left out of the sweep's score.",
+		],
+		changed: [
+			"**The quality level no longer sets the render scale.** Render scale is Native by default; a saved Automatic reads as Native. Dynamic still draws fewer pixels while frames do not fit.",
+			"**A Full sweep runs every quality level at Native**, so its levels differ only in what each level sets.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.105",
 		date: "2026-11-25",
 		headline: "The light grid catches up going up and down as it does going across.",

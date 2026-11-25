@@ -147,6 +147,11 @@ export interface BenchmarkLevelResult {
 	canvas: { width: number; height: number };
 	antialias: string;
 	stations: BenchmarkStationResult[];
+	/**
+	 * A Full sweep's last section: each station at every render scale, at the
+	 * level the view was at. Not in the run's score, which is the levels'.
+	 */
+	pixels?: true;
 }
 
 export interface BenchmarkResult {
@@ -202,9 +207,9 @@ export function levelScore(level: BenchmarkLevelResult): { gpu: number; waited: 
 	return { gpu: geomean(scores.map((s) => s.gpu)), waited: geomean(scores.map((s) => s.waited)) };
 }
 
-/** A run's score: the geometric mean of its levels'. */
+/** A run's score: the geometric mean of its levels', a sweep's render scales left out. */
 export function runScore(result: BenchmarkResult): { gpu: number; waited: number } {
-	const levels = result.levels.map(levelScore);
+	const levels = result.levels.filter((l) => !l.pixels).map(levelScore);
 	return { gpu: geomean(levels.map((l) => l.gpu)), waited: geomean(levels.map((l) => l.waited)) };
 }
 
@@ -259,6 +264,12 @@ export function benchmarkReport(result: BenchmarkResult): string {
 		return lines.join("\n");
 	}
 	for (const level of result.levels) {
+		if (level.pixels) {
+			lines.push("");
+			lines.push(pixelsIntro(result.gpuTimers));
+			lines.push(...pixelsLevel(level, result.gpuTimers));
+			continue;
+		}
 		const ls = levelScore(level);
 		const warm = warmDrift(level, result.gpuTimers);
 		lines.push("");
@@ -416,13 +427,19 @@ const middle = (values: number[]) => {
 const nsText = (v: number | undefined) =>
 	v !== undefined && Number.isFinite(v) ? (Math.abs(v) < 0.005 ? 0 : v).toFixed(2) : "–";
 
+const pixelsIntro = (gpu: boolean) =>
+	`Each station timed at every render scale this screen has, shaded and as the parts' depth alone, by the ${gpu ? "GPU's own time" : "frame interval"}, and fitted as a fixed cost plus a cost per million pixels. 1 ms per million pixels is 1 ns a pixel.`;
+
 function pixelsReport(result: BenchmarkResult): string[] {
-	const gpu = result.gpuTimers;
+	const lines = [pixelsIntro(result.gpuTimers)];
+	for (const level of result.levels) lines.push(...pixelsLevel(level, result.gpuTimers));
+	return lines;
+}
+
+/** One section of render scales: a line a station, fitted, then each station's stages. */
+function pixelsLevel(level: BenchmarkLevelResult, gpu: boolean): string[] {
 	const lines: string[] = [];
-	lines.push(
-		`Each station timed at every render scale this screen has, shaded and as the parts' depth alone, by the ${gpu ? "GPU's own time" : "frame interval"}, and fitted as a fixed cost plus a cost per million pixels. 1 ms per million pixels is 1 ns a pixel.`,
-	);
-	for (const level of result.levels) {
+	{
 		const fits = level.stations.map((s) => [s, stationPixelFits(s, gpu)] as const);
 		const sizes = (level.stations[0]?.pixels ?? []).map(
 			(p) => `${Math.round(p.scale * 100)}% ${p.width}×${p.height}`,

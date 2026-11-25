@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.69.2",
+	version: "0.70.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.70.0",
+			roswaal: "1.1.0-canary.106",
+			date: "2026-11-25",
+			text: "Quality levels no longer carry a render scale; Render scale defaults to Native. A Full sweep runs its levels at Native and ends with a pixel-cost section at the starting level.",
+		},
 		{
 			version: "0.69.2",
 			roswaal: "1.1.0-canary.105",

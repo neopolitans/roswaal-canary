@@ -1,13 +1,13 @@
 /**
  * Quality levels: Automatic and Level 1–21, as Studio's Enum.QualityLevel.
- * A level sets the Rendering panel's switches, the render scale, the
- * antialiasing, how far parts are drawn, how far the sun's shadows reach and
- * the size of their maps.
+ * A level sets the Rendering panel's switches, the antialiasing, how far
+ * parts are drawn, how far the sun's shadows reach and the size of their
+ * maps. The render scale is its own setting, since 1.1.0.
  *
  * The render distances and the bands where glow and sharp shadows begin were
  * fitted to Studio's screen captures at each EditQualityLevel (22 Nov 2026):
- * rows of Neon cubes out to 9,750 studs, and one spot for light. Render scale
- * and antialiasing are this viewer's own: they are a tablet's biggest costs.
+ * rows of Neon cubes out to 9,750 studs, and one spot for light. Antialiasing
+ * is this viewer's own: it is one of a tablet's biggest costs.
  */
 
 import type { AntialiasMode } from "./antialias.js";
@@ -18,11 +18,6 @@ export interface QualityLevel {
 	level: number;
 	/** How far from the camera parts are drawn, in studs; null, all of them. */
 	distance: number | null;
-	/**
-	 * The share of the page's own pixels across and down (CSS pixels, before
-	 * a Retina screen doubles them); "native", every pixel the screen has.
-	 */
-	scale: number | "native";
 	/**
 	 * Antialiasing: none, then a pass over the frame, which costs a tablet
 	 * least, then four samples a pixel.
@@ -87,10 +82,6 @@ function makeLevel(level: number): QualityLevel {
 	return {
 		level,
 		distance: stepped(DISTANCE, level),
-		// 150% before Native: on a Retina screen Native is four times 100%'s
-		// pixels, and Level 18 took an iPad Mini from 6 to 23 ms a frame in one
-		// step (Benchmark 4 sweep, 23 Nov 2026); 150% is 2.25 times.
-		scale: level <= 2 ? 0.5 : level <= 9 ? 0.75 : level <= 17 ? 1 : level === 18 ? 1.5 : "native",
 		// No level multisamples: at the screen's own pixels MSAA 4× took an iPad
 		// Mini from 15 ms of GPU a frame to 62, one draw or two (canary.16), for
 		// little to see over SMAA. It is the Antialiasing setting's to choose.

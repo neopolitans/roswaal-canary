@@ -170,7 +170,9 @@ export function compareRuns(before: BenchmarkResult, after: BenchmarkResult): Co
 	const gpu = before.gpuTimers && after.gpuTimers;
 	const levels: LevelComparison[] = [];
 	for (const a of before.levels) {
-		const b = after.levels.find((l) => l.level === a.level);
+		// A sweep's render scales are its own section, not a level to set beside one.
+		if (a.pixels) continue;
+		const b = after.levels.find((l) => l.level === a.level && !l.pixels);
 		if (!b) continue;
 		if (
 			a.canvas.width !== b.canvas.width ||

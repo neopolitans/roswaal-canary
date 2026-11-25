@@ -9617,8 +9617,11 @@ button.tb.icon-only.on {
 	transform: translate(-50%, -50%);
 }
 
+/* 20px of the knot's 22: nearly all of it starts a wire (1.1.0). Moving the
+   knot is its ring, grown outwards below to make up for it. */
 .node.node--reroute .pin::after {
-	inset: -1px;
+	inset: -4px;
+	border-radius: 50%;
 }
 
 /* A knot's pins stay at its centre -- it is a bend in a wire, not a node with
@@ -9638,13 +9641,13 @@ button.tb.icon-only.on {
 .node.node--reroute::before {
 	content: "";
 	position: absolute;
-	inset: -6px;
+	inset: -10px;
 	border-radius: 50%;
 	z-index: -1;
 }
 
 .canvas.canvas--wiring .node.node--reroute .pin::after {
-	inset: -5px;
+	inset: -8px;
 }
 
 /* Both of a knot's pins sit at its centre, stacked. Drawing both means an
@@ -9657,6 +9660,66 @@ button.tb.icon-only.on {
 
 .node.node--reroute .pin-label {
 	display: none;
+}
+
+/* A wildcard pin's grab, wider (1.1.0). It takes whatever is wired to it
+   first, so it is a pin wires are often started from on purpose. It widens
+   outwards, off the node's edge, where nothing else is: never up or down
+   into the next row's pin. */
+.node .row .side.left .pin.pin--wild::after {
+	inset: -3px -3px -3px -12px;
+	border-radius: 999px;
+}
+
+.node .row .side.right .pin.pin--wild::after {
+	inset: -3px -12px -3px -3px;
+	border-radius: 999px;
+}
+
+.canvas.canvas--wiring .node .row .side.left .pin.pin--wild::after {
+	inset: -9px -9px -9px -12px;
+}
+
+.canvas.canvas--wiring .node .row .side.right .pin.pin--wild::after {
+	inset: -9px -12px -9px -9px;
+}
+
+/* Where a drag from a wildcard pin or a knot starts, shown behind the dot
+   while the pointer is over it (or a finger on it): the grab area itself, in
+   the pin's colour. Not while a wire is in flight, when every pin widens. */
+.node .pin.pin--wild::before,
+.node.node--reroute .pin::before {
+	content: "";
+	position: absolute;
+	border-radius: 999px;
+	background: currentColor;
+	opacity: 0;
+	transition: opacity 0.12s;
+	pointer-events: none;
+}
+
+.node .row .side.left .pin.pin--wild::before {
+	inset: -3px -3px -3px -12px;
+}
+
+.node .row .side.right .pin.pin--wild::before {
+	inset: -3px -12px -3px -3px;
+}
+
+.node.node--reroute .pin::before {
+	inset: -4px;
+}
+
+@media (hover: hover) {
+	.canvas:not(.canvas--wiring) .node .pin.pin--wild:hover::before,
+	.canvas:not(.canvas--wiring) .node.node--reroute .pin:hover::before {
+		opacity: 0.22;
+	}
+}
+
+.canvas:not(.canvas--wiring) .node .pin.pin--wild:active::before,
+.canvas:not(.canvas--wiring) .node.node--reroute .pin:active::before {
+	opacity: 0.3;
 }
 
 .node.node--reroute.node--selected {

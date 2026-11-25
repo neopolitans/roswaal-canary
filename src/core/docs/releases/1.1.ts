@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.113",
+		date: "2026-11-25",
+		headline: "Knots and wildcard pins are easier to drag a wire from, and show where.",
+		changed: [
+			"**Most of a reroute knot starts a wire**, not only its middle; the ring round it, now wider, moves the knot.",
+			"**A wildcard pin can be grabbed further out**, off the node's edge, without reaching into the next row.",
+			"**Hovering a knot or a wildcard pin shows where a drag starts**: its grab area, behind the dot, in the pin's colour.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.112",
 		date: "2026-11-25",
 		headline: "Shadow maps draw only what they cover, and moving a light refills only round it.",

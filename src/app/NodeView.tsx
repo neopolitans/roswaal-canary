@@ -31,7 +31,14 @@ import {
 	typeGroup,
 } from "../core/roblox.js";
 import { readOnlyToScripts } from "../core/robloxEngine.js";
-import type { GraphNode, Literal, NodeDef, PinDef } from "../core/schema.js";
+import {
+	ANY,
+	type GraphNode,
+	type Literal,
+	type NodeDef,
+	type PinDef,
+	WILDCARD,
+} from "../core/schema.js";
 import { typeChip, typeFamily } from "../core/typeFamily.js";
 import { ClassIcon } from "./ClassIcon.jsx";
 import { requestCodeEdit } from "./codeEditRequests.js";
@@ -727,6 +734,8 @@ function renderPin(
 				"pin",
 				pin.kind,
 				pin.kind === "data" && `fam-${typeFamily(pin.type)}`,
+				// Takes whatever is wired to it: a wider grab, shown on hover.
+				pin.kind === "data" && (pin.type === WILDCARD || pin.type === ANY) && "pin--wild",
 				wired && "connected",
 				state,
 				highlighted,

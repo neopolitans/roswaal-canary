@@ -27,6 +27,7 @@ import {
 	type BenchmarkKind,
 	type BenchmarkResult,
 	type BenchmarkStationResult,
+	benchmarkSettings,
 	PIXEL_SCALES,
 	type PixelPoint,
 } from "../benchmark/result.js";
@@ -2632,6 +2633,7 @@ export class ViewportController {
 			...(passes > 1 ? { passes } : {}),
 			...(busy ? { measure: "busy" as const } : {}),
 			...(switchedOff.length > 0 ? { switchedOff } : {}),
+			settings: benchmarkSettings(options),
 			...(run.ab
 				? {
 						ab: { feature: run.ab, label: FEATURES.find((f) => f.key === run.ab)?.label ?? run.ab },
@@ -3411,6 +3413,16 @@ export class ViewportController {
 		if ((showsHandles(this.state.tool) || this.state.pivotEdit) && this.selection.length > 0)
 			this.drawHandles(camera.eye);
 		this.followGizmos(camera.eye);
+		// The GPU's times only as often as they are read: every frame for a
+		// benchmark, a profile or the Performance panel's graph; Automatic's
+		// level, which adds up time over many frames, from one in a few.
+		view.setTimers?.(
+			this.state.profiling !== null || this.frameWatchers > 0
+				? "every"
+				: this.auto !== null
+					? "sampled"
+					: "off",
+		);
 		view.draw(camera, this.stillNext);
 		this.stillNext = false;
 		this.drawPivot();
@@ -3853,6 +3865,20 @@ export class ViewportController {
 			scene: gpu?.scene ?? Number.NaN,
 			post: gpu?.post ?? Number.NaN,
 		});
+	}
+
+	/** Performance panel graphs showing: the GPU's passes are timed while any is. */
+	private frameWatchers = 0;
+	/** A graph of the frames is showing until the returned function is called. */
+	watchFrames(): () => void {
+		this.frameWatchers++;
+		this.redraw();
+		let done = false;
+		return () => {
+			if (done) return;
+			done = true;
+			this.frameWatchers--;
+		};
 	}
 
 	/** The last frames drawn, for the Performance panel's graph. */

@@ -1181,7 +1181,11 @@ function FrameGraph({ controller, timed }: { controller: ViewportController; tim
 		};
 		paint();
 		const tick = setInterval(paint, 250);
-		return () => clearInterval(tick);
+		const unwatch = controller.watchFrames();
+		return () => {
+			clearInterval(tick);
+			unwatch();
+		};
 	}, [controller]);
 	const keys: [string, string][] = timed
 		? [

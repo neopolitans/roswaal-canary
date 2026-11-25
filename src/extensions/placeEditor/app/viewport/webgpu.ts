@@ -152,6 +152,8 @@ import {
 	SKY_VIEWS,
 	SUN_CASCADES,
 	SUN_GAIN,
+	TIMER_SAMPLE,
+	type TimerMode,
 	sceneBox,
 	sceneFingerprint,
 	seeThroughSets,
@@ -317,6 +319,16 @@ ${OVERDRAW_WGSL}
 /** Antialiasing's samples a pixel, unless the view is made with another count. */
 const SAMPLES = 4;
 
+/**
+ * Bits of a lit pipeline's FEATURES that no Rendering panel switch has:
+ * whether the light grid is read and whether the place is Soft, known when
+ * it compiles (see litFor); and LIT_ASK, set only in the pipelines for every
+ * switch, which read Soft from the grid's uniform instead.
+ */
+const LIT_GRID = 1 << 28;
+const LIT_SOFT = 1 << 29;
+const LIT_ASK = 1 << 30;
+
 /** The pipelines built again for one set of switches: see WebGpuView.litFor. */
 type LitKind = "solid" | "solidWrite" | "blended" | "glassBlended" | "lamps";
 /** Where the material table starts in the frame's uniforms, in bytes: after `U`'s two matrices and fifteen vec4s. */
@@ -379,7 +391,8 @@ fn filled(p: vec3f) -> f32 {
 	let c = vec3i(floor(p / ${OCC_CELL}.0));
 	let rel = c - vec3i(gp.occ.xyz);
 	if (any(rel < vec3i(0)) || any(rel >= vec3i(s))) { return 0.0; }
-	return textureLoad(occ, ((c % vec3i(s)) + vec3i(s)) % vec3i(s), 0).r;
+	// OCC_SIZE is a power of two: the mask wraps negative cells too.
+	return textureLoad(occ, c & vec3i(s - 1), 0).r;
 }
 fn lightCell(p: vec3f) -> u32 {
 	let c = vec3i(floor(p / ${LIGHT_CELL}.0));
@@ -395,10 +408,15 @@ fn lightCell(p: vec3f) -> u32 {
 	let r = step * 0.5;
 	let bits = u32(gp.info.y);
 	let corner = gp.origin.xyz + vec3f(id) * size;
+	// A cell partly inside a part keeps the light of only the air round it;
+	// one wholly inside, none, so none is worked out for it.
+	var air = 1.0;
+	if (gp.occ.w > 0.5) { air = 1.0 - filled(corner + vec3f(size * 0.5)); }
+	let samples = select(m * m * m, 0u, air <= 0.0);
 	var light = vec3f(0.0);
 	var weighted = vec3f(0.0);
 	var weight = 0.0;
-	for (var s = 0u; s < m * m * m; s++) {
+	for (var s = 0u; s < samples; s++) {
 		let p = corner + (vec3f(f32(s % m), f32((s / m) % m), f32(s / (m * m))) + 0.5) * step;
 		let b = lightTable[lightCell(p)];
 		for (var j = 0u; j < min(b.y, 64u); j++) {
@@ -436,6 +454,8 @@ fn lightCell(p: vec3f) -> u32 {
 			}
 			// A light smaller than the sample's cube: spread over it, its total kept.
 			k2 = k2 * min(1.0, 0.52 * pow(a.w / r, 3.0));
+			// Too faint to show: not stepped to, nor added.
+			if (max(col.r, max(col.g, col.b)) * k2 < 0.001) { continue; }
 			// On the way to it, each cell lets through what parts leave of it:
 			// the light's own cell and the sample's are not in the way.
 			if (gp.occ.w > 0.5 && k2 > 0.0) {
@@ -456,9 +476,6 @@ fn lightCell(p: vec3f) -> u32 {
 		}
 	}
 	let n = f32(m * m * m);
-	// A cell partly inside a part keeps the light of only the air round it.
-	var air = 1.0;
-	if (gp.occ.w > 0.5) { air = 1.0 - filled(corner + vec3f(size * 0.5)); }
 	light = light / n * air;
 	let w = weight / n * air;
 	// Where it comes from, from the cell's middle in cells, times its weight:
@@ -466,13 +483,9 @@ fn lightCell(p: vec3f) -> u32 {
 	let middle = corner + vec3f(size * 0.5);
 	var source = vec3f(0.0);
 	if (weight > 0.0) { source = (weighted / weight - middle) / size * w; }
-	let c = vec3i(round(corner / size));
-	let k = i32(cells);
-	let at = vec3u(
-		u32(((c.x % k) + k) % k),
-		u32(((c.z % k) + k) % k),
-		u32(((c.y % k) + k) % k) + u32(gp.info.x) * cells,
-	);
+	// LIGHT_GRID_CELLS is a power of two: the mask wraps negative cells too.
+	let c = vec3i(round(corner / size)) & vec3i(i32(cells) - 1);
+	let at = vec3u(u32(c.x), u32(c.z), u32(c.y) + u32(gp.info.x) * cells);
 	textureStore(gridA, at, vec4f(light, w));
 	textureStore(gridB, at, vec4f(source, 0.0));
 }
@@ -637,9 +650,9 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		var k2 = select(
 			max(dot(n, l), 0.0) * (1.0 - smoothstep(0.7, 1.0, dist / a.w)),
 			softFall(dist / a.w),
-			gridU.info.y > 0.5,
+			softLight(),
 		);
-		if (gridU.info.y > 0.5 && col.w > 0.5 && col.w < 1.5) {
+		if (softLight() && col.w > 0.5 && col.w < 1.5) {
 			k2 = k2 * softSpot(d.w);
 		} else if (col.w > 0.5) {
 			let c = dot(-l, d.xyz);
@@ -648,7 +661,7 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		}
 		let lit = hv3(col.rgb * k2);
 		sum = sum + lit;
-		shine = shine + lit * hf(select(pow(max(dot(n, normalize(l + v)), 0.0), gloss), 0.0, gridU.info.y > 0.5));
+		shine = shine + lit * hf(select(pow(max(dot(n, normalize(l + v)), 0.0), gloss), 0.0, softLight()));
 	}
 	return Lamps(vec3f(sum) * 1.25, vec3f(shine) * 1.25);
 }
@@ -667,6 +680,18 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 // info: x, whether the grid is read; y, Soft: light objects flat (partLights too).
 struct GridU { cascades: array<vec4f, ${LIGHT_GRID_CASCADES}>, info: vec4f };
 @group(0) @binding(21) var<uniform> gridU: GridU;
+// The light grid and Soft, in FEATURES where a pipeline is built for them (see
+// WebGpuView.litFor): known when it compiles, so the code for the other is
+// left out. The pipelines for every switch have LIT_ASK, and read gridU. The
+// grid is read only once filled, which gridU says either way.
+fn softLight() -> bool {
+	if ((FEATURES & ${LIT_ASK}u) != 0u) { return gridU.info.y > 0.5; }
+	return (FEATURES & ${LIT_SOFT}u) != 0u;
+}
+fn gridRead() -> bool {
+	if ((FEATURES & ${LIT_GRID}u) == 0u) { return false; }
+	return gridU.info.x > 0.5;
+}
 @group(0) @binding(22) var gridA: texture_3d<f32>;
 @group(0) @binding(23) var gridB: texture_3d<f32>;
 // Repeats across (u, v), so the grid wraps round; up and down (w) it wraps
@@ -682,8 +707,9 @@ fn gridLayers(k: u32, y: f32, size: f32) -> GridLayers {
 	let low = i32(floor(f));
 	let third = f32(k) * f32(n);
 	let depth = f32(n * ${LIGHT_GRID_CASCADES});
-	let lo = (f32(((low % n) + n) % n) + third + 0.5) / depth;
-	let hi = (f32((((low + 1) % n) + n) % n) + third + 0.5) / depth;
+	// n is a power of two: the mask wraps below zero too, without a division.
+	let lo = (f32(low & (n - 1)) + third + 0.5) / depth;
+	let hi = (f32((low + 1) & (n - 1)) + third + 0.5) / depth;
 	return GridLayers(lo, hi, f - floor(f));
 }
 // A cascade's light at p, its cells blended, and where it comes from: the
@@ -704,6 +730,8 @@ fn gridLight(k: u32, p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		y.t,
 	);
 	if (a.a <= 1e-5) { return Lamps(vec3f(0.0), vec3f(0.0)); }
+	// Soft: flat, as Studio's, and no highlight; where it comes from is not read.
+	if (softLight()) { return Lamps(a.rgb * 1.25, vec3f(0.0)); }
 	let b = mix(
 		textureSampleLevel(gridB, gridSampler, vec3f(uv, y.lo), 0.0),
 		textureSampleLevel(gridB, gridSampler, vec3f(uv, y.hi), 0.0),
@@ -713,11 +741,8 @@ fn gridLight(k: u32, p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	let source = p + g.w * b.xyz / a.a;
 	let to = source - p;
 	let l = to / max(length(to), 1e-3);
-	// Soft (info.y): flat, as Studio's, and no highlight.
-	let flat = gridU.info.y > 0.5;
-	let ndl = select(max(dot(n, l), 0.0), 1.0, flat);
-	let lit = a.rgb * ndl;
-	let shine = select(pow(max(dot(n, normalize(l + v)), 0.0), gloss), 0.0, flat);
+	let lit = a.rgb * max(dot(n, l), 0.0);
+	let shine = pow(max(dot(n, normalize(l + v)), 0.0), gloss);
 	return Lamps(lit * 1.25, lit * shine * 1.25);
 }
 // The finest cascade p is a cell inside, eased into the next over two
@@ -752,7 +777,7 @@ fn lampAgrees(p: vec2i, dist: f32, near: f32, n: vec3f) -> bool {
 // bilinear filtering would, each only where it stands for this pixel
 // (lampAgrees); where none does, as at an edge or a corner, worked out here.
 fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
-	if (gridU.info.x > 0.5) { return gridLamps(i.world, n, v, gloss); }
+	if (gridRead()) { return gridLamps(i.world, n, v, gloss); }
 	if (has(${FEATURE_BIT.halfLamps}u)) {
 		let size = vec2i(textureDimensions(lampLight));
 		// Half or a quarter of the frame across and down: its share from the two sizes.
@@ -2339,11 +2364,22 @@ export class WebGpuView implements ViewRenderer {
 	private gpuTimes: RenderStats["gpu"] = null;
 	/** While profiling: each frame's GPU time by stage, from the stamps. */
 	private gpuSink: StageSink | null = null;
+	/** How often the passes are timed (see setTimers), and whether this frame is. */
+	private timerMode: TimerMode = "every";
+	private timedFrames = 0;
+	private stampThis = true;
+	setTimers(mode: TimerMode): void {
+		if (mode === this.timerMode) return;
+		this.timerMode = mode;
+		// No times now, rather than the last ones standing for every frame after.
+		if (mode === "off") this.gpuTimes = null;
+	}
 	private stamp(
 		kind: "shadows" | "scene" | "post" | null,
 	): GPURenderPassTimestampWrites | undefined {
 		const t = this.timing;
 		if (kind === null && !this.gpuSink) return undefined;
+		if (!this.stampThis && !this.gpuSink) return undefined;
 		if (!t || (this.stamps.length + 1) * 2 > WebGpuView.STAMPS) return undefined;
 		const at = this.stamps.length * 2;
 		this.stamps.push(kind);
@@ -2485,6 +2521,10 @@ export class WebGpuView implements ViewRenderer {
 	 */
 	private litBits(features: RenderFeatures = this.render.features): number {
 		let bits = featureBits(features);
+		// The light grid and Soft, for the pipeline's own constants (see litFor):
+		// bits no switch has.
+		if (this.gridCell !== null) bits |= LIT_GRID;
+		if (this.lighting?.soft) bits |= LIT_SOFT;
 		if (!this.hasLights)
 			bits &= ~(
 				FEATURE_BIT.pointLights |
@@ -4136,6 +4176,9 @@ fn at(c: vec2i) -> u32 {
 
 	draw(camera: Camera, still = false): void {
 		const started = performance.now();
+		this.stampThis =
+			this.timerMode === "every" ||
+			(this.timerMode === "sampled" && this.timedFrames++ % TIMER_SAMPLE === 0);
 		this.cpuEffects = 0;
 		this.cpuCulling = 0;
 		// Still-frame TAA: a frame aside by a fraction of a pixel, while the
@@ -4308,6 +4351,17 @@ fn at(c: vec2i) -> u32 {
 				? this.occludable && !this.eyeMoving && this.drawFarSmall(encoder)
 				: this.drawFar(encoder));
 		if (passes.occlusion) encoder = this.cut(encoder, "occlusion");
+		// What reads the place's depth once its pass ends: a Highlight with
+		// DepthMode Occluded; and past the glow, beams and particles at half
+		// size, and handles and selection lines hidden behind parts, drawn in
+		// a pass of their own. With none, the depth stays in the GPU's tile
+		// memory, never written out and read back.
+		const depthAfter =
+			hlOn ||
+			(!!glow &&
+				(this.particleHalf ||
+					this.handleDraws.length > 0 ||
+					(!!this.selection && this.hideBehind)));
 		let pass = encoder.beginRenderPass({
 			timestampWrites: this.stamp("scene"),
 			colorAttachments: [
@@ -4327,8 +4381,7 @@ fn at(c: vec2i) -> u32 {
 				view: this.depth!.createView(),
 				depthClearValue: 0,
 				depthLoadOp: load ? "load" : "clear",
-				// Kept for the glow, and for a Highlight with DepthMode Occluded.
-				depthStoreOp: glow || hlOn ? "store" : "discard",
+				depthStoreOp: depthAfter ? "store" : "discard",
 			},
 		});
 		pass.setBindGroup(0, this.bind);
@@ -4431,7 +4484,8 @@ fn at(c: vec2i) -> u32 {
 				],
 				depthStencilAttachment: {
 					view: this.depth!.createView(),
-					depthLoadOp: "load",
+					depthClearValue: 0,
+					depthLoadOp: depthAfter ? "load" : "clear",
 					depthStoreOp: hlOn ? "store" : "discard",
 				},
 			});

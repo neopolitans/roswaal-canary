@@ -167,6 +167,16 @@ export function compareRuns(before: BenchmarkResult, after: BenchmarkResult): Co
 		warnings.push(
 			`Different devices or renderers: ${before.renderer} on ${before.gpu}, and ${after.renderer} on ${after.gpu}.`,
 		);
+	// Settings each run recorded (since canary.111) that differ between them.
+	const was = before.settings;
+	const now = after.settings;
+	if (was && now) {
+		const differ = Object.keys(now).filter((k) => k in was && was[k] !== now[k]);
+		if (differ.length > 0)
+			warnings.push(
+				`Different settings: ${differ.map((k) => `${k} ${was[k]}, then ${now[k]}`).join("; ")}.`,
+			);
+	}
 	const gpu = before.gpuTimers && after.gpuTimers;
 	const levels: LevelComparison[] = [];
 	for (const a of before.levels) {

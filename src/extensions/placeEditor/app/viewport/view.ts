@@ -189,6 +189,13 @@ export interface ViewRenderer {
 	 */
 	setProfiling(sink: StageSink | null, gpu?: StageSink | null): void;
 	/**
+	 * How often the GPU's passes are timed, where the browser times them:
+	 * every frame, one frame in TIMER_SAMPLE (the last times standing for the
+	 * rest), or not at all. Reading them back makes Safari wait for the GPU,
+	 * so they are read only as often as something needs them. Every, by default.
+	 */
+	setTimers?(mode: TimerMode): void;
+	/**
 	 * What the view has drawn again since it was made, counted: the
 	 * reflection cube's faces, the near sky maps and the sun's maps. For the
 	 * profile's moving camera; where the renderer counts them.
@@ -890,6 +897,11 @@ export function halfPassStep(share: number, renderWidth: number, pointsWidth: nu
 	const perPoint = pointsWidth > 0 ? renderWidth / pointsWidth : 1;
 	return perPoint > 1 ? Math.min(2, perPoint) : 2;
 }
+
+/** How often the GPU's passes are timed: see RenderView.setTimers. */
+export type TimerMode = "every" | "sampled" | "off";
+/** Sampled timers time one frame in this many. */
+export const TIMER_SAMPLE = 4;
 
 /** Cells a side of each of the light grid's three cascades. */
 export const LIGHT_GRID_CELLS = 32;

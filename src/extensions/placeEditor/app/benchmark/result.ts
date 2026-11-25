@@ -162,6 +162,12 @@ export interface BenchmarkResult {
 	passes?: number;
 	/** The render switches that were off for the run, by their names in the Rendering panel. */
 	switchedOff?: string[];
+	/**
+	 * Settings › Scene view as the run found it, by name: the quality level,
+	 * render scale and each effect's resolution ("Automatic" where unset).
+	 * Since 1.1.0-canary.111; absent before.
+	 */
+	settings?: Record<string, string>;
 	/** An A/B run's switch, by its key and its name. */
 	ab?: { feature: string; label: string };
 	/**
@@ -228,6 +234,46 @@ function cpuBound(s: BenchmarkStationResult): boolean {
 	);
 }
 
+/** The Scene view settings a run records, by their names in Settings: see BenchmarkResult.settings. */
+const RECORDED: [key: string, name: string][] = [
+	["quality", "Quality"],
+	["renderScale", "Render scale"],
+	["frameRate", "Frame rate"],
+	["dynamicOptimization", "Dynamic optimization"],
+	["antialias", "Antialiasing"],
+	["upscale", "Upscaling"],
+	["lampResolution", "Light objects resolution"],
+	["lightGrid", "Light object grid"],
+	["skyResolution", "Sky light resolution"],
+	["bloomResolution", "Bloom resolution"],
+	["particleResolution", "Particle resolution"],
+	["reflectionUpdates", "Surface reflection accuracy"],
+	["shadowMapSize", "Shadow map size"],
+	["textureResolution", "Texture resolution"],
+];
+
+/** Scene view's settings as a run found them, by name, each value as Settings words it near enough. */
+export function benchmarkSettings(options: object): Record<string, string> {
+	const o = options as Record<string, unknown>;
+	const out: Record<string, string> = {};
+	for (const [key, name] of RECORDED) {
+		const v = o[key];
+		out[name] =
+			v === undefined || v === "auto"
+				? "Automatic"
+				: typeof v === "boolean"
+					? v
+						? "On"
+						: "Off"
+					: key === "quality" && typeof v === "number"
+						? `Level ${v}`
+						: key === "renderScale" && typeof v === "number"
+							? `${Math.round(v * 100)}%`
+							: String(v);
+	}
+	return out;
+}
+
 /** The run as text, to paste: a section a level, a line a station, then each station's stages. */
 export function benchmarkReport(result: BenchmarkResult): string {
 	const lines: string[] = [];
@@ -245,6 +291,12 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	lines.push(`Browser: ${result.userAgent}`);
 	if (result.switchedOff?.length)
 		lines.push(`Switched off in the Rendering panel: ${result.switchedOff.join(", ")}`);
+	if (result.settings)
+		lines.push(
+			`Settings: ${Object.entries(result.settings)
+				.map(([k, v]) => `${k} ${v}`)
+				.join(" · ")}`,
+		);
 	if (result.measure === "busy")
 		lines.push(
 			"Measured with the GPU kept busy, two frames in flight: the time between frames, and the GPU's own time for one, at its full clock.",

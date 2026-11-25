@@ -905,7 +905,8 @@ const GRID_READ = `
 uniform highp sampler3D gridA;
 uniform highp sampler3D gridB;
 uniform vec4 gridC[${LIGHT_GRID_CASCADES}];
-int gridWrap(int v) { return v - ${LIGHT_GRID_CELLS} * int(floor(float(v) / ${LIGHT_GRID_CELLS}.0)); }
+// LIGHT_GRID_CELLS is a power of two: the mask wraps below zero too, without a division.
+int gridWrap(int v) { return v & ${LIGHT_GRID_CELLS - 1}; }
 // A cascade's light at p, as WebGpuView's gridLight: across, wrapped by the
 // sampler; up and down, the two layers either side read at their middles
 // and blended here, which a sampler cannot do within a third.
@@ -922,13 +923,13 @@ vec3 gridLight(int k, vec3 p, vec3 n, vec3 v, float gloss, out vec3 shine) {
 	vec4 a = mix(textureLod(gridA, vec3(uv, lo), 0.0), textureLod(gridA, vec3(uv, hi), 0.0), t);
 	shine = vec3(0.0);
 	if (a.a <= 1e-5) return vec3(0.0);
+	// Soft (gridInfo.y): flat, as Studio's, and no highlight; where it comes from is not read.
+	if (gridInfo.y > 0.5) return a.rgb * 1.25;
 	vec4 b = mix(textureLod(gridB, vec3(uv, lo), 0.0), textureLod(gridB, vec3(uv, hi), 0.0), t);
 	vec3 to = g.w * b.xyz / a.a;
 	vec3 l = to / max(length(to), 1e-3);
-	// Soft (gridInfo.y): flat, as Studio's, and no highlight.
-	bool even = gridInfo.y > 0.5;
-	vec3 lit = a.rgb * (even ? 1.0 : max(dot(n, l), 0.0));
-	if (!even) shine = lit * pow(max(dot(n, normalize(l + v)), 0.0), gloss) * 1.25;
+	vec3 lit = a.rgb * max(dot(n, l), 0.0);
+	shine = lit * pow(max(dot(n, normalize(l + v)), 0.0), gloss) * 1.25;
 	return lit * 1.25;
 }
 // The finest cascade p is a cell inside, eased into the next over two cells
@@ -983,7 +984,8 @@ float filled(vec3 p) {
 	ivec3 c = ivec3(floor(p / ${OCC_CELL}.0));
 	ivec3 rel = c - ivec3(gOcc.xyz);
 	if (any(lessThan(rel, ivec3(0))) || any(greaterThanEqual(rel, ivec3(${OCC_SIZE})))) return 0.0;
-	return texelFetch(occ, ivec3(wrapBy(c.x, ${OCC_SIZE}), wrapBy(c.y, ${OCC_SIZE}), wrapBy(c.z, ${OCC_SIZE})), 0).r;
+	// OCC_SIZE is a power of two: the mask wraps negative cells too.
+	return texelFetch(occ, c & ivec3(${OCC_SIZE - 1}), 0).r;
 }
 void main() {
 	ivec3 lo = ivec3(gLo.xyz);
@@ -996,10 +998,15 @@ void main() {
 	int m = int(round(size / st));
 	float r = st * 0.5;
 	bool soft = gSize.z > 0.5;
+	// A cell partly inside a part keeps the light of only the air round it;
+	// one wholly inside, none, so none is worked out for it.
+	float airK = 1.0;
+	if (gOcc.w > 0.5) airK = 1.0 - filled(corner + vec3(size * 0.5));
+	int samplesDone = airK <= 0.0 ? 0 : m * m * m;
 	vec3 light = vec3(0.0);
 	vec3 weighted = vec3(0.0);
 	float weight = 0.0;
-	for (int s = 0; s < m * m * m; s++) {
+	for (int s = 0; s < samplesDone; s++) {
 		vec3 p = corner + (vec3(float(s % m), float((s / m) % m), float(s / (m * m))) + 0.5) * st;
 		uint h = lightCell(p);
 		uvec2 b = texelFetch(lightTable, ivec2(int(h & 255u), int(h >> 8u)), 0).xy;
@@ -1038,6 +1045,8 @@ void main() {
 			}
 			// A light smaller than the sample's cube: spread over it, its total kept.
 			k2 *= min(1.0, 0.52 * pow(a.w / r, 3.0));
+			// Too faint to show: not stepped to, nor added.
+			if (max(col.r, max(col.g, col.b)) * k2 < 0.001) continue;
 			// On the way to it, each cell lets through what parts leave of it.
 			if (gOcc.w > 0.5 && k2 > 0.0) {
 				vec3 dir = to / max(dist, 1e-4);
@@ -1057,9 +1066,6 @@ void main() {
 		}
 	}
 	float samples = float(m * m * m);
-	// A cell partly inside a part keeps the light of only the air round it.
-	float airK = 1.0;
-	if (gOcc.w > 0.5) airK = 1.0 - filled(corner + vec3(size * 0.5));
 	light = light / samples * airK;
 	float w = weight / samples * airK;
 	vec3 middle = corner + vec3(size * 0.5);

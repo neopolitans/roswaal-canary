@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.72.0",
+	version: "0.73.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.73.0",
+			roswaal: "1.1.0-canary.111",
+			date: "2026-11-25",
+			text: "GPU timers only as read (setTimers: every for a benchmark, profile or the frame graph, one frame in four for Automatic, otherwise off); the frame depth stored only for what reads it after the glow; lit pipelines specialised on the light grid and Soft (LIT_GRID, LIT_SOFT, LIT_ASK in FEATURES); the grid's wraps masked; the fill skips solid cells and faint lights. Benchmark results record Scene view's settings.",
+		},
 		{
 			version: "0.72.0",
 			roswaal: "1.1.0-canary.110",

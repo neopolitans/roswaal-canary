@@ -9,6 +9,20 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.111",
+		date: "2026-11-25",
+		headline: "Less work for the GPU each frame, with the same picture.",
+		added: [
+			"**A benchmark run records the Scene view settings it ran with**: the quality level, render scale and each effect's resolution. Comparing two runs says which settings differ.",
+		],
+		changed: [
+			"**The GPU's passes are timed only as often as something reads the times**: every frame for a benchmark, a profile or the Performance panel's graph, one frame in four for Automatic quality, and otherwise not at all. Reading the times makes Safari wait for the GPU.",
+			"**The frame's depth stays on the GPU's chip** when nothing reads it after the glow, instead of being written out and read back each frame.",
+			"**Light objects cost less on the light grid**: under Soft, each pixel reads one grid texture rather than two; the grid's cells inside parts and lights too faint to show are not worked out; and its wrapping costs no division (WebGPU and WebGL2).",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.110",
 		date: "2026-11-25",
 		headline: "WebGL2 catches up with WebGPU's savings: half-size lights and particles, and the reflection grid.",

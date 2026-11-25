@@ -3,7 +3,7 @@
  *
  * Roswaal's own issues, on the public repository: reports and the code they are
  * about live in one place. (They went to a separate `roswaal-feedback`
- * repository until 1.1.0, which is archived.)
+ * repository until 1.0.3, which is archived.)
  *
  * One constant, because two footers carry it: the published site's, rendered in
  * `html.ts`, and the editor's own docs window, in `PageEditor.tsx`. They build

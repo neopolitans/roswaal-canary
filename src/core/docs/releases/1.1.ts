@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.109",
+		date: "2026-11-25",
+		headline: "A canary's version stays inside its box on the landing page.",
+		fixed: [
+			"**A long version no longer breaks out of its box** beside the name on the landing page, as a canary's did in Safari on an iPad. Where there is no room beside the name, it goes under it.",
+		],
+		affects: ["docs"],
+	},
+	{
 		version: "1.1.0-canary.108",
 		date: "2026-11-25",
 		headline: "The light object grid on WebGL2, with Soft.",

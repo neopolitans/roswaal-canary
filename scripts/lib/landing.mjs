@@ -236,8 +236,10 @@ body.roswaal-landing {
 .landing-banner.canary .banner-name .name-mark .logo-mark { color: var(--warning); }
 /* The version sits on the name's baseline and stands as tall as its
    lowercase letters, so it reads as part of the wordmark rather than a label
-   floating beside it. The offset is the h1's descent at line-height 1. */
-.banner-name { display: flex; align-items: flex-end; gap: 14px 16px; }
+   floating beside it. The offset is the h1's descent at line-height 1.
+   The box is one line tall, so the version never breaks (Safari broke a
+   canary's at its hyphen); without the room, it goes under the name. */
+.banner-name { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 16px; }
 .banner-name h1 { font-size: 64px; line-height: 1; margin: 0; letter-spacing: -0.02em; font-weight: 700; }
 .banner-name .tag {
   box-sizing: border-box; height: 0.5em; margin-bottom: 0.21em;
@@ -245,7 +247,7 @@ body.roswaal-landing {
   font-size: 64px; /* sizes the box in the name's em; the text is set below */
   border: 1px solid var(--border); border-radius: 5px; padding: 0 0.16em; color: var(--accent);
 }
-.banner-name .tag-text { font-size: 15px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.banner-name .tag-text { white-space: nowrap; font-size: 15px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .banner-name .tag { font-size: 44px; } .banner-name .tag-text { font-size: 12px; } }
 .banner-sub { font-size: 24px; margin: 10px 0 0; color: var(--fg-muted, var(--fg)); }
 .banner-graph svg { display: block; width: 100%; height: auto; margin-left: auto; }

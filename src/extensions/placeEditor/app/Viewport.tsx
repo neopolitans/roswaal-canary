@@ -8,6 +8,7 @@
 
 import {
 	Fragment,
+	type KeyboardEvent as ReactKeyboardEvent,
 	type ReactNode,
 	type PointerEvent as ReactPointerEvent,
 	useEffect,
@@ -22,7 +23,7 @@ import { PanelHead } from "../../../app/Cards.jsx";
 import { cx } from "../../../app/cx.js";
 import { Icon, type IconName } from "../../../app/icons.jsx";
 import { Ident, SectionHead, useFold } from "../../../app/PanelParts.jsx";
-import { InfoButton } from "../../../app/settingsParts.jsx";
+import { InfoButton, matches } from "../../../app/settingsParts.jsx";
 import { useWorkspaceControls } from "../../../app/Workspace.jsx";
 import { errorMessage } from "../../../core/errorMessage.js";
 import { startBenchmark } from "../benchmarkEvent.js";
@@ -1719,12 +1720,125 @@ export function PerformancePanel({ controller }: { controller: ViewportControlle
 	);
 }
 
+/** The panel's tabs: what is kept, the frame's switches, and the tools for looking into it. */
+const RENDER_TABS = [
+	["picture", "Picture"],
+	["switches", "Switches"],
+	["inspect", "Inspect"],
+] as const;
+type RenderTab = (typeof RENDER_TABS)[number][0];
+
 /**
- * Rendering: how the viewer draws the place, as engines' editors offer. A
- * switch for each part of the picture, the ten steps a frame is built in to
- * walk through, presets for speed and for looking into one feature, and the
- * views of what it costs. The view's alone, for the session; the place is
- * untouched.
+ * How far the panel is pulled up where it is a sheet from the bottom, on a
+ * touch screen held upright: enough for what changed last, half the screen,
+ * or nearly all of it.
+ */
+const DETENTS = ["peek", "half", "full"] as const;
+type Detent = (typeof DETENTS)[number];
+const DETENT_NAMES: Record<Detent, string> = { peek: "Peek", half: "Half", full: "Full" };
+
+const PANEL_PLACE_KEY = "roswaal.renderPanel";
+
+/** The tab and the sheet's height this viewer left the panel at, where the browser keeps them. */
+function readPanelPlace(): { tab: RenderTab; detent: Detent } {
+	try {
+		const saved = JSON.parse(localStorage.getItem(PANEL_PLACE_KEY) ?? "{}");
+		return {
+			tab: RENDER_TABS.some(([id]) => id === saved.tab) ? saved.tab : "picture",
+			detent: DETENTS.includes(saved.detent) ? saved.detent : "half",
+		};
+	} catch {
+		return { tab: "picture", detent: "half" };
+	}
+}
+
+function keepPanelPlace(place: { tab: RenderTab; detent: Detent }): void {
+	try {
+		localStorage.setItem(PANEL_PLACE_KEY, JSON.stringify(place));
+	} catch {
+		// A browser that keeps nothing opens the panel at Picture, half up.
+	}
+}
+
+type FeatureInfo = (typeof FEATURE_GROUPS)[number]["features"][number];
+
+/**
+ * One switch: its name, its "i" and what it waits for, the switch itself. The
+ * row is the switch's label, so a tap anywhere on it flips it; a tap on the
+ * "i" opens what it does instead.
+ */
+function SwitchRow({
+	info,
+	id,
+	features,
+	base,
+	saying,
+	onTell,
+	onSet,
+}: {
+	info: FeatureInfo;
+	/** Unique in the page: the switch's own, and the prefix of what describes it. */
+	id: string;
+	features: RenderFeatures;
+	base: { label: string; features: RenderFeatures };
+	saying: boolean;
+	onTell: () => void;
+	onSet: (on: boolean) => void;
+}) {
+	const needs =
+		info.parent && !featureOn(features, info.parent) ? FEATURE_LABEL.get(info.parent) : undefined;
+	return (
+		<>
+			<label
+				htmlFor={id}
+				className={cx(
+					"render-switch",
+					info.parent && "render-switch-under",
+					!featureOn(features, info.key) && features[info.key] && "render-switch-held",
+				)}
+			>
+				<span className="render-switch-name">
+					{features[info.key] !== base.features[info.key] && (
+						<span className="render-switch-changed" title={`Changed from ${base.label}`} />
+					)}
+					{info.label}
+					<InfoButton label={info.label} open={saying} controls={`${id}-what`} onToggle={onTell} />
+					{needs && (
+						<span className="render-switch-needs" id={`${id}-needs`}>
+							Needs {needs}
+						</span>
+					)}
+				</span>
+				<input
+					id={id}
+					type="checkbox"
+					role="switch"
+					checked={features[info.key]}
+					disabled={needs !== undefined}
+					aria-label={info.label}
+					aria-describedby={
+						[needs ? `${id}-needs` : "", saying ? `${id}-what` : ""].filter(Boolean).join(" ") ||
+						undefined
+					}
+					onChange={(e) => onSet(e.target.checked)}
+				/>
+			</label>
+			{saying && (
+				<p className="render-detail render-detail-switch" id={`${id}-what`}>
+					{info.hint}
+				</p>
+			)}
+		</>
+	);
+}
+
+/**
+ * Rendering: how the viewer draws the place, as engines' editors offer. Three
+ * tabs: Picture, what is kept in Settings too; Switches, a switch for each
+ * part of the picture and the ten steps a frame is built in; Inspect, the
+ * tools for looking into a frame. On a touch screen held upright it is a sheet
+ * from the bottom, pulled to Peek, Half or Full, so the view stays in sight.
+ * The view's alone, for the session; the place is untouched.
  */
 export function RenderPanel({
 	controller,
@@ -1761,6 +1875,20 @@ export function RenderPanel({
 			if (!next.delete(key)) next.add(key);
 			return next;
 		});
+	// The three switches changed last, newest first: what Peek offers.
+	const [recent, setRecent] = useState<readonly string[]>([]);
+	const flip = (key: keyof RenderFeatures, on: boolean) => {
+		setFeatures({ ...features, [key]: on });
+		setRecent((was) => [key, ...was.filter((k) => k !== key)].slice(0, 3));
+	};
+	const [query, setQuery] = useState("");
+	const [place, setPlace] = useState(readPanelPlace);
+	const movePlace = (next: Partial<typeof place>) =>
+		setPlace((was) => {
+			const moved = { ...was, ...next };
+			keepPanelPlace(moved);
+			return moved;
+		});
 	const uid = useId();
 	const [toolsOpen, toggleTools] = useFold(false);
 	const base = presetById(render.preset);
@@ -1787,240 +1915,328 @@ export function RenderPanel({
 			apply({ ...render, mode: "lit", preset: p.id, features: p.features });
 		} else apply({ ...render, mode: id as RenderMode });
 	};
+	const row = (info: FeatureInfo, prefix: string) => (
+		<SwitchRow
+			key={info.key}
+			info={info}
+			id={`${uid}-${prefix}-${info.key}`}
+			features={features}
+			base={base}
+			saying={told.has(`${prefix}:${info.key}`)}
+			onTell={() => tell(`${prefix}:${info.key}`)}
+			onSet={(on) => flip(info.key, on)}
+		/>
+	);
+
+	// The sheet's grab: dragged up or down a height, or tapped to the next one.
+	const grabFrom = useRef<number | null>(null);
+	const towards = (by: 1 | -1) => {
+		const at = DETENTS.indexOf(place.detent);
+		movePlace({ detent: DETENTS[Math.max(0, Math.min(DETENTS.length - 1, at + by))] });
+	};
+	const endGrab = (y: number) => {
+		const from = grabFrom.current;
+		grabFrom.current = null;
+		if (from === null) return;
+		const moved = y - from;
+		if (moved < -24) towards(1);
+		else if (moved > 24) towards(-1);
+		else
+			movePlace({
+				detent: place.detent === "full" ? "peek" : DETENTS[DETENTS.indexOf(place.detent) + 1],
+			});
+	};
+
+	const tabKeys = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+		const at = RENDER_TABS.findIndex(([id]) => id === place.tab);
+		const by = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+		if (by === 0) return;
+		e.preventDefault();
+		const next = RENDER_TABS[(at + by + RENDER_TABS.length) % RENDER_TABS.length][0];
+		movePlace({ tab: next });
+		document.getElementById(`${uid}-tab-${next}`)?.focus();
+	};
+
+	const searching = query.trim() !== "";
+	const found = (info: FeatureInfo) => !searching || matches(query, info.label, info.hint);
+	const recentInfos = recent
+		.map((key) =>
+			FEATURE_GROUPS.flatMap((group) => group.features).find((info) => info.key === key),
+		)
+		.filter((info): info is FeatureInfo => info !== undefined);
+
 	return (
-		<div className="place-properties render-panel">
+		<div className="place-properties render-panel" data-detent={place.detent}>
+			<button
+				type="button"
+				className="render-grab"
+				aria-label={`Panel height: ${DETENT_NAMES[place.detent]}. Drag or tap to change it.`}
+				onPointerDown={(e) => {
+					grabFrom.current = e.clientY;
+					e.currentTarget.setPointerCapture(e.pointerId);
+				}}
+				onPointerUp={(e) => endGrab(e.clientY)}
+				onPointerCancel={() => {
+					grabFrom.current = null;
+				}}
+				onKeyDown={(e) => {
+					if (e.key === "ArrowUp") towards(1);
+					else if (e.key === "ArrowDown") towards(-1);
+					else return;
+					e.preventDefault();
+				}}
+				onClick={(e) => {
+					// A keyboard's Enter or Space; a pointer's tap is handled as it lifts.
+					if (e.detail === 0)
+						movePlace({
+							detent: place.detent === "full" ? "peek" : DETENTS[DETENTS.indexOf(place.detent) + 1],
+						});
+				}}
+			>
+				<span aria-hidden="true" />
+			</button>
 			<PanelHead sub="The view only" />
-			<div className="place-props">
+			<div className="render-recent" aria-label="Changed last">
+				<span className="render-recent-title">Changed last</span>
+				{recentInfos.length === 0 ? (
+					<span className="render-setting-line">The switches you change show here.</span>
+				) : (
+					recentInfos.map((info) => row(info, "recent"))
+				)}
+			</div>
+			<div
+				className="segmented render-tabs"
+				role="tablist"
+				aria-label="Rendering"
+				onKeyDown={tabKeys}
+			>
+				{RENDER_TABS.map(([id, label]) => (
+					<button
+						key={id}
+						type="button"
+						role="tab"
+						id={`${uid}-tab-${id}`}
+						aria-selected={place.tab === id}
+						aria-controls={`${uid}-body-${id}`}
+						tabIndex={place.tab === id ? 0 : -1}
+						className={place.tab === id ? "on" : ""}
+						onClick={() => movePlace({ tab: id })}
+					>
+						{label}
+					</button>
+				))}
+			</div>
+			<div
+				className="place-props render-tab-body"
+				role="tabpanel"
+				id={`${uid}-body-${place.tab}`}
+				aria-labelledby={`${uid}-tab-${place.tab}`}
+			>
 				<div className="place-groups">
-					<div className="place-group">
-						<PanelSetting label="View" words={VIEW_WORDS}>
-							<select
-								className="tb place-edit-field"
-								aria-label="View"
-								value={
-									render.mode !== "lit"
-										? `mode:${render.mode}`
-										: presetLevel(base.id) === null
-											? `preset:${base.id}`
-											: quality.auto
-												? "quality:auto"
-												: `quality:${presetLevel(base.id)}`
-								}
-								onChange={(e) => pick(e.target.value)}
-							>
-								<optgroup label="Quality">
-									<option value="quality:auto">
-										{quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"}
-									</option>
-									{QUALITY_PRESETS.map((p) => (
-										<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
-											{p.label}
-										</option>
-									))}
-								</optgroup>
-								<optgroup label="Final output, one feature">
-									{DEBUG_PRESETS.map((p) => (
-										<option key={p.id} value={`preset:${p.id}`}>
-											{p.label}
-										</option>
-									))}
-								</optgroup>
-								<optgroup label="Inspect, as the switches leave it">
-									{RENDER_MODES.filter(([mode]) => mode !== "lit").map(([mode, label]) => (
-										<option key={mode} value={`mode:${mode}`}>
-											{label}
-										</option>
-									))}
-								</optgroup>
-							</select>
-						</PanelSetting>
-						<PanelSetting settingKey="antialiasing">
-							<select
-								className="tb place-edit-field"
-								aria-label="Antialiasing"
-								value={antialias}
-								onChange={(e) => onAntialias(e.target.value)}
-							>
-								<option value="auto">
-									{`Automatic · ${antialiasInfo(qualityLevel(quality.level).antialias).label}`}
-								</option>
-								{VIEWPORT_ANTIALIAS.filter((a) => {
-									const mode = antialiasSetting(a.value);
-									return mode !== undefined && antialiasModes.includes(mode);
-								}).map((a) => (
-									<option key={a.value} value={a.value}>
-										{a.label}
-									</option>
-								))}
-							</select>
-						</PanelSetting>
-						{scene && onScene && <SceneSettings scene={scene} onScene={onScene} />}
-						{render.mode === "lit" && (
-							<div className="render-step">
-								<button
-									type="button"
-									className="tb icon-only"
-									aria-label="Previous step"
-									disabled={step === 0 && exact}
-									onClick={() => toStep(exact ? step - 1 : step)}
-								>
-									<Icon name="chevron" size={14} className="render-step-back" />
-								</button>
-								<span className="render-step-where" aria-live="polite">
-									<span className="render-step-count">
-										{step === 0 ? "Before step 1" : `Step ${step} of ${RENDER_STEPS.length}`}
-									</span>
-									<span className="render-step-name">
-										{step === 0 ? "Nothing lit" : RENDER_STEPS[step - 1][0]}
-										{exact ? "" : ", and more"}
-									</span>
-								</span>
-								<button
-									type="button"
-									className="tb icon-only"
-									aria-label="Next step"
-									disabled={step === RENDER_STEPS.length}
-									onClick={() => toStep(step + 1)}
-								>
-									<Icon name="chevron" size={14} className="render-step-on" />
-								</button>
-							</div>
-						)}
-						{heatStyled(render.mode) && (
-							<label className="render-heat">
-								<span>Heat</span>
+					{place.tab === "picture" && (
+						<div className="place-group">
+							<PanelSetting label="View" words={VIEW_WORDS}>
 								<select
 									className="tb place-edit-field"
-									value={render.heat}
-									onChange={(e) => apply({ ...render, heat: e.target.value as RenderHeat })}
+									aria-label="View"
+									value={
+										render.mode !== "lit"
+											? `mode:${render.mode}`
+											: presetLevel(base.id) === null
+												? `preset:${base.id}`
+												: quality.auto
+													? "quality:auto"
+													: `quality:${presetLevel(base.id)}`
+									}
+									onChange={(e) => pick(e.target.value)}
 								>
-									{RENDER_HEAT.map(([value, label]) => (
-										<option key={value} value={value}>
-											{label}
+									<optgroup label="Quality">
+										<option value="quality:auto">
+											{quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"}
+										</option>
+										{QUALITY_PRESETS.map((p) => (
+											<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
+												{p.label}
+											</option>
+										))}
+									</optgroup>
+									<optgroup label="Final output, one feature">
+										{DEBUG_PRESETS.map((p) => (
+											<option key={p.id} value={`preset:${p.id}`}>
+												{p.label}
+											</option>
+										))}
+									</optgroup>
+									<optgroup label="Inspect, as the switches leave it">
+										{RENDER_MODES.filter(([mode]) => mode !== "lit").map(([mode, label]) => (
+											<option key={mode} value={`mode:${mode}`}>
+												{label}
+											</option>
+										))}
+									</optgroup>
+								</select>
+							</PanelSetting>
+							{heatStyled(render.mode) && (
+								<label className="render-heat">
+									<span>Heat</span>
+									<select
+										className="tb place-edit-field"
+										value={render.heat}
+										onChange={(e) => apply({ ...render, heat: e.target.value as RenderHeat })}
+									>
+										{RENDER_HEAT.map(([value, label]) => (
+											<option key={value} value={value}>
+												{label}
+											</option>
+										))}
+									</select>
+								</label>
+							)}
+							{legend && (
+								<div
+									className={cx(
+										"render-legend",
+										render.mode === "lights" && "render-legend-lights",
+									)}
+								>
+									<span className="render-legend-bar" />
+									<span className="render-legend-ends">
+										<span>{legend[0]}</span>
+										<span>{legend[1]}</span>
+									</span>
+								</div>
+							)}
+							{viewLegend && <ViewLegend legend={viewLegend} />}
+							<PanelSetting settingKey="antialiasing">
+								<select
+									className="tb place-edit-field"
+									aria-label="Antialiasing"
+									value={antialias}
+									onChange={(e) => onAntialias(e.target.value)}
+								>
+									<option value="auto">
+										{`Automatic · ${antialiasInfo(qualityLevel(quality.level).antialias).label}`}
+									</option>
+									{VIEWPORT_ANTIALIAS.filter((a) => {
+										const mode = antialiasSetting(a.value);
+										return mode !== undefined && antialiasModes.includes(mode);
+									}).map((a) => (
+										<option key={a.value} value={a.value}>
+											{a.label}
 										</option>
 									))}
 								</select>
-							</label>
-						)}
-						{legend && (
-							<div
-								className={cx("render-legend", render.mode === "lights" && "render-legend-lights")}
-							>
-								<span className="render-legend-bar" />
-								<span className="render-legend-ends">
-									<span>{legend[0]}</span>
-									<span>{legend[1]}</span>
-								</span>
-							</div>
-						)}
-						{viewLegend && <ViewLegend legend={viewLegend} />}
-					</div>
-					{FEATURE_GROUPS.map((group) => {
-						const open = !shut.has(group.title);
-						const on = group.features.filter((i) => featureOn(features, i.key)).length;
-						return (
-							<div className="place-group" key={group.title}>
-								<SectionHead
-									title={group.title}
-									open={open}
-									onToggle={() =>
-										setShut((was) => {
-											const next = new Set(was);
-											if (!next.delete(group.title)) next.add(group.title);
-											return next;
-										})
-									}
-								>
-									<span className="render-group-count">
-										{on}/{group.features.length}
-									</span>
-								</SectionHead>
-								{open &&
-									group.features.map((info) => {
-										const id = `${uid}-${info.key}`;
-										const needs =
-											info.parent && !featureOn(features, info.parent)
-												? FEATURE_LABEL.get(info.parent)
-												: undefined;
-										const saying = told.has(info.key);
-										return (
-											<Fragment key={info.key}>
-												<label
-													htmlFor={id}
-													className={cx(
-														"render-switch",
-														info.parent && "render-switch-under",
-														!featureOn(features, info.key) &&
-															features[info.key] &&
-															"render-switch-held",
-													)}
-												>
-													<span className="render-switch-name">
-														{features[info.key] !== base.features[info.key] && (
-															<span
-																className="render-switch-changed"
-																title={`Changed from ${base.label}`}
-															/>
-														)}
-														{info.label}
-														<InfoButton
-															label={info.label}
-															open={saying}
-															controls={`${id}-what`}
-															onToggle={() => tell(info.key)}
-														/>
-														{needs && (
-															<span className="render-switch-needs" id={`${id}-needs`}>
-																Needs {needs}
-															</span>
-														)}
-													</span>
-													<input
-														id={id}
-														type="checkbox"
-														role="switch"
-														checked={features[info.key]}
-														disabled={needs !== undefined}
-														aria-label={info.label}
-														aria-describedby={
-															[needs ? `${id}-needs` : "", saying ? `${id}-what` : ""]
-																.filter(Boolean)
-																.join(" ") || undefined
-														}
-														onChange={(e) =>
-															setFeatures({ ...features, [info.key]: e.target.checked })
-														}
-													/>
-												</label>
-												{saying && (
-													<p className="render-detail render-detail-switch" id={`${id}-what`}>
-														{info.hint}
-													</p>
-												)}
-											</Fragment>
-										);
-									})}
-							</div>
-						);
-					})}
-					<GizmoSection controller={controller} />
-					<div className="place-group">
-						<SectionHead title="Tools" open={toolsOpen} onToggle={toggleTools} />
-						{toolsOpen && (
-							<>
-								<RenderToolSwitch
-									label="Light ranges"
-									on={render.lightRanges}
-									onChange={(lightRanges) => apply({ ...render, lightRanges })}
+							</PanelSetting>
+							{scene && onScene && <SceneSettings scene={scene} onScene={onScene} />}
+						</div>
+					)}
+					{place.tab === "switches" && (
+						<>
+							<div className="place-group">
+								<input
+									type="search"
+									className="tb place-edit-field render-search"
+									placeholder={`Search ${FEATURE_LABEL.size} switches`}
+									aria-label="Search the switches"
+									value={query}
+									onChange={(e) => setQuery(e.target.value)}
 								/>
-								<RenderToolSwitch
-									label="Freeze shadows"
-									on={render.freezeShadows}
-									onChange={(freezeShadows) => apply({ ...render, freezeShadows })}
-								/>
-							</>
-						)}
-					</div>
+								{render.mode === "lit" && !searching && (
+									<div className="render-step">
+										<button
+											type="button"
+											className="tb icon-only"
+											aria-label="Previous step"
+											disabled={step === 0 && exact}
+											onClick={() => toStep(exact ? step - 1 : step)}
+										>
+											<Icon name="chevron" size={14} className="render-step-back" />
+										</button>
+										<span className="render-step-where" aria-live="polite">
+											<span className="render-step-count">
+												{step === 0 ? "Before step 1" : `Step ${step} of ${RENDER_STEPS.length}`}
+											</span>
+											<span className="render-step-name">
+												{step === 0 ? "Nothing lit" : RENDER_STEPS[step - 1][0]}
+												{exact ? "" : ", and more"}
+											</span>
+										</span>
+										<button
+											type="button"
+											className="tb icon-only"
+											aria-label="Next step"
+											disabled={step === RENDER_STEPS.length}
+											onClick={() => toStep(step + 1)}
+										>
+											<Icon name="chevron" size={14} className="render-step-on" />
+										</button>
+									</div>
+								)}
+							</div>
+							{FEATURE_GROUPS.map((group) => {
+								const shown = group.features.filter(found);
+								if (shown.length === 0) return null;
+								const open = searching || !shut.has(group.title);
+								const on = group.features.filter((i) => featureOn(features, i.key)).length;
+								const allOn = group.features.every((i) => features[i.key]);
+								return (
+									<div className="place-group" key={group.title}>
+										<SectionHead
+											title={group.title}
+											open={open}
+											onToggle={() =>
+												setShut((was) => {
+													const next = new Set(was);
+													if (!next.delete(group.title)) next.add(group.title);
+													return next;
+												})
+											}
+										>
+											<button
+												type="button"
+												className="render-group-count"
+												aria-label={`${group.title}: ${on} of ${group.features.length} on. Turn them all ${allOn ? "off" : "on"}.`}
+												onClick={() =>
+													setFeatures({
+														...features,
+														...Object.fromEntries(group.features.map((i) => [i.key, !allOn])),
+													})
+												}
+											>
+												{on}/{group.features.length}
+											</button>
+										</SectionHead>
+										{open && shown.map((info) => row(info, "switch"))}
+									</div>
+								);
+							})}
+							{searching && FEATURE_GROUPS.every((group) => !group.features.some(found)) && (
+								<p className="render-setting-line render-none">No switch matches.</p>
+							)}
+						</>
+					)}
+					{place.tab === "inspect" && (
+						<>
+							<GizmoSection controller={controller} />
+							<div className="place-group">
+								<SectionHead title="Tools" open={toolsOpen} onToggle={toggleTools} />
+								{toolsOpen && (
+									<>
+										<RenderToolSwitch
+											label="Light ranges"
+											on={render.lightRanges}
+											onChange={(lightRanges) => apply({ ...render, lightRanges })}
+										/>
+										<RenderToolSwitch
+											label="Freeze shadows"
+											on={render.freezeShadows}
+											onChange={(freezeShadows) => apply({ ...render, freezeShadows })}
+										/>
+									</>
+								)}
+							</div>
+						</>
+					)}
 				</div>
 			</div>
 			<div className="render-foot">

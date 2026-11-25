@@ -265,7 +265,11 @@ export function placeEditorRenderingPage(): DocPage {
 				t: "p",
 				text:
 					"The **Rendering** panel, in the **Panels** menu while the place is in front, changes " +
-					"how the view draws the place, never the place.",
+					"how the view draws the place, never the place. **Picture** holds the quality level and " +
+					"the Scene view settings, **Switches** a switch for each part of the picture, and " +
+					"**Inspect** the tools for looking into a frame. On a touch screen held upright it comes " +
+					"up from the bottom: drag or tap its grab for **Peek**, which shows the switches changed " +
+					"last, **Half** or **Full**.",
 			},
 			{ t: "h", level: 2, text: "Quality levels" },
 			{
@@ -295,7 +299,9 @@ export function placeEditorRenderingPage(): DocPage {
 					"Every part of the picture has its own switch, in groups: surfaces, light, shadows, " +
 					"lights, glow and effects, sky and air, post effects. A switch changes only itself. A " +
 					"dot marks one changed from the preset; **Reset** puts them back. The **i** beside a " +
-					"switch or a setting opens what it does in full; a switch held off by another says which.",
+					"switch or a setting opens what it does in full; a switch held off by another says which. " +
+					"The search finds a switch by its name or what it does, and a group's count turns the " +
+					"whole group on or off.",
 			},
 			{ t: "h", level: 2, text: "View" },
 			{

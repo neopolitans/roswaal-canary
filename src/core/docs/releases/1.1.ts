@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.74",
+		date: "2026-11-25",
+		headline: "The Rendering panel has three tabs, and comes up from the bottom on a tablet held upright.",
+		added: [
+			"**Picture, Switches and Inspect tabs in the Rendering panel**: the quality level and Scene view settings, the switches and steps, and the gizmos and tools.",
+			"**On a touch screen held upright, the Rendering panel is a sheet from the bottom**, so the view stays in sight above it. Drag or tap its grab for Peek, which shows the three switches changed last, Half or Full.",
+			"**A search over the switches**, by name or by what they do, and **a group's count turns the whole group on or off**.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.73",
 		date: "2026-11-25",
 		headline: "The Rendering panel fits a finger, and says what each switch does on a tap.",

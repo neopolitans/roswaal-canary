@@ -271,7 +271,11 @@ export function placeEditorRenderingPage(): DocPage {
 					"up from the bottom: drag or tap its grab for **Peek**, which shows the switches changed " +
 					"last, **Half** or **Full**. Inspect's **Start log** lists each step of opening a " +
 					"place with its time; if the page froze or was closed before a start finished, the next " +
-					"start says which step it stopped after. **Copy log** puts it in a report.",
+					"start says which step it stopped after. **Automatic's choices** shows what the view " +
+					"measured and chose in this place, with the times behind each; **This frame** its time " +
+					"stage by stage; **Compare**, held, turns back the switch changed last until it is let go; " +
+					"**Views** shows the wireframe and heatmaps as tiles; and **Copy report** copies the " +
+					"version, the browser, the choices and the start log for an issue.",
 			},
 			{ t: "h", level: 2, text: "Quality levels" },
 			{

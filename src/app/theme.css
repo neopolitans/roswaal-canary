@@ -24175,6 +24175,98 @@ textarea.tb:where(:disabled) {
 	}
 }
 
+/* Automatic's choices, in Inspect: a choice, what it came to, and why. */
+.auto-lines {
+	display: grid;
+	gap: 6px;
+	margin: 2px 6px 6px;
+}
+
+.auto-lines > div {
+	display: grid;
+	grid-template-columns: 7.5em minmax(0, 1fr);
+	gap: 8px;
+}
+
+.auto-lines dt {
+	color: var(--fg-muted);
+	font-size: var(--text-sm);
+}
+
+.auto-lines dd {
+	display: grid;
+	gap: 1px;
+	margin: 0;
+	color: var(--fg);
+	font-size: var(--text-md);
+}
+
+/* Hold to compare: pressed and held, never a long-press menu or a selection. */
+.render-hold {
+	width: calc(100% - 12px);
+	margin: 4px 6px 2px;
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+	touch-action: none;
+}
+
+.render-hold:active:not(:disabled) {
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.render-hold-line {
+	display: block;
+	padding: 0 6px 4px;
+}
+
+/* The views as tiles: two across, one tap each. */
+.view-tiles {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 4px;
+	margin: 4px 6px;
+}
+
+.view-tiles button {
+	min-height: 32px;
+	padding: 4px 6px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-input);
+	color: var(--fg);
+	font: inherit;
+	font-size: var(--text-sm);
+	text-align: left;
+	cursor: pointer;
+}
+
+.view-tiles button.on {
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 20%, transparent);
+	color: var(--accent);
+}
+
+.view-tiles button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.render-report {
+	display: grid;
+	gap: 4px;
+	padding: 8px 6px;
+}
+
+@media (pointer: coarse) {
+	.render-hold,
+	.view-tiles button,
+	.render-report .tb {
+		min-height: 44px;
+	}
+}
+
 /* Picture, Switches and Inspect, under the panel's head. */
 .render-tabs {
 	display: flex;

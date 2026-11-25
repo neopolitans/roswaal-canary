@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.45.0",
+	version: "0.46.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.46.0",
+			roswaal: "1.1.0-canary.76",
+			date: "2026-11-25",
+			text: "Inspect: Automatic's choices (controller.automaticChoices, automaticLines.ts), This frame (FrameGraph), hold to compare the last switch, view tiles with ModeLegends shared with Picture, and Copy report.",
+		},
 		{
 			version: "0.45.0",
 			roswaal: "1.1.0-canary.75",

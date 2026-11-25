@@ -33,6 +33,7 @@ import {
 import type { Station } from "../benchmark/stations.js";
 import { type AntialiasMode, antialiasInfo } from "./antialias.js";
 import { type AssetGaps, type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
+import type { AutomaticChoices } from "./automaticLines.js";
 import { boxAround } from "./box.js";
 import { DepthChoice, LampChoice, type LampResolution, lampMode } from "./depthChoice.js";
 import {
@@ -2987,6 +2988,32 @@ export class ViewportController {
 		if (!was) return;
 		this.view?.setRender(this.withSavings(this.state.render));
 		this.fit();
+	}
+
+	/**
+	 * What Automatic measured and chose in this place, for the Rendering
+	 * panel's Inspect tab: the renderer, the level, the depth path, light
+	 * objects' resolution and Dynamic, with the times behind them.
+	 */
+	automaticChoices(): AutomaticChoices {
+		const setting = this.options.lampResolution ?? "auto";
+		const features = this.withSavings(this.state.render).features;
+		return {
+			backend: this.view?.backend ?? null,
+			fellBackWhy: this.fellBackWhy,
+			quality: this.state.quality,
+			depth: this.view?.setDepthPath
+				? { chosen: this.depth.chosen, medians: this.depth.medians() }
+				: null,
+			lamps: {
+				setting,
+				lights: this.place?.lights?.length ?? 0,
+				mode: lampMode(setting, features.fullResLamps, this.lamps.chosen),
+				chosen: this.lamps.chosen,
+				medians: this.lamps.medians(),
+			},
+			dynamic: this.dynamicState(),
+		};
 	}
 
 	/** Where Dynamic and Dynamic optimization stand, for a benchmark station's report; null with both off. */

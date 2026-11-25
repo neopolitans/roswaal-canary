@@ -25,6 +25,7 @@ import { Icon, type IconName } from "../../../app/icons.jsx";
 import { Ident, SectionHead, useFold } from "../../../app/PanelParts.jsx";
 import { InfoButton, matches } from "../../../app/settingsParts.jsx";
 import { useWorkspaceControls } from "../../../app/Workspace.jsx";
+import { VERSION } from "../../../cli/version.js";
 import { errorMessage } from "../../../core/errorMessage.js";
 import { startBenchmark } from "../benchmarkEvent.js";
 import {
@@ -41,6 +42,7 @@ import {
 	type ViewportFrameRate,
 	type ViewportRenderer,
 } from "../settings.js";
+import { AutomaticSection, automaticText } from "./AutomaticSection.jsx";
 import { GizmoSection } from "./GizmoSection.jsx";
 import { StartLogSection } from "./StartLogSection.jsx";
 import { placeScene, type SceneSince } from "./sceneApi.js";
@@ -96,6 +98,7 @@ import {
 	upToStep,
 } from "./viewport/renderFeatures.js";
 import { readSpeed, SPEED_MAX, SPEED_MIN, SPEED_STEP, speedText } from "./viewport/speed.js";
+import { startRuns, startText } from "./viewport/startLog.js";
 import {
 	heatStyled,
 	RENDER_HEAT,
@@ -1861,8 +1864,6 @@ export function RenderPanel({
 }) {
 	const { render, quality, antialiasModes } = useViewport(controller);
 	const apply = (next: RenderSettings) => controller.setRender(next);
-	const legend = HEAT_LEGEND[render.mode];
-	const viewLegend = renderLegend(render.mode);
 	const { features } = render;
 	// See, the preset and the switches are independent: a switch changes only itself.
 	const setFeatures = (next: RenderFeatures) => apply({ ...render, features: next });
@@ -1883,6 +1884,8 @@ export function RenderPanel({
 		setRecent((was) => [key, ...was.filter((k) => k !== key)].slice(0, 3));
 	};
 	const [query, setQuery] = useState("");
+	// Hold to compare: the switch changed last, turned back while the button is held.
+	const holding = useRef(false);
 	const [place, setPlace] = useState(readPanelPlace);
 	const movePlace = (next: Partial<typeof place>) =>
 		setPlace((was) => {
@@ -1965,6 +1968,13 @@ export function RenderPanel({
 			FEATURE_GROUPS.flatMap((group) => group.features).find((info) => info.key === key),
 		)
 		.filter((info): info is FeatureInfo => info !== undefined);
+	const last = recentInfos[0];
+	const hold = (on: boolean) => {
+		if (!last || holding.current === on) return;
+		holding.current = on;
+		// Flipped and flipped back; never added to the switches changed last.
+		setFeatures({ ...features, [last.key]: !features[last.key] });
+	};
 
 	return (
 		<div className="place-properties render-panel" data-detent={place.detent}>
@@ -2077,37 +2087,7 @@ export function RenderPanel({
 									</optgroup>
 								</select>
 							</PanelSetting>
-							{heatStyled(render.mode) && (
-								<label className="render-heat">
-									<span>Heat</span>
-									<select
-										className="tb place-edit-field"
-										value={render.heat}
-										onChange={(e) => apply({ ...render, heat: e.target.value as RenderHeat })}
-									>
-										{RENDER_HEAT.map(([value, label]) => (
-											<option key={value} value={value}>
-												{label}
-											</option>
-										))}
-									</select>
-								</label>
-							)}
-							{legend && (
-								<div
-									className={cx(
-										"render-legend",
-										render.mode === "lights" && "render-legend-lights",
-									)}
-								>
-									<span className="render-legend-bar" />
-									<span className="render-legend-ends">
-										<span>{legend[0]}</span>
-										<span>{legend[1]}</span>
-									</span>
-								</div>
-							)}
-							{viewLegend && <ViewLegend legend={viewLegend} />}
+							<ModeLegends render={render} apply={apply} />
 							<PanelSetting settingKey="antialiasing">
 								<select
 									className="tb place-edit-field"
@@ -2219,6 +2199,36 @@ export function RenderPanel({
 					{place.tab === "inspect" && (
 						<>
 							<StartLogSection />
+							<AutomaticSection controller={controller} />
+							<FrameSection controller={controller} />
+							<div className="place-group">
+								<SectionHead title="Compare" />
+								<button
+									type="button"
+									className="tb render-hold"
+									disabled={!last}
+									onPointerDown={() => hold(true)}
+									onPointerUp={() => hold(false)}
+									onPointerLeave={() => hold(false)}
+									onPointerCancel={() => hold(false)}
+									onContextMenu={(e) => e.preventDefault()}
+									onKeyDown={(e) => {
+										if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+											e.preventDefault();
+											hold(true);
+										}
+									}}
+									onKeyUp={() => hold(false)}
+								>
+									{last ? `Hold to compare: ${last.label}` : "Hold to compare"}
+								</button>
+								<span className="render-setting-line render-hold-line">
+									{last
+										? "While held, the switch changed last is turned back; let go to return."
+										: "Change a switch first: holding turns it back while held."}
+								</span>
+							</div>
+							<ViewTiles render={render} apply={apply} />
 							<GizmoSection controller={controller} />
 							<div className="place-group">
 								<SectionHead title="Tools" open={toolsOpen} onToggle={toggleTools} />
@@ -2237,6 +2247,7 @@ export function RenderPanel({
 									</>
 								)}
 							</div>
+							<CopyReport controller={controller} />
 						</>
 					)}
 				</div>
@@ -2252,6 +2263,134 @@ export function RenderPanel({
 					Reset
 				</button>
 			</div>
+		</div>
+	);
+}
+
+/** A view's heat style and what its colours mean: under View in Picture, and under Views in Inspect. */
+function ModeLegends({
+	render,
+	apply,
+}: {
+	render: RenderSettings;
+	apply: (next: RenderSettings) => void;
+}) {
+	const legend = HEAT_LEGEND[render.mode];
+	const viewLegend = renderLegend(render.mode);
+	return (
+		<>
+			{heatStyled(render.mode) && (
+				<label className="render-heat">
+					<span>Heat</span>
+					<select
+						className="tb place-edit-field"
+						value={render.heat}
+						onChange={(e) => apply({ ...render, heat: e.target.value as RenderHeat })}
+					>
+						{RENDER_HEAT.map(([value, label]) => (
+							<option key={value} value={value}>
+								{label}
+							</option>
+						))}
+					</select>
+				</label>
+			)}
+			{legend && (
+				<div className={cx("render-legend", render.mode === "lights" && "render-legend-lights")}>
+					<span className="render-legend-bar" />
+					<span className="render-legend-ends">
+						<span>{legend[0]}</span>
+						<span>{legend[1]}</span>
+					</span>
+				</div>
+			)}
+			{viewLegend && <ViewLegend legend={viewLegend} />}
+		</>
+	);
+}
+
+/** The views as tiles, one tap each, with what the colours of the one shown mean. */
+function ViewTiles({
+	render,
+	apply,
+}: {
+	render: RenderSettings;
+	apply: (next: RenderSettings) => void;
+}) {
+	const [open, toggle] = useFold(true);
+	return (
+		<div className="place-group">
+			<SectionHead title="Views" open={open} onToggle={toggle} />
+			{open && (
+				<>
+					<div className="view-tiles">
+						{RENDER_MODES.map(([mode, label]) => (
+							<button
+								key={mode}
+								type="button"
+								className={render.mode === mode ? "on" : ""}
+								aria-pressed={render.mode === mode}
+								onClick={() => apply({ ...render, mode })}
+							>
+								{label}
+							</button>
+						))}
+					</div>
+					<ModeLegends render={render} apply={apply} />
+				</>
+			)}
+		</div>
+	);
+}
+
+/** This frame's time, stage by stage where the browser times them: Performance's graph. */
+function FrameSection({ controller }: { controller: ViewportController }) {
+	const [open, toggle] = useFold(true);
+	const [timed, setTimed] = useState(false);
+	useEffect(() => {
+		const read = () => setTimed(!!controller.renderStats()?.gpu);
+		read();
+		const every = setInterval(read, 1000);
+		return () => clearInterval(every);
+	}, [controller]);
+	return (
+		<div className="place-group">
+			<SectionHead title="This frame" open={open} onToggle={toggle} />
+			{open && <FrameGraph controller={controller} timed={timed} />}
+		</div>
+	);
+}
+
+/** The version, the browser, Automatic's choices and the start log, as text for a report. */
+function CopyReport({ controller }: { controller: ViewportController }) {
+	const [said, setSaid] = useState("");
+	const copy = async () => {
+		const text = [
+			`Roswaal ${VERSION}`,
+			typeof navigator === "undefined" ? "" : navigator.userAgent,
+			"",
+			"Automatic's choices",
+			automaticText(controller),
+			"",
+			"Start log",
+			...startRuns().map(startText),
+		].join("\n");
+		try {
+			await navigator.clipboard.writeText(text);
+			setSaid("Copied");
+		} catch {
+			setSaid("Copy failed");
+		}
+		setTimeout(() => setSaid(""), 2000);
+	};
+	return (
+		<div className="place-group render-report">
+			<button type="button" className="tb" onClick={copy}>
+				{said || "Copy report"}
+			</button>
+			<span className="render-setting-line">
+				The version, the browser, Automatic's choices and the start log, to paste into an issue.
+			</span>
 		</div>
 	);
 }

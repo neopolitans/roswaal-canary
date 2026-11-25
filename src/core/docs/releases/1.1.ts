@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.76",
+		date: "2026-11-25",
+		headline: "Inspect shows what Automatic chose, this frame's time, and a held comparison.",
+		added: [
+			"**Automatic's choices, in the Rendering panel's Inspect tab**: the renderer, the quality level, the depth path, light objects' resolution and Dynamic, each with what was measured in this place.",
+			"**Hold to compare**: pressed and held, it turns back the switch changed last, and lets it go on release.",
+			"**This frame**, the frame's time stage by stage, and **Views** as tiles with their legends, in Inspect.",
+			"**Copy report**: the version, the browser, Automatic's choices and the start log, to paste into an issue.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.75",
 		date: "2026-11-25",
 		headline: "A start log says where opening a place stopped, after a freeze.",

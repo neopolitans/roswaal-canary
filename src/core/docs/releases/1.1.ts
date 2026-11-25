@@ -9,6 +9,20 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.114",
+		date: "2026-11-25",
+		headline: "WebGL2 leaves out what is switched off, and draws the place without copying it.",
+		changed: [
+			"**WebGL2 builds its shaders for the switches that are on**, as WebGPU does, leaving out the code for what is off: the light grid, lights in a place with none, and the rest. Until one is built, the shader for every switch draws.",
+			"**WebGL2 without multisampling draws the place straight into the texture the glow and post effects read**, rather than copying it there once or twice a frame, and leaves depth it no longer reads in the GPU's tile memory.",
+			"**A benchmark run records the depth path and light objects resolution Automatic measured**, which it runs with too, so a comparison says when they differ.",
+		],
+		fixed: [
+			"**Hovering a reroute knot shows the ring that moves it**, not the middle that starts a wire.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.113",
 		date: "2026-11-25",
 		headline: "Knots and wildcard pins are easier to drag a wire from, and show where.",

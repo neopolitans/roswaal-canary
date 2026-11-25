@@ -2633,7 +2633,14 @@ export class ViewportController {
 			...(passes > 1 ? { passes } : {}),
 			...(busy ? { measure: "busy" as const } : {}),
 			...(switchedOff.length > 0 ? { switchedOff } : {}),
-			settings: benchmarkSettings(options),
+			settings: {
+				...benchmarkSettings(options),
+				// What Automatic measured and chose, which a run draws with too.
+				...(this.view.setDepthPath
+					? { "Depth path, measured": this.depth.chosen ?? "full (not yet measured)" }
+					: {}),
+				"Light objects, measured": this.lamps.chosen ?? "not yet measured",
+			},
 			...(run.ab
 				? {
 						ab: { feature: run.ab, label: FEATURES.find((f) => f.key === run.ab)?.label ?? run.ab },

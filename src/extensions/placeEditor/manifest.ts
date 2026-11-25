@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.74.0",
+	version: "0.75.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.75.0",
+			roswaal: "1.1.0-canary.114",
+			date: "2026-11-25",
+			text: "WebGL2 builds its main program per set of switches (a FEATURES define with LIT_GRID; mainFor, linked in the background) and draws the generic one meanwhile; unsampled, the place is drawn straight into frameTex; the scene target's depth is invalidated once read; use() looks uniforms up once. Benchmark results record the measured depth path and light objects resolution.",
+		},
 		{
 			version: "0.74.0",
 			roswaal: "1.1.0-canary.112",

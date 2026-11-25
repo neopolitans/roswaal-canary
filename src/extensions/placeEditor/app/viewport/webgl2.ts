@@ -145,14 +145,27 @@ import {
 	type ViewRenderer,
 } from "./view.js";
 
+/**
+ * A bit of the main program's FEATURES that no Rendering panel switch has:
+ * whether the light grid is read (see WebGl2View.mainFor).
+ */
+const LIT_GRID = 1 << 28;
+
 const COMMON = `
 uniform vec4 L[11];
 // The Rendering panel: its view (RENDER_MODE_CODE), its switches' bits
 // (renderFeatures.ts), whether the heatmaps are linear, and the view drawn
 // over it: see renderDebug.
 uniform vec4 R;
-// Whether a switch is on, as WebGpuView's has.
-bool has(int bit) { return (int(R.y + 0.5) & bit) != 0; }
+// Whether a switch is on, as WebGpuView's has: its bit in R.y, and in
+// FEATURES, the program's own define where it is built for one set of
+// switches (see WebGl2View.mainFor). Then what is off is known when it
+// compiles and its code is left out, which on a tablet's GPU costs even when
+// its branches are not taken. Every bit otherwise.
+#ifndef FEATURES
+#define FEATURES 0x7fffffff
+#endif
+bool has(int bit) { return (FEATURES & bit) != 0 && (int(R.y + 0.5) & bit) != 0; }
 // As WebGpuView's sunLight.
 vec3 sunLight(vec3 dir) {
 	float a = dot(dir, L[0].xyz);
@@ -710,7 +723,7 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		vec3 lampShine = vec3(0.0);
 		vec3 lamps = vec3(0.0);
 		if (has(${FEATURE_BIT.pointLights} | ${FEATURE_BIT.spotLights} | ${FEATURE_BIT.surfaceLights})) {
-			if (gridInfo.x > 0.5) lamps = gridLamps(world, n, v, a.y * 2.0, lampShine);
+			if ((FEATURES & ${LIT_GRID}) != 0 && gridInfo.x > 0.5) lamps = gridLamps(world, n, v, a.y * 2.0, lampShine);
 			else lamps = lampsAt(world, n, v, a.y * 2.0, lampShine);
 		}
 		if (!has(${FEATURE_BIT.lightHighlights})) lampShine = vec3(0.0);
@@ -1640,7 +1653,17 @@ export class WebGl2View implements ViewRenderer {
 	private farDepth = 1;
 	/** The solid parts' depth alone, before they are lit: only where depth is reversed. */
 	private pre: Program | null = null;
+	/** The main program for the frame being drawn: built for its switches once linked (mainFor). */
 	private main!: Program;
+	/** The main program for every switch, drawing while one built for the switches links. */
+	private generic!: Program;
+	/** The main program for each set of switches, once linked; and those still linking. */
+	private mains = new Map<number, Program>();
+	private mainsBuilding = new Set<number>();
+	/** The material table as last sent, for a main program linked after it. */
+	private lookBlock: Float32Array | null = null;
+	/** Whether the last frame drew with the program for every switch, its own still linking. */
+	genericFrame = false;
 	private reflProgram!: Program;
 	private reflCube: WebGLTexture | null = null;
 	private reflFbo: WebGLFramebuffer | null = null;
@@ -1901,6 +1924,12 @@ export class WebGl2View implements ViewRenderer {
 	private sceneDepth!: WebGLRenderbuffer;
 	private frameFbo!: WebGLFramebuffer;
 	private frameTex!: WebGLTexture;
+	/**
+	 * Unsampled, the place is drawn straight into frameTex, which is what the
+	 * glow and the composite read: the full-size copy from the scene's target
+	 * into it, once or twice a frame, is not made.
+	 */
+	private sceneIsFrame = false;
 	/** The frame blurred across, on its way to being blurred down: a BlurEffect. */
 	private acrossFbo!: WebGLFramebuffer;
 	private acrossTex!: WebGLTexture;
@@ -2819,7 +2848,8 @@ export class WebGl2View implements ViewRenderer {
 			this.farDepth = 0;
 		}
 		await this.linkAhead(progress);
-		this.main = this.link(VS, FS);
+		this.generic = this.link(VS, FS);
+		this.main = this.generic;
 		// The reflection cube's faces: the same shading, without reading the cube.
 		this.reflProgram = this.link(
 			VS,
@@ -3598,8 +3628,16 @@ export class WebGl2View implements ViewRenderer {
 		// The place drawn off screen, antialiased, and resolved into a texture
 		// for the glow to be added to.
 		const samples = this.drawnSamples();
+		this.sceneIsFrame = samples === 0;
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.sceneColour);
-		gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, this.width, this.height);
+		// Unused while the place is drawn into frameTex: a pixel, not a frame.
+		gl.renderbufferStorageMultisample(
+			gl.RENDERBUFFER,
+			samples,
+			gl.RGBA8,
+			this.sceneIsFrame ? 1 : this.width,
+			this.sceneIsFrame ? 1 : this.height,
+		);
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.sceneDepth);
 		gl.renderbufferStorageMultisample(
 			gl.RENDERBUFFER,
@@ -3640,6 +3678,16 @@ export class WebGl2View implements ViewRenderer {
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.frameFbo);
 		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.frameTex, 0);
+		if (this.sceneIsFrame) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneFbo);
+			gl.framebufferTexture2D(
+				gl.FRAMEBUFFER,
+				gl.COLOR_ATTACHMENT0,
+				gl.TEXTURE_2D,
+				this.frameTex,
+				0,
+			);
+		}
 		gl.bindTexture(gl.TEXTURE_2D, this.acrossTex);
 		gl.texImage2D(
 			gl.TEXTURE_2D,
@@ -3737,11 +3785,20 @@ export class WebGl2View implements ViewRenderer {
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		gl.disable(gl.DEPTH_TEST);
-		// Resolved into the frame's texture, which the place is drawn into after.
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sceneFbo);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.frameFbo);
-		const { width: fw, height: fh } = this;
-		gl.blitFramebuffer(0, 0, fw, fh, 0, 0, fw, fh, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+		// Its depth is not read again: left in the GPU's tile memory, not
+		// written out, on a tile-based GPU (Apple's) where it is drawn.
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneFbo);
+		gl.invalidateFramebuffer(gl.FRAMEBUFFER, [gl.DEPTH_ATTACHMENT]);
+		// Resolved into the frame's texture, which the place is drawn into
+		// after; drawn there already where it is not sampled.
+		if (!this.sceneIsFrame) {
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sceneFbo);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.frameFbo);
+			const { width: fw, height: fh } = this;
+			gl.blitFramebuffer(0, 0, fw, fh, 0, 0, fw, fh, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sceneFbo);
+			gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0]);
+		}
 		gl.viewport(0, 0, w, h);
 		gl.activeTexture(gl.TEXTURE0);
 		gl.useProgram(this.downProgram.program);
@@ -3833,9 +3890,19 @@ export class WebGl2View implements ViewRenderer {
 	): void {
 		const gl = this.gl;
 		const { width: w, height: h } = this;
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sceneFbo);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.frameFbo);
-		gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+		// The place's depth is not read again (the marks test against the
+		// canvas's own, drawn again for them): not written out. Then its colour
+		// into the frame's texture, where it is not drawn there already.
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneFbo);
+		gl.invalidateFramebuffer(gl.FRAMEBUFFER, [gl.DEPTH_ATTACHMENT]);
+		if (!this.sceneIsFrame) {
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sceneFbo);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.frameFbo);
+			gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sceneFbo);
+			gl.invalidateFramebuffer(gl.READ_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0]);
+		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.frameFbo);
 		if (glowing) this.blurGlow(this.bloomAll);
 		gl.viewport(0, 0, w, h);
 		gl.disable(gl.DEPTH_TEST);
@@ -4210,6 +4277,22 @@ export class WebGl2View implements ViewRenderer {
 		};
 	}
 
+	/** A uniform's location in a program, looked up once: use() sets these each frame. */
+	private locations = new Map<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
+	private loc(program: WebGLProgram, name: string): WebGLUniformLocation | null {
+		let names = this.locations.get(program);
+		if (!names) {
+			names = new Map();
+			this.locations.set(program, names);
+		}
+		let at = names.get(name);
+		if (at === undefined) {
+			at = this.gl.getUniformLocation(program, name);
+			names.set(name, at);
+		}
+		return at;
+	}
+
 	/** Opens the near maps just drawn, as WebGpuView's openNearMaps. */
 	private openNearMaps(): void {
 		const gl = this.gl;
@@ -4295,8 +4378,8 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniformMatrix4fv(prog.viewProj, false, vp);
 		const debug = renderDebug(this.render);
 		debug[1] = this.lampBit(debug[1]);
-		gl.uniform4fv(gl.getUniformLocation(prog.program, "R"), debug);
-		gl.uniform1f(gl.getUniformLocation(prog.program, "logFar"), 1 / Math.log2(camera.far + 1));
+		gl.uniform4fv(this.loc(prog.program, "R"), debug);
+		gl.uniform1f(this.loc(prog.program, "logFar"), 1 / Math.log2(camera.far + 1));
 		// The sky's rays through the usual projection's far plane, the same in either depth.
 		if (prog.invViewProj)
 			gl.uniformMatrix4fv(prog.invViewProj, false, invert(reversed ? projection(false) : vp));
@@ -4322,12 +4405,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniform1f(prog.outline, outline ? 1 : 0);
 		const band = this.outlineWidth * (this.width / (this.canvas?.clientWidth || this.width));
 		gl.uniform3f(prog.screen, this.width, this.height, band);
-		gl.uniform3f(
-			gl.getUniformLocation(prog.program, "eye"),
-			camera.eye[0],
-			camera.eye[1],
-			camera.eye[2],
-		);
+		gl.uniform3f(this.loc(prog.program, "eye"), camera.eye[0], camera.eye[1], camera.eye[2]);
 		gl.uniform3f(prog.select, SELECT[0], SELECT[1], SELECT[2]);
 		gl.uniform1f(prog.handle, 0);
 		const grid = this.gridAt(prog.program);
@@ -4341,9 +4419,9 @@ export class WebGl2View implements ViewRenderer {
 		if (prog === this.main) {
 			this.lampUnits(prog);
 			const c = this.reflCentre ?? camera.eye;
-			gl.uniform3f(gl.getUniformLocation(prog.program, "reflCentre"), c[0], c[1], c[2]);
+			gl.uniform3f(this.loc(prog.program, "reflCentre"), c[0], c[1], c[2]);
 		}
-		const reflSky = gl.getUniformLocation(prog.program, "reflSkyOn");
+		const reflSky = this.loc(prog.program, "reflSkyOn");
 		if (reflSky)
 			gl.uniform1f(
 				reflSky,
@@ -4562,6 +4640,9 @@ export class WebGl2View implements ViewRenderer {
 	draw(camera: Camera, still = false): void {
 		const gl = this.gl;
 		const started = performance.now();
+		// The main program built for this frame's switches, once linked: see mainFor.
+		this.main = this.mainFor(this.litBits());
+		this.genericFrame = this.main === this.generic;
 		// Still-frame TAA, as WebGpuView's.
 		const aaPass = antialiasInfo(this.antialias).pass;
 		this.taaWeight = 1;
@@ -4735,9 +4816,87 @@ export class WebGl2View implements ViewRenderer {
 		return Math.min(this.samples, this.gl.getParameter(this.gl.MAX_SAMPLES) as number);
 	}
 
-	/** WebGL2's programs are built once, for every switch. */
-	pipelinesReady(): Promise<void> {
-		return Promise.resolve();
+	/** Resolves once the main program for the switches as they are now has linked: see mainFor. */
+	async pipelinesReady(): Promise<void> {
+		const bits = this.litBits();
+		while (this.mainFor(bits) === this.generic && this.mainsBuilding.has(bits))
+			await new Promise((resolve) => setTimeout(resolve, 8));
+	}
+
+	/**
+	 * The switches' bits the main program is built for: those on as the frame
+	 * draws them (R.y, with the half-size lamp pass's), less the lights' where
+	 * the place has none, and the grid's where it is read.
+	 */
+	private litBits(): number {
+		let bits = this.lampBit(featureBits(this.render.features));
+		if (!this.hasLights)
+			bits &= ~(
+				FEATURE_BIT.pointLights |
+				FEATURE_BIT.spotLights |
+				FEATURE_BIT.surfaceLights |
+				FEATURE_BIT.lightHighlights
+			);
+		if (this.gridCell !== null) bits |= LIT_GRID;
+		return bits;
+	}
+
+	/**
+	 * The main program built for these switches, as WebGpuView's litFor: once
+	 * linked, a set kept; meanwhile the one for every switch draws, and the
+	 * view is drawn again once it has. Linked in the background where the
+	 * browser can (KHR_parallel_shader_compile); otherwise here, once a set.
+	 */
+	private mainFor(bits: number): Program {
+		const built = this.mains.get(bits);
+		if (built) return built;
+		const gl = this.gl;
+		const fs = FS.replace("#version 300 es\n", `#version 300 es\n#define FEATURES ${bits}\n`);
+		const parallel = gl.getExtension("KHR_parallel_shader_compile") as {
+			COMPLETION_STATUS_KHR: number;
+		} | null;
+		if (parallel && !this.mainsBuilding.has(bits)) {
+			this.mainsBuilding.add(bits);
+			const program = gl.createProgram()!;
+			const shaders = (
+				[
+					[gl.VERTEX_SHADER, VS],
+					[gl.FRAGMENT_SHADER, fs],
+				] as const
+			).map(([type, src]) => {
+				const s = gl.createShader(type)!;
+				gl.shaderSource(s, this.source(src));
+				gl.compileShader(s);
+				gl.attachShader(program, s);
+				return s;
+			});
+			gl.linkProgram(program);
+			this.linked.set(`${VS}\0${fs}`, { program, shaders });
+			const look = () => {
+				if (gl.isContextLost()) return;
+				if (gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) this.onRedraw?.();
+				else setTimeout(look, 16);
+			};
+			setTimeout(look, 16);
+		}
+		const job = this.linked.get(`${VS}\0${fs}`);
+		if (parallel && job && !gl.getProgramParameter(job.program, parallel.COMPLETION_STATUS_KHR))
+			return this.generic;
+		this.mainsBuilding.delete(bits);
+		let prog = this.generic;
+		try {
+			prog = this.link(VS, fs);
+			gl.useProgram(prog.program);
+			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), this.lookBlock ?? materialBlock());
+			gl.uniform1i(gl.getUniformLocation(prog.program, "looks"), 1);
+			gl.uniform1i(gl.getUniformLocation(prog.program, "reflSky"), 4);
+			gl.uniform1i(gl.getUniformLocation(prog.program, "reflCube"), 14);
+		} catch (err) {
+			// Not built: the program for every switch goes on drawing these.
+			console.warn("Place Editor: the main program for these switches did not build.", err);
+		}
+		this.mains.set(bits, prog);
+		return prog;
 	}
 
 	/** A profile's probe: WebGL2 has the empty frame; the parts' depth alone is WebGPU's. */
@@ -5259,7 +5418,8 @@ export class WebGl2View implements ViewRenderer {
 	private sendLookBlock(): void {
 		const gl = this.gl;
 		const block = materialBlock(this.loaded, (layer) => this.lookSlots.get(layer) ?? 0);
-		for (const prog of [this.main, this.glowProgram, this.reflProgram]) {
+		this.lookBlock = block;
+		for (const prog of [this.generic, ...this.mains.values(), this.glowProgram, this.reflProgram]) {
 			if (!prog) continue;
 			gl.useProgram(prog.program);
 			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), block);

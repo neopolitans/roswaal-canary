@@ -9644,6 +9644,10 @@ button.tb.icon-only.on {
 	inset: -10px;
 	border-radius: 50%;
 	z-index: -1;
+	/* Shown on hover, below: still there to catch the pointer while hidden. */
+	background: var(--fg);
+	opacity: 0;
+	transition: opacity 0.12s;
 }
 
 .canvas.canvas--wiring .node.node--reroute .pin::after {
@@ -9684,11 +9688,10 @@ button.tb.icon-only.on {
 	inset: -9px -12px -9px -9px;
 }
 
-/* Where a drag from a wildcard pin or a knot starts, shown behind the dot
-   while the pointer is over it (or a finger on it): the grab area itself, in
-   the pin's colour. Not while a wire is in flight, when every pin widens. */
-.node .pin.pin--wild::before,
-.node.node--reroute .pin::before {
+/* Where a drag from a wildcard pin starts, shown behind the dot while the
+   pointer is over it (or a finger on it): the grab area itself, in the pin's
+   colour. Not while a wire is in flight, when every pin widens. */
+.node .pin.pin--wild::before {
 	content: "";
 	position: absolute;
 	border-radius: 999px;
@@ -9706,20 +9709,25 @@ button.tb.icon-only.on {
 	inset: -3px -12px -3px -3px;
 }
 
-.node.node--reroute .pin::before {
-	inset: -4px;
-}
 
 @media (hover: hover) {
-	.canvas:not(.canvas--wiring) .node .pin.pin--wild:hover::before,
-	.canvas:not(.canvas--wiring) .node.node--reroute .pin:hover::before {
+	.canvas:not(.canvas--wiring) .node .pin.pin--wild:hover::before {
 		opacity: 0.22;
+	}
+
+	/* A knot hovered shows its ring, the area that moves it: the middle, a
+	   wire's, is the dot. */
+	.canvas:not(.canvas--wiring) .node.node--reroute:hover::before {
+		opacity: 0.16;
 	}
 }
 
-.canvas:not(.canvas--wiring) .node .pin.pin--wild:active::before,
-.canvas:not(.canvas--wiring) .node.node--reroute .pin:active::before {
+.canvas:not(.canvas--wiring) .node .pin.pin--wild:active::before {
 	opacity: 0.3;
+}
+
+.canvas:not(.canvas--wiring) .node.node--reroute:active::before {
+	opacity: 0.24;
 }
 
 .node.node--reroute.node--selected {

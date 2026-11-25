@@ -129,17 +129,19 @@ export const VIEWPORT_SKY_RESOLUTIONS = [
 	{ value: "quarter", label: "Quarter" },
 ] as const;
 
-/** Still frames: the effects' frames with the camera still, at the display's rate or half it. */
+/** Particle animation rate: the effects' frames with the camera still, every display frame or fewer. */
 export const VIEWPORT_STILL_FRAMES = [
 	{ value: "auto", label: "Automatic" },
-	{ value: "full", label: "Full rate" },
-	{ value: "half", label: "Half rate" },
+	{ value: "full", label: "Full" },
+	{ value: "half", label: "Half" },
+	{ value: "third", label: "Third" },
+	{ value: "quarter", label: "Quarter" },
 ] as const;
 
-/** Reflection updates: the place round the camera drawn following it, or kept on a grid. */
+/** Surface reflection accuracy: the place round the camera drawn following it, or kept on a grid. */
 export const VIEWPORT_REFLECTION_UPDATES = [
 	{ value: "auto", label: "Automatic" },
-	{ value: "follow", label: "Following" },
+	{ value: "follow", label: "Exact" },
 	{ value: "32", label: "32-stud grid" },
 	{ value: "64", label: "64-stud grid" },
 	{ value: "128", label: "128-stud grid" },
@@ -188,8 +190,8 @@ export interface PlaceEditorSettings {
 	lampResolution: "auto" | "full" | "half" | "quarter";
 	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
 	reflectionUpdates: "auto" | "follow" | "32" | "64" | "128";
-	/** Effects' frames with the camera still at half rate: see view.ts's stillFramesHalved. */
-	stillFrames: "auto" | "full" | "half";
+	/** Effects' frames with the camera still, every display frame or fewer: see view.ts's stillSkip. */
+	stillFrames: "auto" | "full" | "half" | "third" | "quarter";
 	/** The sky's share at fewer pixels: see the controller's skyModeNow. */
 	skyResolution: "full" | "half" | "quarter";
 	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
@@ -326,20 +328,20 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 			},
 			{
 				key: "stillFrames",
-				title: "Effects while still",
+				title: "Particle animation rate",
 				help: "How often moving effects are drawn with the camera still.",
 				detail:
-					"Each of those frames draws the whole place. Half rate draws every other one, so a tablet rests between them and stays cool; moving the camera draws at full rate at once. Automatic halves them on a touch screen.",
+					"Particles and beams, drawn every display frame (Full), or one in two, three or four. Each of those frames draws the whole place, so fewer let a tablet rest between them and stay cool; moving the camera draws at full rate at once. Automatic is Half on a touch screen and Full on a computer.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_STILL_FRAMES,
 			},
 			{
 				key: "reflectionUpdates",
-				title: "Reflection updates",
-				help: "When the place round the camera is drawn for reflections.",
+				title: "Surface reflection accuracy",
+				help: "How closely reflections follow the camera.",
 				detail:
-					"Following draws it again each 8 studs the camera moves: exact, and a cost while it moves. A grid draws one the first time the camera enters each cell of 32, 64 or 128 studs, keeps the last eight and reads the one for where the camera is: nothing to redraw once drawn, less exact. Automatic follows on a computer and keeps a 64-stud grid on a touch screen. WebGPU.",
+					"Exact draws the place round the camera again each 8 studs it moves: a cost while it moves. A grid draws one the first time the camera enters each cell of 32, 64 or 128 studs, keeps the last eight and reads the one for where the camera is: nothing to redraw once drawn, less exact. Automatic follows on a computer and keeps a 64-stud grid on a touch screen. WebGPU.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_REFLECTION_UPDATES,

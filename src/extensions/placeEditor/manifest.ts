@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.55.0",
+	version: "0.56.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.56.0",
+			roswaal: "1.1.0-canary.89",
+			date: "2026-11-25",
+			text: "stillFrames titled Particle animation rate, with third and quarter (stillSkip in view.ts replaces stillFramesHalved and STILL_SKIP); reflectionUpdates titled Surface reflection accuracy, follow labelled Exact. Keys unchanged.",
+		},
 		{
 			version: "0.55.0",
 			roswaal: "1.1.0-canary.88",

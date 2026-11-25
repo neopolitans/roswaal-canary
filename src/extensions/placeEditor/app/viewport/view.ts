@@ -904,21 +904,20 @@ export function reflectionGrid(setting: string | undefined, touch: boolean): num
 }
 
 /**
- * Whether frames drawn only for the view's own animation (moving particles
- * and beams, a still frame's antialiasing settling), the camera and the
- * place still, come at half the display's rate. Each draws the whole place:
- * at the full rate a tablet drew without rest while nothing but the effects
- * moved, grew hot and slowed its GPU within a minute. Automatic halves them
- * on a touch screen.
+ * How many display frames go by before each frame drawn only for the view's
+ * own animation (moving particles and beams, a still frame's antialiasing
+ * settling), the camera and the place still: Particle animation rate. Each
+ * draws the whole place: at the full rate a tablet drew without rest while
+ * nothing but the effects moved, grew hot and slowed its GPU within a
+ * minute. Automatic is Half on a touch screen, Full on a computer.
  */
-export function stillFramesHalved(setting: string | undefined, touch: boolean): boolean {
-	if (setting === "half") return true;
-	if (setting === "full") return false;
-	return touch;
+export function stillSkip(setting: string | undefined, touch: boolean): number {
+	if (setting === "full") return 0;
+	if (setting === "half") return 1;
+	if (setting === "third") return 2;
+	if (setting === "quarter") return 3;
+	return touch ? 1 : 0;
 }
-
-/** Display frames let go by before each still frame, halved: every other one is drawn. */
-export const STILL_SKIP = 1;
 export const PROBE_NEAR = 0.5;
 export const PROBE_FAR = 4000;
 

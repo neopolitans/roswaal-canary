@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.89",
+		date: "2026-11-25",
+		headline: "Particle animation rate, and Surface reflection accuracy.",
+		changed: [
+			"**Effects while still is now Particle animation rate**, with Third and Quarter beside Full and Half: particles and beams drawn every display frame, or one in two, three or four, while the camera is still. Automatic is Half on a touch screen and Full on a computer.",
+			"**Reflection updates is now Surface reflection accuracy**, and its Following choice is Exact.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.88",
 		date: "2026-11-25",
 		headline: "A tablet stays cooler: fewer frames with the camera still, and sun shadow maps drawn only when needed.",

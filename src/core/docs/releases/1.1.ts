@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.101",
+		date: "2026-11-25",
+		headline: "The 4-stud light grid no longer darkens MeshParts and turned parts.",
+		fixed: [
+			"**The 4-stud light object grid no longer darkens MeshParts and turned parts**: each part counted as the whole box round it, so a mesh's hull or a part turned at an angle darkened and blocked the air round it. Turned parts now count as what they fill, wedges, balls and cylinders by their shape, and MeshParts not at all.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.100",
 		date: "2026-11-25",
 		headline: "Parts block light objects on the light object grid, and darken the cells they fill.",

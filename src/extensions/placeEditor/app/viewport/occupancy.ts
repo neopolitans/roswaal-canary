@@ -31,29 +31,56 @@ const OCC_BUCKET = 64;
 /** A box reaching more buckets than this a side is kept apart, looked at for every region. */
 const OCC_WIDE = 4;
 
-/** A box in studs: its lowest and highest corner. */
+/**
+ * A box in studs: its lowest and highest corner; for a turned part, its
+ * axes as well (each the part's size along it), and how much of its box the
+ * part's shape fills.
+ */
 export interface OccBox {
 	min: readonly number[];
 	max: readonly number[];
+	/** The part's three axes as columns, each scaled to its size along it, nine numbers; none, square to the world. */
+	axes?: readonly number[];
+	/** The share of its box the shape fills: a wedge half. */
+	fill?: number;
 }
 
+/**
+ * How much of its box each kind of part fills. MeshParts are left out: a
+ * mesh's box is mostly air round it (a hull, a wing), and taken as solid
+ * it darkened and blocked every cell round a dropship (25 Nov 2026).
+ */
+const SHAPE_FILL: Partial<Record<(typeof SCENE_KINDS)[number], number>> = {
+	block: 1,
+	wedge: 0.5,
+	cornerWedge: 1 / 3,
+	cylinder: Math.PI / 4,
+	ball: Math.PI / 6,
+};
+
+/** Numbers kept a box: its lowest and highest corner, its middle, its axes inverted (rows), its fill, and whether it is turned. */
+const BOX = 6 + 3 + 9 + 2;
+
 export class Occupancy {
-	/** Each box's lowest and highest corner, six numbers a box. */
 	private boxes: number[] = [];
 	private buckets = new Map<string, number[]>();
 	/** Boxes too large to list by bucket. */
 	private wide: number[] = [];
 
-	/** The solid parts of a scene, each as its box. */
+	/** The solid parts of a scene, each as the box it is turned in, MeshParts aside. */
 	static fromScene(scene: PlaceScene): Occupancy {
 		const occ = new Occupancy();
 		const min = [0, 0, 0];
 		const max = [0, 0, 0];
+		const axes = new Array<number>(9);
 		for (const kind of SCENE_KINDS) {
+			const fill = SHAPE_FILL[kind];
+			if (fill === undefined) continue;
 			const { data, count } = scene.kinds[kind];
 			for (let r = 0; r < count; r++) {
 				const o = r * SCENE_STRIDE;
 				let ok = true;
+				for (let k = 0; k < 9; k++) axes[k] = data[o + k];
 				for (let a = 0; a < 3; a++) {
 					const half =
 						0.5 * (Math.abs(data[o + a]) + Math.abs(data[o + 3 + a]) + Math.abs(data[o + 6 + a]));
@@ -62,16 +89,28 @@ export class Occupancy {
 					min[a] = at - half;
 					max[a] = at + half;
 				}
-				if (ok) occ.add({ min, max });
+				if (ok) occ.add({ min, max, axes, fill });
 			}
 		}
 		return occ;
 	}
 
-	/** A box: each cell it reaches gains the share of it the box fills, to full at most. */
+	/** A box: each cell it reaches gains the share of it the part fills, to full at most. */
 	add(box: OccBox): void {
-		const i = this.boxes.length / 6;
-		this.boxes.push(...box.min, ...box.max);
+		const i = this.boxes.length / BOX;
+		const mid = [0, 1, 2].map((a) => (box.min[a] + box.max[a]) / 2);
+		const size = [0, 1, 2].map((a) => box.max[a] - box.min[a]);
+		const axes = box.axes ?? [size[0], 0, 0, 0, size[1], 0, 0, 0, size[2]];
+		// Square to the world: its share of each cell worked out exactly.
+		const turned = [1, 2, 3, 5, 6, 7].some((k) => Math.abs(axes[k]) > 1e-4);
+		this.boxes.push(
+			...box.min,
+			...box.max,
+			...mid,
+			...inverseRows(axes),
+			box.fill ?? 1,
+			turned ? 1 : 0,
+		);
 		const lo = box.min.map((v) => Math.floor(v / OCC_BUCKET));
 		const hi = box.max.map((v) => Math.floor(v / OCC_BUCKET));
 		if (hi.some((h, a) => h - lo[a] >= OCC_WIDE)) {
@@ -96,7 +135,8 @@ export class Occupancy {
 	/**
 	 * The cells from `min`, `count` along x, y and z, as bytes, x fastest,
 	 * then y, then z: as a 3D texture's rows and images take them. Each the
-	 * share of it the boxes reaching it fill, to full at most.
+	 * share of it the parts reaching it fill, to full at most: a part square
+	 * to the world exactly, a turned one by eight points in each cell.
 	 */
 	region(min: readonly number[], count: readonly number[]): Uint8Array {
 		const [nx, ny, nz] = count;
@@ -112,8 +152,9 @@ export class Occupancy {
 				for (let z = blo[2]; z <= bhi[2]; z++)
 					for (const i of this.buckets.get(`${x},${y},${z}`) ?? []) seen.add(i);
 		const b = this.boxes;
+		const quarter = OCC_CELL / 4;
 		for (const i of seen) {
-			const o = i * 6;
+			const o = i * BOX;
 			// The cells of the region the box reaches.
 			const c0 = [0, 1, 2].map((a) =>
 				Math.max(0, Math.floor((Math.max(b[o + a], lo[a]) - lo[a]) / OCC_CELL)),
@@ -122,23 +163,79 @@ export class Occupancy {
 				Math.min(count[a] - 1, Math.ceil((Math.min(b[o + 3 + a], hi[a]) - lo[a]) / OCC_CELL) - 1),
 			);
 			if (c1.some((v, a) => v < c0[a])) continue;
-			const share = (a: number, c: number) => {
-				const from = lo[a] + c * OCC_CELL;
-				return (
-					Math.max(0, Math.min(b[o + 3 + a], from + OCC_CELL) - Math.max(b[o + a], from)) / OCC_CELL
-				);
-			};
-			for (let z = c0[2]; z <= c1[2]; z++) {
-				const sz = share(2, z);
-				for (let y = c0[1]; y <= c1[1]; y++) {
-					const syz = sz * share(1, y);
-					const row = (z * ny + y) * nx;
-					for (let x = c0[0]; x <= c1[0]; x++) fill[row + x] += syz * share(0, x);
+			const shape = b[o + 18];
+			if (b[o + 19] < 0.5) {
+				const share = (a: number, c: number) => {
+					const from = lo[a] + c * OCC_CELL;
+					return (
+						Math.max(0, Math.min(b[o + 3 + a], from + OCC_CELL) - Math.max(b[o + a], from)) /
+						OCC_CELL
+					);
+				};
+				for (let z = c0[2]; z <= c1[2]; z++) {
+					const sz = share(2, z) * shape;
+					for (let y = c0[1]; y <= c1[1]; y++) {
+						const syz = sz * share(1, y);
+						const row = (z * ny + y) * nx;
+						for (let x = c0[0]; x <= c1[0]; x++) fill[row + x] += syz * share(0, x);
+					}
 				}
+				continue;
 			}
+			// Turned: eight points a cell, each inside the part's own box or not.
+			const inside = (px: number, py: number, pz: number) => {
+				const dx = px - b[o + 6];
+				const dy = py - b[o + 7];
+				const dz = pz - b[o + 8];
+				for (let r = 0; r < 3; r++) {
+					const q = o + 9 + r * 3;
+					if (Math.abs(b[q] * dx + b[q + 1] * dy + b[q + 2] * dz) > 0.5) return false;
+				}
+				return true;
+			};
+			for (let z = c0[2]; z <= c1[2]; z++)
+				for (let y = c0[1]; y <= c1[1]; y++) {
+					const row = (z * ny + y) * nx;
+					for (let x = c0[0]; x <= c1[0]; x++) {
+						const cx = lo[0] + x * OCC_CELL;
+						const cy = lo[1] + y * OCC_CELL;
+						const cz = lo[2] + z * OCC_CELL;
+						let n = 0;
+						for (let s = 0; s < 8; s++) {
+							const px = cx + quarter * (s & 1 ? 3 : 1);
+							const py = cy + quarter * (s & 2 ? 3 : 1);
+							const pz = cz + quarter * (s & 4 ? 3 : 1);
+							if (inside(px, py, pz)) n++;
+						}
+						fill[row + x] += (n / 8) * shape;
+					}
+				}
 		}
 		const out = new Uint8Array(fill.length);
 		for (let k = 0; k < fill.length; k++) out[k] = Math.round(Math.min(1, fill[k]) * 255);
 		return out;
 	}
+}
+
+/**
+ * A part's axes (columns c0, c1, c2, each scaled to its size along it)
+ * inverted, as rows: each row dotted with a point's offset from the middle
+ * gives where along that axis it is, -0.5 to 0.5 inside. The rows are the
+ * cross products of the other two columns over the determinant.
+ */
+function inverseRows(m: readonly number[]): number[] {
+	const c0 = [m[0], m[1], m[2]];
+	const c1 = [m[3], m[4], m[5]];
+	const c2 = [m[6], m[7], m[8]];
+	const cross = (u: number[], v: number[]) => [
+		u[1] * v[2] - u[2] * v[1],
+		u[2] * v[0] - u[0] * v[2],
+		u[0] * v[1] - u[1] * v[0],
+	];
+	const r0 = cross(c1, c2);
+	const r1 = cross(c2, c0);
+	const r2 = cross(c0, c1);
+	const det = c0[0] * r0[0] + c0[1] * r0[1] + c0[2] * r0[2];
+	if (Math.abs(det) < 1e-12) return [0, 0, 0, 0, 0, 0, 0, 0, 0];
+	return [...r0, ...r1, ...r2].map((v) => v / det);
 }

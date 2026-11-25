@@ -39,3 +39,28 @@ describe("what parts fill", () => {
 		expect([...bytes]).toEqual([0, 255, 0, 0]);
 	});
 });
+
+describe("what turned parts and shapes fill", () => {
+	it("is the part's own box, not the box round it", () => {
+		const occ = new Occupancy();
+		// A plank 16 long and 1 thick, turned 45 degrees about y, round (0, 2, 0).
+		const c = Math.SQRT1_2;
+		occ.add({
+			min: [-6.01, 0, -6.01],
+			max: [6.01, 4, 6.01],
+			axes: [16 * c, 0, -16 * c, 0, 4, 0, 1 * c, 0, 1 * c],
+		});
+		// On the line it runs along, x = -z: filled in part.
+		expect(occ.at(0, 0, -1)).toBeGreaterThan(0);
+		// Beside it, inside the box round it: empty.
+		expect(occ.at(0, 0, 0)).toBe(0);
+		// The box round it reaches the corner cell (-2, 0, -2), off the plank: empty.
+		expect(occ.at(-2, 0, -2)).toBe(0);
+	});
+
+	it("fills a wedge's box by half", () => {
+		const occ = new Occupancy();
+		occ.add({ min: [0, 0, 0], max: [4, 4, 4], fill: 0.5 });
+		expect(occ.at(0, 0, 0)).toBeCloseTo(0.5, 2);
+	});
+});

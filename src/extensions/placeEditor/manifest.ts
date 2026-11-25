@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.67.0",
+	version: "0.68.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.68.0",
+			roswaal: "1.1.0-canary.101",
+			date: "2026-11-25",
+			text: "Occupancy counts a turned part by eight points a cell inside its own box (inverseRows), scales by SHAPE_FILL (wedge 0.5, cornerWedge 1/3, cylinder pi/4, ball pi/6), and leaves MeshParts out.",
+		},
 		{
 			version: "0.67.0",
 			roswaal: "1.1.0-canary.100",

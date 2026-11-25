@@ -974,6 +974,78 @@ export function lightGridMove(
 	return { origin: at, fill };
 }
 
+/** Changed lights a refill covers cell by cell; past this many, the grid is filled again whole. */
+export const LIGHT_CHANGES_MOST = 16;
+
+/** A box in studs, its lowest corner and its highest. */
+export interface StudBox {
+	min: number[];
+	max: number[];
+}
+
+/**
+ * The lights that differ between two lists (LIGHT_STRIDE floats each, as
+ * sceneLights writes them), each as the box it reaches: added, removed or
+ * changed, a changed one both where it was and where it is. Null where there
+ * is no list to compare with, or more than LIGHT_CHANGES_MOST differ: the
+ * grid is filled again whole.
+ */
+export function lightChanges(
+	was: readonly number[] | undefined,
+	now: readonly number[] | undefined,
+): StudBox[] | null {
+	if (!was || !now) return null;
+	// Each light by what it is, counted, so two the same are told apart.
+	const tally = (
+		list: readonly number[],
+		by: number,
+		into: Map<string, { row: number[]; n: number }>,
+	) => {
+		for (let i = 0; i + LIGHT_STRIDE <= list.length; i += LIGHT_STRIDE) {
+			const row = list.slice(i, i + LIGHT_STRIDE);
+			const key = row.join(",");
+			const seen = into.get(key) ?? { row, n: 0 };
+			seen.n += by;
+			into.set(key, seen);
+		}
+	};
+	const lights = new Map<string, { row: number[]; n: number }>();
+	tally(was, -1, lights);
+	tally(now, 1, lights);
+	const boxes: StudBox[] = [];
+	for (const { row, n } of lights.values()) {
+		for (let k = 0; k < Math.abs(n); k++) {
+			if (boxes.length >= LIGHT_CHANGES_MOST) return null;
+			// Its Range, past a SurfaceLight's face's two half-sides.
+			const reach =
+				row[3] + Math.hypot(row[12], row[13], row[14]) + Math.hypot(row[16], row[17], row[18]);
+			boxes.push({
+				min: [row[0] - reach, row[1] - reach, row[2] - reach],
+				max: [row[0] + reach, row[1] + reach, row[2] + reach],
+			});
+		}
+	}
+	return boxes;
+}
+
+/**
+ * The cells of a light grid cascade, its lowest cell at `origin` and its
+ * cells `size` studs, that a changed light reaching `box` lights, a cell
+ * more each way: to fill again, in place of the whole cascade. Null where
+ * the light reaches none of it.
+ */
+export function lightGridDirty(
+	origin: readonly number[],
+	size: number,
+	box: StudBox,
+): LightGridRegion | null {
+	const n = LIGHT_GRID_CELLS;
+	const min = [0, 1, 2].map((a) => Math.max(origin[a], Math.floor(box.min[a] / size) - 1));
+	const max = [0, 1, 2].map((a) => Math.min(origin[a] + n - 1, Math.floor(box.max[a] / size) + 1));
+	if (min.some((m, a) => max[a] < m)) return null;
+	return { min, count: max.map((m, a) => m - min[a] + 1) };
+}
+
 /**
  * The samples a light grid cell of `size` studs averages, a side: each a
  * lighting cell (LIGHT_CELL, 16 studs) or less, so each reads only its own

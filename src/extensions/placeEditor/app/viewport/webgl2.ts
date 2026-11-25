@@ -89,10 +89,13 @@ import {
 	imageOrder,
 	imageQuads,
 	LIGHT_CELL,
+	LIGHT_CHANGES_MOST,
 	LIGHT_GRID_CASCADES,
 	LIGHT_GRID_CELLS,
 	LIGHTS_FULL,
 	type LightGridRegion,
+	lightChanges,
+	lightGridDirty,
 	lightGridMove,
 	METAL_DIFFUSE_CUT,
 	METAL_SEEN,
@@ -128,6 +131,7 @@ import {
 	SKY_SEEN_LEAST,
 	SKY_SOFT,
 	SKY_VIEWS,
+	type StudBox,
 	SUN_CASCADES,
 	SUN_GAIN,
 	sceneBox,
@@ -3153,6 +3157,15 @@ export class WebGl2View implements ViewRenderer {
 			this.gridOrigins[k] = move.origin;
 			for (const region of move.fill) jobs.push({ k, region });
 		}
+		// What changed lights reach, in the cascades as they now stand.
+		const dirty = stale ? [] : this.gridDirty;
+		this.gridDirty = [];
+		for (const box of dirty)
+			for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+				const at = this.gridOrigins[k];
+				const region = at ? lightGridDirty(at, cell * 2 ** k, box) : null;
+				if (region) jobs.push({ k, region });
+			}
 		if (jobs.length === 0) return false;
 		// What parts fill round the finest cascade, before its cells are filled.
 		const finest = this.gridOrigins[0];
@@ -3911,14 +3924,34 @@ export class WebGl2View implements ViewRenderer {
 	/** The place's lights and the grid that finds them, on units 7 to 9: see lightGrid. */
 	private lightTextures: WebGLTexture[] = [];
 
+	/** The lights the grid was last filled for, to tell which changed: see lightChanges. */
+	private lightsNow: readonly number[] | undefined;
+	/** What changed lights reach, to fill again before the next frame: see lightGridDirty. */
+	private gridDirty: StudBox[] = [];
+	/**
+	 * The lights changed: only the cells those that changed reach are filled
+	 * again, unless the grid is filled whole anyway or too many changed.
+	 */
+	private lightsChanged(lights: readonly number[] | undefined, had: boolean): void {
+		const changes = had && !this.gridStale ? lightChanges(this.lightsNow, lights) : null;
+		this.lightsNow = lights ? [...lights] : undefined;
+		if (changes && this.gridDirty.length + changes.length <= LIGHT_CHANGES_MOST)
+			this.gridDirty.push(...changes);
+		else {
+			this.gridStale = true;
+			this.gridDirty = [];
+		}
+	}
+
 	private setLights(lights: readonly number[] | undefined): void {
 		const gl = this.gl;
 		// The same lights again, after an edit elsewhere: the grid already holds them.
 		const key = fingerprint(lights);
 		if (key === this.lightKey && this.lightKey !== -1) return;
+		const had = this.hasLights && this.lightKey !== -1;
 		this.lightKey = key;
 		this.hasLights = !!lights && lights.length > 0;
-		this.gridStale = true;
+		this.lightsChanged(lights, had);
 		this.writeGridUniform();
 		for (const t of this.lightTextures) gl.deleteTexture(t);
 		const grid = lightGridFor(lights);
@@ -4083,12 +4116,9 @@ export class WebGl2View implements ViewRenderer {
 			this.redrawn.sunMaps++;
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this.sunMaps, 0, k);
 			gl.clear(gl.DEPTH_BUFFER_BIT);
-			gl.uniformMatrix4fv(
-				this.depthProgram.viewProj,
-				false,
-				step.block.subarray(k * 16, k * 16 + 16),
-			);
-			this.solids();
+			const viewProj = step.block.subarray(k * 16, k * 16 + 16);
+			gl.uniformMatrix4fv(this.depthProgram.viewProj, false, viewProj);
+			this.mapSolids(viewProj);
 		});
 		gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, null, 0, 0);
 		gl.enable(gl.CULL_FACE);
@@ -4125,12 +4155,9 @@ export class WebGl2View implements ViewRenderer {
 			if (!drawn) continue;
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this.skyMaps, 0, k);
 			gl.clear(gl.DEPTH_BUFFER_BIT);
-			gl.uniformMatrix4fv(
-				this.depthProgram.viewProj,
-				false,
-				this.skyData.subarray(k * 16, k * 16 + 16),
-			);
-			this.solids();
+			const viewProj = this.skyData.subarray(k * 16, k * 16 + 16);
+			gl.uniformMatrix4fv(this.depthProgram.viewProj, false, viewProj);
+			this.mapSolids(viewProj);
 		}
 		gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, null, 0, 0);
 		if (which.near && passesOf(this.render.features).thinParts) this.openNearMaps();
@@ -4341,6 +4368,26 @@ export class WebGl2View implements ViewRenderer {
 		for (const d of draws)
 			this.drawRuns(d.vao, d.wire.instances, d, gl.TRIANGLES, d.indexCount, d.type, d.count);
 		gl.bindVertexArray(null);
+	}
+
+	/**
+	 * The solid parts a sun or sky map sees, drawn: the chunks within its four
+	 * sides, as WebGpuView's mapSolids. Its near and far are not tested, so
+	 * what stands between the light and the map's box, and casts into it, is
+	 * drawn too. The camera's own runs are kept aside meanwhile.
+	 */
+	private mapSolids(viewProj: Float32Array): void {
+		const planes = sidePlanes(viewProj);
+		const camera = this.runs;
+		this.runs = new Map();
+		for (const d of this.draws)
+			if (d.chunks)
+				this.runs.set(
+					d,
+					visibleRuns(d.chunks, (c) => boxInView(planes, c.min, c.max)),
+				);
+		this.solids();
+		this.runs = camera;
 	}
 
 	/** WebGL2's own swap already waits for the GPU, so there is nothing to wait on. */

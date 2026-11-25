@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.112",
+		date: "2026-11-25",
+		headline: "Shadow maps draw only what they cover, and moving a light refills only round it.",
+		changed: [
+			"**The sun's shadow maps and the sky's maps draw only the parts within their sides**, not the whole place each time (WebGPU and WebGL2).",
+			"**Moving, adding or removing a light fills the light grid again only where that light reaches**, not all of it (WebGPU and WebGL2).",
+			"**Occlusion culling draws its own depth pass only on frames it reads back**: while the camera moves, the place's pass draws its depth itself.",
+			"**The light grid fills in rows of 32 cells**, so a thin strip of new cells leaves no part of the GPU idle.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.111",
 		date: "2026-11-25",
 		headline: "Less work for the GPU each frame, with the same picture.",

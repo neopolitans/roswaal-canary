@@ -111,10 +111,13 @@ import {
 	imageOrder,
 	imageQuads,
 	LIGHT_CELL,
+	LIGHT_CHANGES_MOST,
 	LIGHT_GRID_CASCADES,
 	LIGHT_GRID_CELLS,
 	LIGHTS_FULL,
 	type LightGridRegion,
+	lightChanges,
+	lightGridDirty,
 	lightGridMove,
 	METAL_DIFFUSE_CUT,
 	METAL_SEEN,
@@ -150,6 +153,7 @@ import {
 	SKY_SEEN_LEAST,
 	SKY_SOFT,
 	SKY_VIEWS,
+	type StudBox,
 	SUN_CASCADES,
 	SUN_GAIN,
 	TIMER_SAMPLE,
@@ -369,6 +373,9 @@ fn softSpot(half: f32) -> f32 {
 }
 `;
 
+/** The grid fill's cells a workgroup: see GRID_FILL's fill. */
+const FILL_GROUP = 32;
+
 const GRID_FILL = /* wgsl */ `${SOFT_FALL}
 @group(0) @binding(0) var<storage, read> lightData: array<vec4f>;
 @group(0) @binding(1) var<storage, read> lightTable: array<vec2u>;
@@ -399,9 +406,14 @@ fn lightCell(p: vec3f) -> u32 {
 	let h = (bitcast<u32>(c.x) * 73856093u) ^ (bitcast<u32>(c.y) * 19349663u) ^ (bitcast<u32>(c.z) * 83492791u);
 	return h & 65535u;
 }
-@compute @workgroup_size(4, 4, 4) fn fill(@builtin(global_invocation_id) id: vec3u) {
+// A row of FILL_GROUP cells a group, a SIMD group's width on Apple's GPUs,
+// the region's cells in turn: a slab a cell or three thick leaves none of a
+// group's lanes idle, as 4 x 4 x 4 groups did.
+@compute @workgroup_size(${FILL_GROUP}) fn fill(@builtin(global_invocation_id) gid: vec3u) {
 	let cells = ${LIGHT_GRID_CELLS}u;
-	if (any(vec3f(id) >= gp.region.xyz)) { return; }
+	let rc = vec3u(gp.region.xyz);
+	if (gid.x >= rc.x * rc.y * rc.z) { return; }
+	let id = vec3u(gid.x % rc.x, (gid.x / rc.x) % rc.y, gid.x / (rc.x * rc.y));
 	let size = gp.origin.w;
 	let step = min(size, ${LIGHT_CELL}.0);
 	let m = u32(round(size / step));
@@ -4174,6 +4186,31 @@ fn at(c: vec2i) -> u32 {
 		}
 	}
 
+	/**
+	 * The solid parts a sun or sky map sees, drawn: the chunks within its
+	 * four sides. Its near and far are not tested, so what stands between the
+	 * light and the map's box, and casts into it, is drawn too. Before, every
+	 * map drew the whole place: its passes come before the camera's culling.
+	 */
+	private mapSolids(pass: GPURenderPassEncoder, viewProj: Float32Array): void {
+		const planes = sidePlanes(viewProj);
+		for (const draw of this.draws) {
+			const runs = draw.chunks
+				? visibleRuns(draw.chunks, (c) => boxInView(planes, c.min, c.max))
+				: null;
+			if (runs && runs.length === 0) continue;
+			pass.setVertexBuffer(0, draw.vertices);
+			pass.setVertexBuffer(1, draw.instances);
+			pass.setIndexBuffer(draw.indices, draw.format);
+			if (!runs) {
+				pass.drawIndexed(draw.indexCount, draw.count);
+				continue;
+			}
+			for (let i = 0; i < runs.length; i += 2)
+				pass.drawIndexed(draw.indexCount, runs[i + 1], 0, 0, runs[i]);
+		}
+	}
+
 	draw(camera: Camera, still = false): void {
 		const started = performance.now();
 		this.stampThis =
@@ -4290,7 +4327,10 @@ fn at(c: vec2i) -> u32 {
 		// Made in every view, so occlusion works in each; only the picture's
 		// and the wireframe's passes go on from its depth.
 		const lean = this.leanDepth();
-		const early = passes.occlusion && !lean;
+		// The full path's depth in a pass of its own only on a frame whose image
+		// is read back: moving, or with nothing to test, the main pass draws it
+		// first itself, one pass fewer and no depth written out and read back.
+		const early = passes.occlusion && !lean && this.occludable && !this.eyeMoving;
 		const load = early && mode !== "overdraw" && mode !== "density";
 		// Antialiasing by a pass over the frame: everything is drawn into its
 		// input, and the pass draws the canvas.
@@ -4349,7 +4389,7 @@ fn at(c: vec2i) -> u32 {
 			passes.occlusion &&
 			(lean
 				? this.occludable && !this.eyeMoving && this.drawFarSmall(encoder)
-				: this.drawFar(encoder));
+				: early && this.drawFar(encoder));
 		if (passes.occlusion) encoder = this.cut(encoder, "occlusion");
 		// What reads the place's depth once its pass ends: a Highlight with
 		// DepthMode Occluded; and past the glow, beams and particles at half
@@ -4854,7 +4894,6 @@ fn at(c: vec2i) -> u32 {
 		pass.setPipeline(this.solidDepth);
 		this.solids(pass);
 		pass.end();
-		if (!this.occludable || this.eyeMoving) return false;
 		return this.reduceFar(encoder, this.depth!, this.width, this.height, this.samples);
 	}
 
@@ -6006,6 +6045,15 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			this.gridOrigins[k] = move.origin;
 			for (const region of move.fill) jobs.push({ k, region });
 		}
+		// What changed lights reach, in the cascades as they now stand.
+		const dirty = stale ? [] : this.gridDirty;
+		this.gridDirty = [];
+		for (const box of dirty)
+			for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+				const at = this.gridOrigins[k];
+				const region = at ? lightGridDirty(at, cell * 2 ** k, box) : null;
+				if (region) jobs.push({ k, region });
+			}
 		if (jobs.length === 0) return false;
 		const d = this.device;
 		// What parts fill round the finest cascade, before its cells are filled.
@@ -6061,8 +6109,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					],
 				}),
 			);
-			const [x, y, z] = region.count.map((c) => Math.ceil(c / 4));
-			pass.dispatchWorkgroups(x, y, z);
+			const [x, y, z] = region.count;
+			pass.dispatchWorkgroups(Math.ceil((x * y * z) / FILL_GROUP));
 			this.redrawn.lightGrid += region.count[0] * region.count[1] * region.count[2];
 		});
 		pass.end();
@@ -6726,11 +6774,31 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** The place's lights and the grid that finds them: see lightGrid. */
 	private lightBuffers!: { data: GPUBuffer; table: GPUBuffer; index: GPUBuffer };
 
+	/** The lights the grid was last filled for, to tell which changed: see lightChanges. */
+	private lightsNow: readonly number[] | undefined;
+	/** What changed lights reach, to fill again before the next frame: see lightGridDirty. */
+	private gridDirty: StudBox[] = [];
+	/**
+	 * The lights changed: only the cells those that changed reach are filled
+	 * again, unless the grid is filled whole anyway or too many changed.
+	 */
+	private lightsChanged(lights: readonly number[] | undefined, had: boolean): void {
+		const changes = had && !this.gridStale ? lightChanges(this.lightsNow, lights) : null;
+		this.lightsNow = lights ? [...lights] : undefined;
+		if (changes && this.gridDirty.length + changes.length <= LIGHT_CHANGES_MOST)
+			this.gridDirty.push(...changes);
+		else {
+			this.gridStale = true;
+			this.gridDirty = [];
+		}
+	}
+
 	private setLights(lights: readonly number[] | undefined): void {
 		const d = this.device;
 		// The same lights again, after an edit elsewhere: the grid already holds them.
 		const key = fingerprint(lights);
 		if (key === this.lightKey && this.lightKey !== -1) return;
+		const had = this.hasLights && this.lightKey !== -1;
 		this.hasLights = !!lights && lights.length > 0;
 		this.lightKey = key;
 		const old = this.lightBuffers;
@@ -6749,7 +6817,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			index: store(grid.index),
 		};
 		if (old) for (const b of [old.data, old.table, old.index]) b.destroy();
-		this.gridStale = true;
+		this.lightsChanged(lights, had);
 		// Read or not as the lights now say: with none left, nothing fills the
 		// grid again, and the uniform went on reading the light that was there.
 		this.writeGridUniform();
@@ -7214,7 +7282,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			});
 			pass.setPipeline(this.skyDepth);
 			pass.setBindGroup(0, group);
-			this.solids(pass);
+			this.mapSolids(pass, block.subarray(k * 16, k * 16 + 16));
 			pass.end();
 		});
 	}
@@ -7267,7 +7335,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 				});
 				pass.setPipeline(this.skyDepth);
 				pass.setBindGroup(0, group);
-				this.solids(pass);
+				this.mapSolids(pass, fill.block.subarray(k * 16, k * 16 + 16));
 				pass.end();
 			}
 			at = this.cut(at, "skyMaps");
@@ -7344,7 +7412,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			});
 			pass.setPipeline(this.skyDepth);
 			pass.setBindGroup(0, group);
-			this.solids(pass);
+			this.mapSolids(pass, block.subarray(k * 16, k * 16 + 16));
 			pass.end();
 		});
 		if (which.near) this.redrawn.nearMaps++;

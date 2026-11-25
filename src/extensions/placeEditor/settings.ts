@@ -280,7 +280,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Light objects resolution",
 				help: "Pixels the lights are worked out at.",
 				detail:
-					"The light of PointLights, SpotLights and SurfaceLights. Automatic measures, as the view moves, whether half the pixels is faster in this place and keeps it only if so; it pays where many lights reach the same pixels. Full, Half or Quarter set it. WebGPU.",
+					"The light of PointLights, SpotLights and SurfaceLights. Automatic measures, as the view moves, whether half the pixels is faster in this place and keeps it only if so; it pays where many lights reach the same pixels. Full, Half or Quarter set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LAMP_RESOLUTIONS,

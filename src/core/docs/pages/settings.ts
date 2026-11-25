@@ -281,7 +281,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Light objects resolution",
-						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. WebGPU.",
+						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU.",
 					],
 					[
 						"Sky light resolution",

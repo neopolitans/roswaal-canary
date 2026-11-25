@@ -866,6 +866,20 @@ export const METAL_DIFFUSE_CUT = 0.7;
 export const METAL_SEEN = 4;
 export const PROBE_STEP = 8;
 
+/**
+ * How many of the render's pixels across each pixel of the half-size pass
+ * (light objects and the sky) stands for. Half is two; but where the render
+ * has more pixels than the screen has points (`renderWidth` over
+ * `pointsWidth`, as at 150%), no more than a point's worth, so the light is
+ * never worked out at fewer pixels than the screen shows: half of 150%
+ * softened surfaces on an iPad (canary.86). Quarter is four, as chosen.
+ */
+export function halfPassStep(share: number, renderWidth: number, pointsWidth: number): number {
+	if (share !== 2) return share;
+	const perPoint = pointsWidth > 0 ? renderWidth / pointsWidth : 1;
+	return perPoint > 1 ? Math.min(2, perPoint) : 2;
+}
+
 /** Cubes kept on the reflection grid, the latest used: about 1 MB each. */
 export const REFLECTION_CACHE = 8;
 

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.87",
+		date: "2026-11-25",
+		headline: "Light objects at Half stay sharp above 100% render scale.",
+		fixed: [
+			"**Light objects and Sky light at Half no longer soften surfaces above 100% render scale**: at 150% they were worked out at fewer pixels than the screen has. Half now never goes below the screen's own detail; at Native and at 100% and below it is as before.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.86",
 		date: "2026-11-25",
 		headline: "Roswaal Benchmark 5: Reflections and Bloom stations.",

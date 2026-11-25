@@ -94,6 +94,7 @@ import {
 	glowSpread,
 	gradeBlock,
 	HANDLE_ALPHA,
+	halfPassStep,
 	IMAGE_VERTEX,
 	type ImageLayer,
 	type ImageQuad,
@@ -5203,6 +5204,11 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		return this.lampModeNow === "quarter" || this.skyModeNow === "quarter" ? 4 : 2;
 	}
 
+	/** The half-size pass's step across the render: see halfPassStep. */
+	private halfStep(): number {
+		return halfPassStep(this.halfShare(), this.width, this.canvas?.clientWidth ?? 0);
+	}
+
 	setLampMode(mode: "full" | "half" | "quarter"): void {
 		if (mode === this.lampModeNow) return;
 		const was = this.halfShare();
@@ -5236,7 +5242,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			format: "rgba16float",
 			usage: TEXTURE.TEXTURE_BINDING,
 		});
-		const share = this.halfShare();
+		const share = this.halfStep();
 		const size = [
 			Math.max(1, Math.ceil(this.width / share)),
 			Math.max(1, Math.ceil(this.height / share)),

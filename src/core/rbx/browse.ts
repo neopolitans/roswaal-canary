@@ -529,6 +529,9 @@ export function describeInstance(
 	for (const [stored, prop] of inst.props) {
 		if (INTERNAL.has(stored)) continue;
 		const engine = findProperty(inst.className, RENAMED[stored] ?? stored);
+		// Deprecated, as Studio's Properties leaves it out: Lighting.Technology,
+		// which LightingStyle replaced, and the like. Kept in the file as it is.
+		if (engine?.deprecated) continue;
 		const name = engine?.name ?? RENAMED[stored] ?? stored;
 		const edit = fixedName(inst, stored) ? undefined : editFor(stored, prop, engine);
 		const frame = prop.value as { position: number[]; rotation: number[] } | null;

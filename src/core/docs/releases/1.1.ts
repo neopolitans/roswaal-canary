@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.94",
+		date: "2026-11-25",
+		headline: "Properties leaves out deprecated properties; the place's panel shows what it draws.",
+		changed: [
+			"**Properties leaves out deprecated properties**, as Studio's does: Lighting's Technology, which LightingStyle replaced, Outlines and the like. The place keeps them as they are.",
+			"**The place's own panel shows what it draws**: Renderer, Frame rate and the lighting notes are gone from it. Renderer and Frame rate are in Settings › Scene view and the Rendering panel.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.93",
 		date: "2026-11-25",
 		headline: "Particle resolution: beams and particles at half size.",

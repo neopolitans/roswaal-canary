@@ -2805,14 +2805,7 @@ export function App() {
 								onPin={pinProperties}
 							/>
 						) : project.place && placeDoc && viewer && viewport ? (
-							<viewer.PlaceSummary
-								controller={viewport}
-								file={project.place}
-								renderer={sceneView.renderer}
-								onRenderer={(renderer) => placeEditor.set("renderer", renderer)}
-								frameRate={sceneView.frameRate}
-								onFrameRate={(frameRate) => placeEditor.set("frameRate", frameRate)}
-							/>
+							<viewer.PlaceSummary controller={viewport} file={project.place} />
 						) : undefined,
 					),
 					code:

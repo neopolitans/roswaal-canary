@@ -47,8 +47,6 @@ import {
 	VIEWPORT_STILL_FRAMES,
 	VIEWPORT_TEXTURE_RESOLUTIONS,
 	VIEWPORT_UPSCALES,
-	type ViewportFrameRate,
-	type ViewportRenderer,
 } from "../settings.js";
 import { AutomaticSection, automaticText } from "./AutomaticSection.jsx";
 import { shortAuto, useTight } from "./autoFit.js";
@@ -131,8 +129,6 @@ const TOOL_ICON: Record<Tool, IconName> = {
 const LATER = "comes with editing";
 /** Said by an editing tool while Modify DataModel Instances is off. */
 const EDITING_OFF = "Editing is off: turn on Modify DataModel Instances in Settings › Workspace";
-/** What Automatic draws with here: WebGPU where the browser offers it at all. */
-const AUTOMATIC = typeof navigator !== "undefined" && "gpu" in navigator ? "WebGPU" : "WebGL2";
 
 function useViewport(controller: ViewportController) {
 	return useSyncExternalStore(controller.subscribe, controller.getState);
@@ -683,21 +679,11 @@ function Rows({ rows }: { rows: [string, string][] }) {
 export function PlaceSummary({
 	controller,
 	file,
-	renderer,
-	onRenderer,
-	frameRate,
-	onFrameRate,
 }: {
 	controller: ViewportController;
 	file: string;
-	/** The renderer Settings asks for, chosen here too. */
-	renderer: ViewportRenderer;
-	onRenderer: (renderer: ViewportRenderer) => void;
-	/** The frame rate Settings asks for, chosen here too. */
-	frameRate: ViewportFrameRate;
-	onFrameRate: (frameRate: ViewportFrameRate) => void;
 }) {
-	const { summary, backend, fellBack } = useViewport(controller);
+	const { summary } = useViewport(controller);
 	const name = file.split("/").pop() ?? file;
 	return (
 		<div className="place-properties">
@@ -709,8 +695,8 @@ export function PlaceSummary({
 				<p className="place-summary">
 					The place in 3D. Pick an instance in it, or in DataModel, for its properties.
 				</p>
-				<div className="place-groups">
-					{summary && (
+				{summary && (
+					<div className="place-groups">
 						<div className="place-group">
 							<SectionHead title="Drawn" />
 							<Rows
@@ -728,55 +714,9 @@ export function PlaceSummary({
 									["Left out", `${summary.transparent.toLocaleString()} fully transparent`],
 								]}
 							/>
-							<div className="place-prop" title="What draws the view. Settings has it too.">
-								<span className="place-prop-name">Renderer</span>
-								<span className="place-prop-value">
-									<select
-										className="tb place-edit-field"
-										value={renderer}
-										onChange={(e) => onRenderer(e.target.value as ViewportRenderer)}
-									>
-										{VIEWPORT_RENDERERS.map(({ value, label }) => (
-											<option key={value} value={value}>
-												{value === "auto" ? `${label}: ${AUTOMATIC}` : label}
-											</option>
-										))}
-									</select>
-								</span>
-							</div>
-							<div
-								className="place-prop"
-								title="The most the view is drawn a second while it moves. It is drawn only when something changes. Settings has it too."
-							>
-								<span className="place-prop-name">Frame rate</span>
-								<span className="place-prop-value">
-									<select
-										className="tb place-edit-field"
-										value={frameRate}
-										onChange={(e) => onFrameRate(e.target.value as ViewportFrameRate)}
-									>
-										{VIEWPORT_FRAME_RATES.map(({ value, label }) => (
-											<option key={value} value={value}>
-												{label}
-											</option>
-										))}
-									</select>
-								</span>
-							</div>
-							{backend && (
-								<Rows
-									rows={[["Drawing with", fellBack ? `${backend}, no WebGPU here` : backend]]}
-								/>
-							)}
 						</div>
-					)}
-					{summary && summary.notes.length > 0 && (
-						<div className="place-group">
-							<SectionHead title="Lighting" />
-							<Rows rows={summary.notes} />
-						</div>
-					)}
-				</div>
+					</div>
+				)}
 			</div>
 		</div>
 	);

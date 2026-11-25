@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.116",
+		date: "2026-11-25",
+		headline: "WebGL2 benchmarks no longer stall on every moving frame.",
+		fixed: [
+			"**A benchmark on WebGL2 no longer stalls each moving frame**: it waited for the GPU to finish at every stage of every frame, which on an iPad took 60 to 137 ms a frame and skipped the camera to the end of each movement. Nothing it measured that way was kept.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.115",
 		date: "2026-11-25",
 		headline: "A tablet keeps up at Native with light objects: a coarser grid by default, filled more cheaply as you move.",

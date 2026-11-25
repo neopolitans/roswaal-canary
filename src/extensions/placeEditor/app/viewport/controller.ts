@@ -80,6 +80,7 @@ import {
 	type MovingRow,
 	type ProfileResult,
 	type StageFrame,
+	type StageSink,
 	spread,
 	stageRows,
 	stagesTotal,
@@ -483,6 +484,19 @@ export interface CornerElements {
 function forView(view: ViewRenderer, image: ImageBitmap): Promise<ImageBitmap> {
 	if (view.backend !== "WebGPU") return Promise.resolve(image);
 	return createImageBitmap(image, { premultiplyAlpha: "default" }).catch(() => image);
+}
+
+/**
+ * The stage sink for a busy run that keeps only the GPU's own times: one that
+ * throws the waited stages away, so a renderer with timers still splits its
+ * frame by stage (WebGPU labels each pass's stamps as it cuts); none where it
+ * has no timers. WebGL2's stages are waited for with finish, and a sink that
+ * waits at every stage of every frame drained an iPad's GPU six times a frame:
+ * its moving frames took 60 to 137 ms in a busy benchmark (25 Nov 2026), and
+ * nothing it measured was kept.
+ */
+export function stagesOnly(view: Pick<ViewRenderer, "deviceFacts">): StageSink | null {
+	return view.deviceFacts().timers ? () => {} : null;
 }
 
 export class ViewportController {
@@ -2468,10 +2482,7 @@ export class ViewportController {
 			if (busy) {
 				await this.warmBusy(300);
 				// Two frames in flight cross the waited stages' sums: kept to the GPU's own.
-				view.setProfiling(
-					() => {},
-					(each) => gpuFrames.push(each),
-				);
+				view.setProfiling(stagesOnly(view), (each) => gpuFrames.push(each));
 			}
 			let last = performance.now();
 			const byClock = () => {
@@ -2859,10 +2870,7 @@ export class ViewportController {
 		const view = this.view;
 		if (!view) return [];
 		const gpuFrames: StageFrame[] = [];
-		view.setProfiling(
-			() => {},
-			(each) => gpuFrames.push(each),
-		);
+		view.setProfiling(stagesOnly(view), (each) => gpuFrames.push(each));
 		if (busy) await this.busyFrames(30);
 		else await this.waitedFrames(30, PROFILE_BUDGET);
 		await view.settled();

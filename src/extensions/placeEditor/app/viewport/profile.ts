@@ -29,6 +29,8 @@ export const STAGES = [
 	"skyMaps",
 	"skyOpen",
 	"shadows",
+	"lightGrid",
+	"reflections",
 	"skyCells",
 	"glowSources",
 	"occlusion",
@@ -46,6 +48,8 @@ export const STAGE_LABELS: Record<Stage, string> = {
 	skyMaps: "Sky maps",
 	skyOpen: "Thin parts opened",
 	shadows: "Sun shadows",
+	lightGrid: "Light object grid",
+	reflections: "Reflection cube",
 	skyCells: "Lighting cells",
 	glowSources: "Glow sources",
 	occlusion: "Occlusion depth",
@@ -62,6 +66,8 @@ export const STAGE_SHORT: Record<Stage, string> = {
 	skyMaps: "Sky maps",
 	skyOpen: "Thin parts",
 	shadows: "Shadows",
+	lightGrid: "Light grid",
+	reflections: "Reflections",
 	skyCells: "Cells",
 	glowSources: "Glow src",
 	occlusion: "Occlusion",
@@ -77,7 +83,10 @@ export const STAGE_SHORT: Record<Stage, string> = {
 export const STAGE_HINTS: Record<Stage, string> = {
 	skyMaps:
 		"The sun's and the sky's maps: drawn when the place, the sun or the camera's area changes.",
-	shadows: "The sun's shadow cascades.",
+	shadows: "The sun's shadow cascades, and a share of the near sky maps as the camera moves on.",
+	lightGrid:
+		"The light object grid's cells filled: the slices the camera newly reaches, or a whole grid when it goes up or down.",
+	reflections: "Faces of the reflection cube drawn: a new one as the camera reaches a new cell.",
 	skyCells: "The lighting cells around the camera, found again from the near sky maps.",
 	skyOpen:
 		"The near sky maps with what is thinner than a window strut taken out: four passes over each map.",

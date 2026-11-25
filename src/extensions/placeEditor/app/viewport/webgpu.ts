@@ -4169,7 +4169,13 @@ fn at(c: vec2i) -> u32 {
 		// The place or the sun changed, or nothing drawn yet: every map at once.
 		// The camera moved on alone: the near maps a share a frame (nearFillStep).
 		const mapsDue = this.skyDirty || this.sunDirty || !this.nearCentre;
-		if (!mapsDue && (nearMoved || this.nearFill)) encoder = this.nearFillStep(encoder, centre);
+		// Catching up as the camera reaches somewhere new: at most one piece
+		// of work that draws the whole place a frame (a near map's share, a
+		// face of the reflection cube, a whole light grid), the rest the
+		// frames after. Several in one frame were what a tablet paid for in
+		// a new area (the author, 25 Nov 2026).
+		const nearStep = !mapsDue && !!(nearMoved || this.nearFill);
+		if (nearStep) encoder = this.nearFillStep(encoder, centre);
 		if (mapsDue) this.nearFill = null;
 		if (mapsDue)
 			encoder = this.drawSkyMaps(
@@ -4184,13 +4190,15 @@ fn at(c: vec2i) -> u32 {
 		// While the stages are profiled, the sun's maps are drawn every frame,
 		// as when the camera moves: a still camera draws them only once.
 		this.drawCascades(encoder, camera, partsMoved || this.clock !== null);
-		this.fillLightGrid(encoder, camera.eye);
+		encoder = this.cut(encoder, "shadows");
+		const whole = this.fillLightGrid(encoder, camera.eye, !nearStep || mapsDue);
+		encoder = this.cut(encoder, "lightGrid");
 		// The parts moved or the light changed: the cube shows them again. Not
 		// when only the near maps moved with the camera: the cube follows it
 		// by PROBE_STEP, and the near maps changed what it showed by little.
 		if (partsMoved || sunMoved) this.reflStale();
-		this.drawReflections(encoder, camera);
-		encoder = this.cut(encoder, "shadows");
+		this.drawReflections(encoder, camera, !nearStep && !whole);
+		encoder = this.cut(encoder, "reflections");
 		// The camera's passes from here draw only the chunks in view.
 		const culling = performance.now();
 		this.cull(camera, [...this.draws, ...this.glass]);
@@ -5933,9 +5941,9 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	 * cells a cascade newly takes in as the eye goes across (lightGridMove),
 	 * and a whole cascade when the eye goes up or down out of it, one a frame.
 	 */
-	private fillLightGrid(encoder: GPUCommandEncoder, eye: number[]): void {
+	private fillLightGrid(encoder: GPUCommandEncoder, eye: number[], wholeAllowed: boolean): boolean {
 		const cell = this.gridCell;
-		if (cell === null || !this.gridA || !this.gridB || !this.hasLights) return;
+		if (cell === null || !this.gridA || !this.gridB || !this.hasLights) return false;
 		const stale = this.gridStale;
 		this.gridStale = false;
 		const jobs: { k: number; region: LightGridRegion }[] = [];
@@ -5945,13 +5953,17 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			const move = lightGridMove(eye, cell * 2 ** k, was);
 			if (move.fill.length === 0) continue;
 			const all = move.fill[0].count.every((c) => c === LIGHT_GRID_CELLS);
-			// Once filled, one whole cascade a frame: the rest the frames after.
-			if (all && was && whole > 0) continue;
+			// Once filled, one whole cascade a frame, and only in a frame with no
+			// other whole-place work (see the frame's catching up): the rest after.
+			if (all && was && (whole > 0 || !wholeAllowed)) {
+				this.onRedraw?.();
+				continue;
+			}
 			if (all) whole++;
 			this.gridOrigins[k] = move.origin;
 			for (const region of move.fill) jobs.push({ k, region });
 		}
-		if (jobs.length === 0) return;
+		if (jobs.length === 0) return false;
 		const d = this.device;
 		// What parts fill round the finest cascade, before its cells are filled.
 		const finest = this.gridOrigins[0];
@@ -5960,7 +5972,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			: null;
 		if (occAt) this.syncOccupancy(occAt);
 		// Not yet made (no finest cascade yet): the next frame.
-		if (!this.occTex) return;
+		if (!this.occTex) return false;
 		this.gridPipe ??= d.createComputePipeline({
 			layout: "auto",
 			compute: { module: d.createShaderModule({ code: GRID_FILL }), entryPoint: "fill" },
@@ -6013,6 +6025,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		});
 		pass.end();
 		this.writeGridUniform();
+		return whole > 0;
 	}
 
 	// -- the lamp light at half size: see lampsAt ---------------------------------------
@@ -6344,9 +6357,15 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	 * camera is PROBE_STEP studs from where it was last drawn, or what it
 	 * shows changed. Every part, culled for none of the faces.
 	 */
-	private drawReflections(encoder: GPUCommandEncoder, camera: Camera): void {
+	private drawReflections(encoder: GPUCommandEncoder, camera: Camera, allowed = true): void {
 		if (!this.reflPipe || !this.reflBind || !featureOn(this.render.features, "sceneReflections"))
 			return;
+		// The frame has done its share of catching up: a face the next one,
+		// asked for so a cube half drawn is not left so while the camera rests.
+		if (!allowed && this.reflEver) {
+			this.onRedraw?.();
+			return;
+		}
 		if (!this.reflFill) {
 			const grid = this.reflGrid;
 			if (grid === null) {

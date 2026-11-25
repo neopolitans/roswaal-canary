@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.102",
+		date: "2026-11-25",
+		headline: "Reaching a new area spreads its catching up over frames.",
+		changed: [
+			"**Reaching a new area no longer stacks its catching up into the same frames**: a share of the near sky maps, a face of the reflection cube and a whole light object grid each draw the whole place, and now at most one goes in a frame, the rest the frames after.",
+		],
+		added: [
+			"**Light object grid and Reflection cube** have their own rows in the Performance panel's stages, apart from the sun's shadows.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.101",
 		date: "2026-11-25",
 		headline: "The 4-stud light grid no longer darkens MeshParts and turned parts.",

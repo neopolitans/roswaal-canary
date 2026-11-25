@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.52.0",
+	version: "0.53.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.53.0",
+			roswaal: "1.1.0-canary.85",
+			date: "2026-11-25",
+			text: "Reflections read only where a part reflects (mirror > 0, or Metal), both renderers. Reflection grid (reflectionUpdates; reflectionGrid/reflectionCell in view.ts): cubes kept per cell, REFLECTION_CACHE of them, spares reused; near-map refills no longer drop the grid's cubes.",
+		},
 		{
 			version: "0.52.0",
 			roswaal: "1.1.0-canary.84",

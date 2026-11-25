@@ -624,16 +624,16 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		if (!has(${FEATURE_BIT.lightHighlights})) lampShine = vec3(0.0);
 		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps) + mix(vec3(1.0), albedo, a.z) * (spec * lit + lampShine * a.x * pat.y * 4.6);
 		if (has(${FEATURE_BIT.reflections})) {
-			vec3 r = reflect(-v, n);
-			vec3 seen = envSees(world, r, vis, 0.0);
-			// A metal shows what is round it, blurred, in its own colour.
-			if (a.z > 0.5) c += envSees(world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)};
 			float mirror = shine;
 			if (b.y > 1.5) {
 				float edge = 1.0 - abs(dot(n, v));
 				mirror = max(mirror, 0.2 + 0.5 * edge * edge * edge);
 			}
-			c = mix(c, seen, mirror);
+			// Only what reflects reads what is round it: see the WebGPU shader.
+			vec3 r = reflect(-v, n);
+			// A metal shows what is round it, blurred, in its own colour.
+			if (a.z > 0.5) c += envSees(world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)};
+			if (mirror > 0.001) c = mix(c, envSees(world, r, vis, 0.0), mirror);
 		}
 		if (has(${FEATURE_BIT.lava})) c += lavaLight(pat.z) * 2.2;
 	}

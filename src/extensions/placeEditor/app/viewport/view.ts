@@ -129,6 +129,8 @@ export interface ViewRenderer {
 	 * 1 half, 2 a quarter. On WebGPU, Decals and Textures too.
 	 */
 	setTextureDetail(step: number): void;
+	/** Scene reflections drawn following the camera (null), or cached on a grid of `cell` studs. WebGPU. */
+	setReflectionGrid?(cell: number | null): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
 	readonly genericFrame?: boolean;
 	/**
@@ -863,6 +865,29 @@ export const PROBE_RADIUS = 300;
 export const METAL_DIFFUSE_CUT = 0.7;
 export const METAL_SEEN = 4;
 export const PROBE_STEP = 8;
+
+/** Cubes kept on the reflection grid, the latest used: about 1 MB each. */
+export const REFLECTION_CACHE = 8;
+
+/**
+ * The reflection grid's cell a point is in, as a key: the cube drawn for it
+ * the first time the camera enters is kept and read while the camera is in it.
+ */
+export function reflectionCell(eye: readonly number[], cell: number): string {
+	return `${Math.floor(eye[0] / cell)},${Math.floor(eye[1] / cell)},${Math.floor(eye[2] / cell)}`;
+}
+
+/**
+ * Scene reflections' updates as Settings asks: following the camera (null),
+ * or cached on a grid of cells this many studs a side. Automatic follows on a
+ * computer and keeps a 64-stud grid on a touch screen, where redrawing the
+ * cube as the camera moves costs a tablet most.
+ */
+export function reflectionGrid(setting: string | undefined, touch: boolean): number | null {
+	if (setting === "follow") return null;
+	if (setting === "32" || setting === "64" || setting === "128") return Number(setting);
+	return touch ? 64 : null;
+}
 export const PROBE_NEAR = 0.5;
 export const PROBE_FAR = 4000;
 

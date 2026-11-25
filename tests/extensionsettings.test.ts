@@ -42,6 +42,7 @@ describe("an extension's settings", () => {
 			shadowMapSize: "auto",
 			textureResolution: "full",
 			skyResolution: "full",
+			reflectionUpdates: "auto",
 			antialiasing: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,

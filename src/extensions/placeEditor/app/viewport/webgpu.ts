@@ -113,8 +113,10 @@ import {
 	PROBE_STEP,
 	postActive,
 	probeFaces,
+	REFLECTION_CACHE,
 	type RenderSettings,
 	type RenderStats,
+	reflectionCell,
 	renderDebug,
 	SELECT,
 	SELECT_WIDTH,
@@ -1168,14 +1170,16 @@ fn surface(i: VOut) -> vec4f {
 		let lampShine = select(0.0, 1.0, has(${FEATURE_BIT.lightHighlights}u));
 		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps.diffuse) + mix(vec3f(1.0), albedo, a.z) * (spec * lit + lamps.spec * a.x * pat.y * 4.6 * lampShine);
 		if (has(${FEATURE_BIT.reflections}u)) {
-			let r = reflect(-v, n);
-			let seen = envSees(i.world, r, vis, 0.0);
-			// A metal shows what is round it, blurred, in its own colour.
-			if (a.z > 0.5) { c = c + envSees(i.world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)}; }
 			// Reflectance, and glass's own, stronger at a glancing angle.
 			var mirror = shine;
 			if (b.y > 1.5) { let edge = 1.0 - abs(dot(n, v)); mirror = max(mirror, 0.2 + 0.5 * edge * edge * edge); }
-			c = mix(c, seen, mirror);
+			// Only what reflects reads what is round it: most parts reflect nothing,
+			// and reading the sky and the cube to mix in none of it was a pixel's
+			// costliest work on an iPad at Native (canary.84).
+			let r = reflect(-v, n);
+			// A metal shows what is round it, blurred, in its own colour.
+			if (a.z > 0.5) { c = c + envSees(i.world, r, vis, ${PROBE_ROUGH.toFixed(1)}) * albedo * a.x * ${METAL_SEEN.toFixed(2)}; }
+			if (mirror > 0.001) { c = mix(c, envSees(i.world, r, vis, 0.0), mirror); }
 		}
 		if (has(${FEATURE_BIT.lava}u)) { c = c + lavaLight(pat.z) * 2.2; }
 	}
@@ -5310,6 +5314,85 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private reflGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
 	/** Where the cube was last drawn from; null, to be drawn again. */
 	private reflAt: number[] | null = null;
+	/** The reflection grid's cell, in studs; null, the cube follows the camera. */
+	private reflGrid: number | null = null;
+	/** Cubes kept on the grid, by cell: each with where it was drawn from, and when last read. */
+	private reflCache = new Map<string, { cube: GPUTexture; at: number[]; used: number }>();
+	/** Cubes no cell keeps, to draw the next into. */
+	private reflSpare: GPUTexture[] = [];
+	/** The cell whose cube is read now. */
+	private reflShown: string | null = null;
+	private reflHalveParts: { layout: GPUBindGroupLayout; sampler: GPUSampler } | null = null;
+	private reflUses = 0;
+
+	setReflectionGrid(cell: number | null): void {
+		if (cell === this.reflGrid) return;
+		this.reflGrid = cell;
+		this.reflStale();
+		this.onRedraw?.();
+	}
+
+	/** A cube's smaller levels and what draws each from the one above. */
+	private levelsFor(into: GPUTexture): void {
+		const d = this.device;
+		const parts = this.reflHalveParts;
+		if (!parts) return;
+		const { layout: halveLayout, sampler: halveSampler } = parts;
+		const view = (level: number, face: number) =>
+			into.createView({
+				dimension: "2d",
+				baseMipLevel: level,
+				mipLevelCount: 1,
+				baseArrayLayer: face,
+				arrayLayerCount: 1,
+			});
+		this.reflLevels.set(
+			into,
+			[0, 1, 2, 3, 4, 5].map((face) =>
+				Array.from({ length: PROBE_LEVELS - 1 }, (_, i) => ({
+					target: view(i + 1, face),
+					group: d.createBindGroup({
+						layout: halveLayout,
+						entries: [
+							{ binding: 0, resource: view(i, face) },
+							{ binding: 1, resource: halveSampler },
+						],
+					}),
+				})),
+			),
+		);
+	}
+
+	/** A cube to draw into: a spare, or a new one with its levels. */
+	private freeCube(): GPUTexture {
+		const spare = this.reflSpare.pop();
+		if (spare) return spare;
+		const cube = this.device.createTexture({
+			size: [PROBE_SIZE, PROBE_SIZE, 6],
+			format: "rgba16float",
+			mipLevelCount: PROBE_LEVELS,
+			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+		});
+		this.levelsFor(cube);
+		return cube;
+	}
+
+	/** The cube now read, the latest drawn: kept for its cell, the least used dropped past REFLECTION_CACHE. */
+	private keepCube(key: string, cube: GPUTexture, at: number[]): void {
+		this.reflCache.set(key, { cube, at, used: ++this.reflUses });
+		if (this.reflCache.size <= REFLECTION_CACHE) return;
+		let oldest: string | null = null;
+		let least = Number.POSITIVE_INFINITY;
+		for (const [k, e] of this.reflCache) {
+			if (e.cube === this.reflCube || e.used >= least) continue;
+			oldest = k;
+			least = e.used;
+		}
+		if (oldest === null) return;
+		const dropped = this.reflCache.get(oldest);
+		this.reflCache.delete(oldest);
+		if (dropped) this.reflSpare.push(dropped.cube);
+	}
 
 	private makeReflections(
 		module: GPUShaderModule,
@@ -5368,31 +5451,11 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		});
 		const halveSampler = d.createSampler({ magFilter: "linear", minFilter: "linear" });
 		this.reflLevels.clear();
-		for (const into of [this.reflCube, this.reflNext]) {
-			const view = (level: number, face: number) =>
-				into.createView({
-					dimension: "2d",
-					baseMipLevel: level,
-					mipLevelCount: 1,
-					baseArrayLayer: face,
-					arrayLayerCount: 1,
-				});
-			this.reflLevels.set(
-				into,
-				[0, 1, 2, 3, 4, 5].map((face) =>
-					Array.from({ length: PROBE_LEVELS - 1 }, (_, i) => ({
-						target: view(i + 1, face),
-						group: d.createBindGroup({
-							layout: halveLayout,
-							entries: [
-								{ binding: 0, resource: view(i, face) },
-								{ binding: 1, resource: halveSampler },
-							],
-						}),
-					})),
-				),
-			);
-		}
+		this.reflHalveParts = { layout: halveLayout, sampler: halveSampler };
+		for (const into of [this.reflCube, this.reflNext]) this.levelsFor(into);
+		this.reflCache.clear();
+		this.reflSpare = [];
+		this.reflShown = null;
 		const faceLayout = d.createBindGroupLayout({
 			entries: [{ binding: 0, visibility: STAGE.VERTEX, buffer: {} }],
 		});
@@ -5426,8 +5489,34 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		if (!this.reflPipe || !this.reflBind || !featureOn(this.render.features, "sceneReflections"))
 			return;
 		if (!this.reflFill) {
-			const at = this.reflAt;
-			if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+			const grid = this.reflGrid;
+			if (grid === null) {
+				const at = this.reflAt;
+				if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+			} else {
+				// The grid: the cell's own cube, kept once drawn. Drawn from where
+				// the camera entered the cell, not its middle, which may be inside
+				// a wall and reflect only darkness.
+				const key = reflectionCell(camera.eye, grid);
+				if (this.reflAt && this.reflShown === key) return;
+				const kept = this.reflCache.get(key);
+				if (kept) {
+					kept.used = ++this.reflUses;
+					// The cube read until now, where no cell keeps it, goes spare.
+					const was = this.reflCube;
+					if (![...this.reflCache.values()].some((e) => e.cube === was)) this.reflSpare.push(was);
+					this.reflCube = kept.cube;
+					this.reflAt = kept.at;
+					this.reflShown = key;
+					this.device.queue.writeBuffer(
+						this.skyUniform,
+						SKY_BLOCK * 4,
+						new Float32Array([...kept.at, 1]),
+					);
+					this.rebind();
+					return;
+				}
+			}
 			this.reflFill = { at: [...camera.eye], face: 0, again: false };
 		}
 		const fill = this.reflFill;
@@ -5486,8 +5575,16 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		fill.face = until;
 		if (fill.face < 6) return;
 		// All six: read from here on, and where they were drawn from with them.
-		this.reflNext = this.reflCube;
+		const was = this.reflCube;
 		this.reflCube = into;
+		// On the grid, kept for its cell; the cube drawn into next is one no cell keeps.
+		if (this.reflGrid !== null && !fill.again) {
+			const key = reflectionCell(fill.at, this.reflGrid);
+			this.reflShown = key;
+			this.keepCube(key, into, fill.at);
+		}
+		const kept = [...this.reflCache.values()].some((e) => e.cube === was);
+		this.reflNext = kept ? this.freeCube() : was;
 		this.reflEver = true;
 		this.reflAt = fill.again ? null : fill.at;
 		this.reflFill = null;
@@ -5499,6 +5596,12 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private reflStale(): void {
 		this.reflAt = null;
 		if (this.reflFill) this.reflFill.again = true;
+		// Every kept cube shows the place as it was: spares, but the one read
+		// now, which stays until its cell's is drawn again.
+		for (const e of this.reflCache.values())
+			if (e.cube !== this.reflCube) this.reflSpare.push(e.cube);
+		this.reflCache.clear();
+		this.reflShown = null;
 	}
 
 	// -- the lighting cells: see SKY_CELL ---------------------------------------------
@@ -6269,7 +6372,10 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		this.rebind();
 		// The cube's faces are lit by the near maps: drawn again a face a frame,
 		// as a cube drawn while the camera moved shows the maps it left behind.
-		this.reflStale();
+		// Not on the reflection grid, whose cubes are to be there rather than
+		// exact: the near maps follow the camera, and redrawing for them threw
+		// away every kept cube each time it moved on.
+		if (this.reflGrid === null) this.reflStale();
 		return at;
 	}
 

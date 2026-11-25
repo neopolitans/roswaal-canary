@@ -129,6 +129,15 @@ export const VIEWPORT_SKY_RESOLUTIONS = [
 	{ value: "quarter", label: "Quarter" },
 ] as const;
 
+/** Reflection updates: the place round the camera drawn following it, or kept on a grid. */
+export const VIEWPORT_REFLECTION_UPDATES = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "follow", label: "Following" },
+	{ value: "32", label: "32-stud grid" },
+	{ value: "64", label: "64-stud grid" },
+	{ value: "128", label: "128-stud grid" },
+] as const;
+
 /** Texture resolution: the material textures read at their own size, or smaller. */
 export const VIEWPORT_TEXTURE_RESOLUTIONS = [
 	{ value: "full", label: "Full" },
@@ -170,6 +179,8 @@ export interface PlaceEditorSettings {
 	dynamicOptimization: boolean;
 	/** Light objects' resolution: see depthChoice.ts's lampMode. */
 	lampResolution: "auto" | "full" | "half" | "quarter";
+	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
+	reflectionUpdates: "auto" | "follow" | "32" | "64" | "128";
 	/** The sky's share at fewer pixels: see the controller's skyModeNow. */
 	skyResolution: "full" | "half" | "quarter";
 	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
@@ -303,6 +314,16 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_SHADOW_MAPS,
+			},
+			{
+				key: "reflectionUpdates",
+				title: "Reflection updates",
+				help: "When the place round the camera is drawn for reflections.",
+				detail:
+					"Following draws it again each 8 studs the camera moves: exact, and a cost while it moves. A grid draws one the first time the camera enters each cell of 32, 64 or 128 studs, keeps the last eight and reads the one for where the camera is: nothing to redraw once drawn, less exact. Automatic follows on a computer and keeps a 64-stud grid on a touch screen. WebGPU.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_REFLECTION_UPDATES,
 			},
 			{
 				key: "textureResolution",

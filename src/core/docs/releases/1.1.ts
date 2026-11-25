@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.85",
+		date: "2026-11-25",
+		headline: "Only what reflects reads reflections, and reflections can be kept on a grid.",
+		fixed: [
+			"**Parts that reflect nothing no longer read the sky and the reflection cube**: every pixel read them to mix in none of it, a large share of a frame on a tablet at Native. Reflective parts, Glass and Metal look as before.",
+		],
+		added: [
+			"**Reflection updates**, in Settings › Scene view and the Rendering panel: the place round the camera drawn again as the camera moves, or kept on a 32, 64 or 128-stud grid, drawn once for each cell the camera enters and read while it stays. Automatic keeps a 64-stud grid on a touch screen and follows on a computer. WebGPU.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.84",
 		date: "2026-11-25",
 		headline: "The sky's light at half or a quarter of the pixels.",

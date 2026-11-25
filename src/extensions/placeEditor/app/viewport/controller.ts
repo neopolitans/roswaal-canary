@@ -136,6 +136,7 @@ import {
 	meshGeometry,
 	type RenderSettings,
 	type RenderStats,
+	reflectionGrid,
 	splitByMesh,
 	TEXTURE_STEPS,
 	tintedOutline,
@@ -185,6 +186,8 @@ export interface ViewportOptions {
 	textureResolution?: "full" | "half" | "quarter";
 	/** The sky's share at fewer pixels, in the lights' half-size pass: see skyModeNow. */
 	skyResolution?: "full" | "half" | "quarter";
+	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
+	reflectionUpdates?: "auto" | "follow" | "32" | "64" | "128";
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -3031,6 +3034,12 @@ export class ViewportController {
 	private applyLampMode(): void {
 		this.view?.setLampMode?.(this.lampModeNow());
 		this.view?.setSkyMode?.(this.skyModeNow());
+		this.view?.setReflectionGrid?.(
+			reflectionGrid(
+				this.options.reflectionUpdates,
+				typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
+			),
+		);
 	}
 
 	/** The sky's share as drawn now: Settings', or half where Dynamic optimization has taken that, never more pixels. */

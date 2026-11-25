@@ -37,6 +37,7 @@ import {
 	VIEWPORT_BLOOM_RESOLUTIONS,
 	VIEWPORT_FRAME_RATES,
 	VIEWPORT_LAMP_RESOLUTIONS,
+	VIEWPORT_REFLECTION_UPDATES,
 	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
 	VIEWPORT_SHADOW_MAPS,
@@ -1076,6 +1077,7 @@ function SceneSettings({
 			{segmented("bloomResolution", VIEWPORT_BLOOM_RESOLUTIONS)}
 			{choice("shadowMapSize", VIEWPORT_SHADOW_MAPS)}
 			{segmented("textureResolution", VIEWPORT_TEXTURE_RESOLUTIONS)}
+			{choice("reflectionUpdates", VIEWPORT_REFLECTION_UPDATES)}
 			<PanelSetting settingKey="dynamicOptimization">
 				<input
 					type="checkbox"

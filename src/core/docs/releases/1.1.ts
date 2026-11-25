@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.99",
+		date: "2026-11-25",
+		headline: "The light object grid fills only what the camera newly reaches.",
+		changed: [
+			"**The light object grid fills only the cells the camera newly reaches** as it goes across, rather than a whole grid each time it moved on: walking costs a sliver of what it did, and the grid no longer hitches when it catches up.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.98",
 		date: "2026-11-25",
 		headline: "SpotLights in a Soft place light as Studio's do.",

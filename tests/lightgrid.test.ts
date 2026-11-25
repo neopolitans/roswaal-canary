@@ -9,8 +9,9 @@ import {
 	autoLightGrid,
 	LIGHT_CELL,
 	LIGHT_GRID_CELLS,
+	LIGHT_GRID_SLACK,
 	lightGridCell,
-	lightGridOrigin,
+	lightGridMove,
 	lightGridSamples,
 	SOFT_LIGHT_CELL,
 } from "../src/extensions/placeEditor/app/viewport/view.js";
@@ -31,20 +32,31 @@ describe("the light grid", () => {
 		expect(autoLightGrid(null, true)).toBeNull();
 	});
 
-	it("centres a cascade on the eye, its corner on whole cells", () => {
-		const at = lightGridOrigin([100, 20, -50], 8, null);
-		for (const v of at) expect(Math.abs(v % 8)).toBe(0);
-		const extent = 8 * LIGHT_GRID_CELLS;
-		[100, 20, -50].forEach((e, a) =>
-			expect(Math.abs(e - (at[a] + extent / 2))).toBeLessThanOrEqual(8),
-		);
+	it("centres a cascade on the eye in whole cells, filling it all first", () => {
+		const move = lightGridMove([100, 20, -50], 8, null);
+		expect(move.origin).toEqual([12 - 16, 2 - 16, -7 - 16]);
+		expect(move.fill).toEqual([{ min: move.origin, count: [32, 32, 32] }]);
 	});
 
-	it("stays while the eye is in its middle half, and moves once it leaves", () => {
-		const extent = 8 * LIGHT_GRID_CELLS;
-		const at = lightGridOrigin([0, 0, 0], 8, null);
-		expect(lightGridOrigin([extent / 8, 0, 0], 8, at)).toEqual(at);
-		expect(lightGridOrigin([extent / 2, 0, 0], 8, at)).not.toEqual(at);
+	it("fills nothing for a small step, and only the new edge for a longer one", () => {
+		const was = lightGridMove([0, 0, 0], 8, null).origin;
+		expect(lightGridMove([8 * LIGHT_GRID_SLACK, 0, 0], 8, was).fill).toEqual([]);
+		// Five cells along x: five slices of cells, the ones the eye now reaches.
+		const on = lightGridMove([40, 0, 0], 8, was);
+		expect(on.origin).toEqual([was[0] + 5, was[1], was[2]]);
+		expect(on.fill).toEqual([
+			{ min: [was[0] + LIGHT_GRID_CELLS, was[1], was[2]], count: [5, 32, 32] },
+		]);
+		// Back the other way along z: the slices below.
+		const back = lightGridMove([0, 0, -40], 8, was);
+		expect(back.fill).toEqual([{ min: [was[0], was[1], was[2] - 5], count: [32, 32, 5] }]);
+	});
+
+	it("fills it all again for a jump past it, or the eye going up out of its middle", () => {
+		const was = lightGridMove([0, 0, 0], 8, null).origin;
+		expect(lightGridMove([1000, 0, 0], 8, was).fill[0].count).toEqual([32, 32, 32]);
+		expect(lightGridMove([0, 8 * 9, 0], 8, was).fill[0].count).toEqual([32, 32, 32]);
+		expect(lightGridMove([0, 8 * 7, 0], 8, was).fill).toEqual([]);
 	});
 
 	/** Each sample one lighting cell or less: its lights are never another sample's too. */

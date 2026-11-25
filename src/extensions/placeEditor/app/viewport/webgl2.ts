@@ -107,8 +107,10 @@ import {
 	PROBE_STEP,
 	postActive,
 	probeFaces,
+	REFLECTION_CACHE,
 	type RenderSettings,
 	type RenderStats,
+	reflectionCell,
 	renderDebug,
 	SELECT,
 	SELECT_WIDTH,
@@ -622,12 +624,15 @@ vec3 skyLight(vec3 dir) {
 // camera: see WebGpuView's sceneSees. Left out of the program that draws it.
 #ifndef REFL_PASS
 uniform highp samplerCube reflCube;
+// Where the cube was drawn from: the camera's place then, or on the
+// reflection grid, where the camera entered the cell.
+uniform vec3 reflCentre;
 #endif
 vec4 sceneSees(vec3 p, vec3 dir, float lod) {
 #ifdef REFL_PASS
 	return vec4(0.0);
 #else
-	vec3 o = p - L[6].xyz;
+	vec3 o = p - reflCentre;
 	float radius = max(${PROBE_RADIUS}.0, length(o) + 50.0);
 	float b = dot(o, dir);
 	float t = -b + sqrt(max(b * b - dot(o, o) + radius * radius, 0.0));
@@ -1550,6 +1555,74 @@ export class WebGl2View implements ViewRenderer {
 	private reflFbo: WebGLFramebuffer | null = null;
 	/** Where the cube was last drawn from; null, to be drawn again. */
 	private reflAt: number[] | null = null;
+	/** Where the cube read now was drawn from, for the shader: see reflCentre. */
+	private reflCentre: number[] | null = null;
+	/** The reflection grid's cell, in studs; null, the cube follows the camera. */
+	private reflGrid: number | null = null;
+	/** Cubes kept on the grid, by cell: each with where it was drawn from, and when last read. */
+	private reflCache = new Map<string, { cube: WebGLTexture; at: number[]; used: number }>();
+	/** Cubes no cell keeps, to draw the next into. */
+	private reflSpare: WebGLTexture[] = [];
+	/** The cell whose cube is read now. */
+	private reflShown: string | null = null;
+	private reflUses = 0;
+
+	setReflectionGrid(cell: number | null): void {
+		if (cell === this.reflGrid) return;
+		this.reflGrid = cell;
+		this.reflStale();
+		this.onRedraw?.();
+	}
+
+	/** What the cube shows changed: drawn again; every kept cube spare but the one read now. */
+	private reflStale(): void {
+		this.reflAt = null;
+		for (const e of this.reflCache.values())
+			if (e.cube !== this.reflCube) this.reflSpare.push(e.cube);
+		this.reflCache.clear();
+		this.reflShown = null;
+	}
+
+	/** A cube of half floats with its smaller levels, for the reflections. */
+	private newCube(): WebGLTexture {
+		const gl = this.gl;
+		const cube = gl.createTexture()!;
+		gl.activeTexture(gl.TEXTURE14);
+		gl.bindTexture(gl.TEXTURE_CUBE_MAP, cube);
+		gl.texStorage2D(gl.TEXTURE_CUBE_MAP, PROBE_LEVELS, gl.RGBA16F, PROBE_SIZE, PROBE_SIZE);
+		gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+		gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.reflCube);
+		gl.activeTexture(gl.TEXTURE0);
+		return cube;
+	}
+
+	/** The cube now read, the latest drawn: kept for its cell, the least used dropped past REFLECTION_CACHE. */
+	private keepCube(key: string, cube: WebGLTexture, at: number[]): void {
+		this.reflCache.set(key, { cube, at, used: ++this.reflUses });
+		if (this.reflCache.size <= REFLECTION_CACHE) return;
+		let oldest: string | null = null;
+		let least = Number.POSITIVE_INFINITY;
+		for (const [k, e] of this.reflCache) {
+			if (e.cube === this.reflCube || e.used >= least) continue;
+			oldest = k;
+			least = e.used;
+		}
+		if (oldest === null) return;
+		const dropped = this.reflCache.get(oldest);
+		this.reflCache.delete(oldest);
+		if (dropped) this.reflSpare.push(dropped.cube);
+	}
+
+	/** A cube read from here on, on unit 14, and where it was drawn from. */
+	private showCube(cube: WebGLTexture, at: number[]): void {
+		const gl = this.gl;
+		this.reflCube = cube;
+		this.reflCentre = at;
+		gl.activeTexture(gl.TEXTURE14);
+		gl.bindTexture(gl.TEXTURE_CUBE_MAP, cube);
+		gl.activeTexture(gl.TEXTURE0);
+	}
 
 	/** Scene reflections' cube and what draws into it: see PROBE_SIZE. Half floats, where they can be drawn into. */
 	private makeReflections(): void {
@@ -1587,10 +1660,34 @@ export class WebGl2View implements ViewRenderer {
 	 */
 	private drawReflections(camera: Camera): void {
 		const gl = this.gl;
-		const cube = this.reflCube;
-		if (!cube || !this.reflFbo || !featureOn(this.render.features, "sceneReflections")) return;
-		const at = this.reflAt;
-		if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+		const shown = this.reflCube;
+		if (!shown || !this.reflFbo || !featureOn(this.render.features, "sceneReflections")) return;
+		const grid = this.reflGrid;
+		const key = grid === null ? null : reflectionCell(camera.eye, grid);
+		if (key === null) {
+			const at = this.reflAt;
+			if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+		} else {
+			// The grid, as WebGpuView's: the cell's own cube, kept once drawn,
+			// from where the camera entered the cell, not its middle, which may
+			// be inside a wall and reflect only darkness.
+			if (this.reflAt && this.reflShown === key) return;
+			const kept = this.reflCache.get(key);
+			if (kept) {
+				kept.used = ++this.reflUses;
+				// The cube read until now, where no cell keeps it, goes spare.
+				if (![...this.reflCache.values()].some((e) => e.cube === shown)) this.reflSpare.push(shown);
+				this.showCube(kept.cube, kept.at);
+				this.reflAt = kept.at;
+				this.reflShown = key;
+				return;
+			}
+		}
+		// Into the cube read now, unless a cell keeps it: then a spare, or a new one.
+		const cube =
+			key !== null && [...this.reflCache.values()].some((e) => e.cube === shown)
+				? (this.reflSpare.pop() ?? this.newCube())
+				: shown;
 		this.reflAt = [...camera.eye];
 		const faces = probeFaces(camera.eye, true);
 		this.redrawn.probeFaces += faces.length;
@@ -1636,6 +1733,11 @@ export class WebGl2View implements ViewRenderer {
 			0,
 		);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		this.showCube(cube, this.reflAt);
+		if (key !== null) {
+			this.reflShown = key;
+			this.keepCube(key, cube, this.reflAt);
+		}
 		gl.activeTexture(gl.TEXTURE14);
 		gl.bindTexture(gl.TEXTURE_CUBE_MAP, cube);
 		gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
@@ -1741,7 +1843,7 @@ export class WebGl2View implements ViewRenderer {
 			`${passesOf(r.features).thinParts} ${featureBits(r.features) & (FEATURE_BIT.skyShadows | FEATURE_BIT.nearSky)}`;
 		if (held(render) !== held(this.render)) this.nearCentre = null;
 		if (render.features !== this.render.features) {
-			this.reflAt = null;
+			this.reflStale();
 			this.gridStale = true;
 		}
 		this.render = render;
@@ -2880,7 +2982,7 @@ export class WebGl2View implements ViewRenderer {
 
 	setLighting(lighting: LightingParams): void {
 		this.lighting = lighting;
-		this.reflAt = null;
+		this.reflStale();
 		this.applyLightGrid();
 		const sun = lighting.sun.join(",");
 		if (sun !== this.sunKey) {
@@ -3965,7 +4067,11 @@ export class WebGl2View implements ViewRenderer {
 			gl.uniform1i(grid.b, 23);
 			gl.uniform4fv(grid.c, this.gridBlock.subarray(0, 4 * LIGHT_GRID_CASCADES));
 		}
-		if (prog === this.main) this.lampUnits(prog);
+		if (prog === this.main) {
+			this.lampUnits(prog);
+			const c = this.reflCentre ?? camera.eye;
+			gl.uniform3f(gl.getUniformLocation(prog.program, "reflCentre"), c[0], c[1], c[2]);
+		}
 		const reflSky = gl.getUniformLocation(prog.program, "reflSkyOn");
 		if (reflSky)
 			gl.uniform1f(
@@ -4234,7 +4340,9 @@ export class WebGl2View implements ViewRenderer {
 		// Not a whole cascade in a frame that drew the near maps: the next.
 		if (this.fillLightGrid(camera, !nearDrawn)) clock?.mark("lightGrid");
 		// The parts moved or the light changed: the cube shows them again.
-		if (partsMoved || nearDrawn) this.reflAt = null;
+		// Not on the reflection grid for the near maps alone, as WebGpuView's:
+		// they follow the camera, and every kept cube was thrown away as it moved.
+		if (partsMoved || (nearDrawn && this.reflGrid === null)) this.reflStale();
 		this.drawReflections(camera);
 		// The camera's passes from here draw only the chunks in view.
 		this.cull(camera, [...this.draws, ...this.glass]);
@@ -4708,7 +4816,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.activeTexture(gl.TEXTURE0);
 		this.imageTextures.set(asset, texture);
 		// The reflection cube shows the images too: drawn again with this one.
-		if (this.imageList.some((quad) => quad.asset === asset)) this.reflAt = null;
+		if (this.imageList.some((quad) => quad.asset === asset)) this.reflStale();
 	}
 
 	/** `order`'s images on a face of the reflection cube, over its parts; the reflection program left in use. */
@@ -4879,7 +4987,7 @@ export class WebGl2View implements ViewRenderer {
 		this.loaded.add(layer);
 		this.sendLookBlock();
 		// The reflection cube was drawn with the material's plain pattern: again, with its texture.
-		this.reflAt = null;
+		this.reflStale();
 	}
 
 	destroy(): void {

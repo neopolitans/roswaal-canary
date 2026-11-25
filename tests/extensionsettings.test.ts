@@ -43,6 +43,7 @@ describe("an extension's settings", () => {
 			textureResolution: "full",
 			skyResolution: "full",
 			reflectionUpdates: "auto",
+			stillFrames: "auto",
 			antialiasing: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,

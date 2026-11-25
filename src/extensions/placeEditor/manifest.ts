@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.54.0",
+	version: "0.55.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.55.0",
+			roswaal: "1.1.0-canary.88",
+			date: "2026-11-25",
+			text: "stillFrames (Effects while still): animation-only frames every other display frame, counted in frames, their gaps kept out of RefreshMeter. CascadeCadence now keeps a cascade while its slice fits its map (CASCADE_SLACK 0.125, cascadeCovers), both renderers. See-through parts' images drawn with the solid ones, before Glass and the see-through parts, into the depth.",
+		},
 		{
 			version: "0.54.0",
 			roswaal: "1.1.0-canary.87",

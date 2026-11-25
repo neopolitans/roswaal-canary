@@ -296,6 +296,10 @@ export function settingsPage(): DocPage {
 						"How many texels a side the maps the sun's shadows are drawn into have. **Automatic**, the default, is the quality level's: 512 to Level 9, 1,024 to 12, then 2,048. **512** to **4,096** set it: bigger is sharper and costs time and memory, 64 MB a map at 4,096.",
 					],
 					[
+						"Effects while still",
+						"How often moving particles and beams are drawn while the camera is still. Each of those frames draws the whole place; **Half rate** draws every other one, so a tablet rests between them and stays cool, and moving the camera draws at full rate at once. **Automatic**, the default, halves them on a touch screen; **Full rate** draws every one.",
+					],
+					[
 						"Reflection updates",
 						"When the place round the camera is drawn for reflections. **Automatic**, the default, follows the camera on a computer and keeps a 64-stud grid on a touch screen. **Following** draws it again each 8 studs the camera moves; a **32**, **64** or **128-stud grid** draws one the first time the camera enters each cell, keeps the last eight and reads the one for where the camera is, which costs nothing once drawn and is less exact. WebGPU.",
 					],

@@ -137,7 +137,9 @@ import {
 	type RenderSettings,
 	type RenderStats,
 	reflectionGrid,
+	STILL_SKIP,
 	splitByMesh,
+	stillFramesHalved,
 	TEXTURE_STEPS,
 	tintedOutline,
 	type ViewQuality,
@@ -188,6 +190,8 @@ export interface ViewportOptions {
 	skyResolution?: "full" | "half" | "quarter";
 	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
 	reflectionUpdates?: "auto" | "follow" | "32" | "64" | "128";
+	/** Effects' frames with the camera still at half rate: see view.ts's stillFramesHalved. */
+	stillFrames?: "auto" | "full" | "half";
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -3247,6 +3251,8 @@ export class ViewportController {
 
 	/** A frame rate's cap, keeping its average: see pacing.ts. */
 	private cap = new FrameCap();
+	/** Display frames let go by since the last still frame, while halved. */
+	private stillSkipped = 0;
 	/** Steady's halving: see pacing.ts. */
 	private steady = new SteadyVsync();
 
@@ -3295,11 +3301,27 @@ export class ViewportController {
 				this.nextFrame(draw);
 				return;
 			}
+			// Asked for by the view's own animation alone, the camera still:
+			// every other display frame, where halved, so a tablet rests.
+			// Counted in display frames, not timed against the refresh, which
+			// is measured from the frames drawn: halving them doubled it.
+			const still = this.stillNext;
+			const halved =
+				still &&
+				stillFramesHalved(
+					this.options.stillFrames,
+					typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
+				);
+			if (halved && this.stillSkipped < STILL_SKIP) {
+				this.stillSkipped++;
+				this.nextFrame(draw);
+				return;
+			}
+			this.stillSkipped = 0;
 			this.pending = false;
 			const started = performance.now();
-			// Asked for by the view's own animation alone, the camera still.
-			const still = this.stillNext;
-			const gap = this.refresh.drawn(now);
+			// A halved still frame's gap is two refreshes: not the refresh's measure.
+			const gap = this.refresh.drawn(now, !halved);
 			// Moving: drawn one after another, for the camera or the place, not a still frame.
 			const moving = !still && gap < this.refresh.period() * 4;
 			// WebGPU says when the GPU is done with the frame: how much room is left.

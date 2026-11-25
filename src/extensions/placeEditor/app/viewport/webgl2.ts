@@ -59,6 +59,7 @@ import {
 	type Camera,
 	CameraHeading,
 	CascadeCadence,
+	type CascadeFit,
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
@@ -3091,6 +3092,7 @@ export class WebGl2View implements ViewRenderer {
 		if (this.render.freezeShadows) return;
 		const gl = this.gl;
 		const l = this.lighting;
+		const fits: CascadeFit[] = [];
 		const block = cascadeBlock(
 			camera,
 			this.width / this.height,
@@ -3101,14 +3103,13 @@ export class WebGl2View implements ViewRenderer {
 			false,
 			this.quality,
 			this.shadowMap,
+			fits,
 		);
-		// While only the camera moves, the far cascades on a cadence: see CascadeCadence.
-		const step = this.cadence.next(block, this.cascadeLast, l?.sun ?? [0, 1, 0], partsMoved);
+		// While only the camera moves, only the maps whose slice left them: see CascadeCadence.
+		const step = this.cadence.next(block, fits, this.cascadeLast, l?.sun ?? [0, 1, 0], partsMoved);
 		if (!step) return;
 		const due = step.due;
 		this.cascadeLast = step.block;
-		// One frame more once the camera stops, for the cascades still behind.
-		if (step.again) this.onRedraw?.();
 		if (step.block[SUN_CASCADES.length * 16 + 7] !== 1 || !this.sunMaps) return;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.skyFbo);
 		gl.drawBuffers([gl.NONE]);
@@ -3644,6 +3645,9 @@ export class WebGl2View implements ViewRenderer {
 			this.count(this.clear);
 			return;
 		}
+		// The see-through parts' images before them, into the depth, as the
+		// solid parts' are: see WebGpuView's scene pass.
+		if (images && this.drawImages(camera, "seeThrough")) this.use(this.main, camera, false);
 		// See-through Glass: the nearest's depth, then its colour blended at that depth.
 		if (this.glass.length > 0) {
 			this.depthOnly(camera, this.glass);
@@ -3669,8 +3673,6 @@ export class WebGl2View implements ViewRenderer {
 			gl.disable(gl.BLEND);
 			this.count(this.clear);
 		}
-		// Over the see-through parts they are on.
-		if (images) this.drawImages(camera, "seeThrough");
 	}
 
 	/**
@@ -3963,8 +3965,8 @@ export class WebGl2View implements ViewRenderer {
 			}
 		};
 		draw();
-		// The solid parts' images then go into the depth, as WebGpuView's imageDepth.
-		if (layer === "solid") {
+		// Then into the depth, as WebGpuView's imageDepth: Overdraw's, the solid parts' only.
+		if (!added || layer === "solid") {
 			const cut = gl.getUniformLocation(this.imageProgram.program, "cut");
 			gl.colorMask(false, false, false, false);
 			gl.depthMask(true);

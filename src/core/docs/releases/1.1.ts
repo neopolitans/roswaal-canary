@@ -9,6 +9,21 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.88",
+		date: "2026-11-25",
+		headline: "A tablet stays cooler: fewer frames with the camera still, and sun shadow maps drawn only when needed.",
+		added: [
+			"**Effects while still**, in Settings › Scene view and the Rendering panel: moving particles and beams drawn at half rate while the camera is still, so a tablet rests between frames. Automatic halves them on a touch screen; moving the camera draws at full rate at once.",
+		],
+		changed: [
+			"**Sun shadow maps are drawn again only when the view moves past them**: each is drawn a little wider than it needs and kept while the camera stays inside it, rather than redrawn as the camera moves. Shadow texels are an eighth wider.",
+		],
+		fixed: [
+			"**Decals and Textures on see-through parts sit behind see-through parts in front of them**: they showed over every see-through part, and Glass in front cut them off.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.87",
 		date: "2026-11-25",
 		headline: "Light objects at Half stay sharp above 100% render scale.",

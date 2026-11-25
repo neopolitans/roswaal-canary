@@ -902,6 +902,23 @@ export function reflectionGrid(setting: string | undefined, touch: boolean): num
 	if (setting === "32" || setting === "64" || setting === "128") return Number(setting);
 	return touch ? 64 : null;
 }
+
+/**
+ * Whether frames drawn only for the view's own animation (moving particles
+ * and beams, a still frame's antialiasing settling), the camera and the
+ * place still, come at half the display's rate. Each draws the whole place:
+ * at the full rate a tablet drew without rest while nothing but the effects
+ * moved, grew hot and slowed its GPU within a minute. Automatic halves them
+ * on a touch screen.
+ */
+export function stillFramesHalved(setting: string | undefined, touch: boolean): boolean {
+	if (setting === "half") return true;
+	if (setting === "full") return false;
+	return touch;
+}
+
+/** Display frames let go by before each still frame, halved: every other one is drawn. */
+export const STILL_SKIP = 1;
 export const PROBE_NEAR = 0.5;
 export const PROBE_FAR = 4000;
 
@@ -978,12 +995,35 @@ export function boxBeyond(
 }
 
 /**
+ * How much wider than its slice of the view each sun cascade's map is drawn,
+ * as a share of the slice's radius: a map still holding the slice as the
+ * camera moves is read as it is, and drawn again only once the slice reaches
+ * its edge. See CascadeCadence. Texels an eighth wider.
+ */
+export const CASCADE_SLACK = 0.125;
+
+/**
+ * Where a cascade's map stands, across the sun's way: the slice's middle
+ * (`x`, `y`) and the radius it needs, and the map's middle as drawn, moved
+ * by whole texels (`sx`, `sy`), and radius, with CASCADE_SLACK.
+ */
+export interface CascadeFit {
+	x: number;
+	y: number;
+	need: number;
+	sx: number;
+	sy: number;
+	radius: number;
+}
+
+/**
  * The cascades for a view: each slice of the view, held in a sphere, seen by
  * the sun square on from beyond the whole place, so what casts a shadow into
  * the slice from outside it still does. Each map is moved only by whole texels
- * as the camera moves, so its edges do not crawl. Then how far each reaches,
- * the shadows' softness as a width in studs, and their texels' widths with
- * whether they are on.
+ * as the camera moves, so its edges do not crawl, and is CASCADE_SLACK wider
+ * than its slice. Then how far each reaches, the shadows' softness as a width
+ * in studs, and their texels' widths with whether they are on. `fits`, given,
+ * takes where each map stands.
  */
 export function cascadeBlock(
 	camera: Camera,
@@ -995,6 +1035,7 @@ export function cascadeBlock(
 	zeroToOne: boolean,
 	quality: ViewQuality = FULL_QUALITY,
 	mapSize: number = CASCADE_MAP,
+	fits?: CascadeFit[],
 ): Float32Array {
 	const block = new Float32Array(CASCADE_BLOCK);
 	const n = SUN_CASCADES.length;
@@ -1026,17 +1067,16 @@ export function cascadeBlock(
 	cascadeFars(quality.reach).forEach((far, i) => {
 		const mid = (near + far) / 2;
 		const corner = (d: number) => Math.hypot(d * tan * aspect, d * tan, d - mid);
-		const radius = Math.max(corner(near), corner(far)) + 1;
+		const need = Math.max(corner(near), corner(far)) + 1;
+		const radius = need * (1 + CASCADE_SLACK);
 		let centre = camera.eye.map((v, a) => v + ahead[a] * mid);
 		const texel = (2 * radius) / mapSize;
 		const cx = dot(centre, x);
 		const cy = dot(centre, y);
-		centre = centre.map(
-			(v, a) =>
-				v +
-				x[a] * (Math.round(cx / texel) * texel - cx) +
-				y[a] * (Math.round(cy / texel) * texel - cy),
-		);
+		const sx = Math.round(cx / texel) * texel;
+		const sy = Math.round(cy / texel) * texel;
+		fits?.push({ x: cx, y: cy, need, sx, sy, radius });
+		centre = centre.map((v, a) => v + x[a] * (sx - cx) + y[a] * (sy - cy));
 		const along = corners.map((c) => dot(c, back) - dot(centre, back));
 		const top = Math.max(radius, ...along) + 1;
 		const depth = top - Math.min(-radius, ...along) + 1;
@@ -1642,57 +1682,63 @@ export function renderLegend(mode: RenderMode): RenderLegend | null {
 	return null;
 }
 
-/**
- * How often each sun cascade is drawn again while only the camera moves, in
- * frames: the near one every frame, the next every second, the far one every
- * third. A far cascade covers hundreds of studs, so a frame's step barely
- * moves what it shows. The place or the sun changing draws them all.
- */
-export const CASCADE_EVERY = [1, 2, 3] as const;
-
-/** Whether two blocks are the same, value for value. */
-function sameBlock(a: Float32Array, b: Float32Array): boolean {
-	return a.length === b.length && a.every((v, i) => v === b[i]);
+/** Whether a map drawn at `drawn` still holds the slice `fresh` needs. */
+export function cascadeCovers(drawn: CascadeFit, fresh: CascadeFit): boolean {
+	return (
+		drawn.radius === fresh.radius &&
+		Math.hypot(fresh.x - drawn.sx, fresh.y - drawn.sy) + fresh.need <= drawn.radius
+	);
 }
 
 /**
- * Which sun cascades a frame draws, and the block the shaders then read:
- * each cascade's matrix and texel as its map was last drawn, so a cascade
- * not drawn this frame is read as it is in its map. When the camera stops,
- * the frame after draws every cascade still behind (`again` asks for it).
+ * Which sun cascades a frame draws, and the block the shaders then read.
+ * While only the camera moves, a cascade whose map still holds its slice of
+ * the view is not drawn again: the parts have not moved, so the map is as
+ * right as a new one, and is read with the matrix it was drawn with. Drawing
+ * the near one every frame, as before, cost a tablet much of a moving frame
+ * and kept it hot. The place, the sun, or the cascades' reach or map size
+ * changing draws them all.
  */
 export class CascadeCadence {
-	private fresh: Float32Array | null = null;
 	private key = "";
-	private frame = 0;
+	private drawn: (CascadeFit | null)[] = [];
 
 	/**
-	 * `fresh`: the block for this frame's camera; `last`: the block the
-	 * shaders read now; `sun`: the sun's way. Null when nothing is to be drawn.
+	 * `fresh`: the block for this frame's camera, and `fits`, where its maps
+	 * stand; `last`: the block the shaders read now; `sun`: the sun's way.
+	 * Null when nothing is to be drawn.
 	 */
 	next(
 		fresh: Float32Array,
+		fits: readonly CascadeFit[],
 		last: Float32Array,
 		sun: readonly number[],
 		partsMoved: boolean,
-	): { block: Float32Array; due: boolean[]; again: boolean } | null {
+	): { block: Float32Array; due: boolean[] } | null {
 		const n = SUN_CASCADES.length;
-		const moved = this.fresh === null || !sameBlock(fresh, this.fresh);
-		this.fresh = fresh;
 		// The sun, the softness, the cascades' reach or the map's size: all again.
 		const key = `${sun.join(",")}|${Array.from(fresh.subarray(n * 16)).join(",")}`;
-		const changed = key !== this.key;
+		const all = partsMoved || key !== this.key;
 		this.key = key;
-		if (!partsMoved && !changed && sameBlock(fresh, last)) return null;
-		const all = partsMoved || changed || !moved;
-		const due = SUN_CASCADES.map((_, k) => all || this.frame % CASCADE_EVERY[k] === 0);
-		this.frame++;
+		// No maps (no place, or no sun shadow): the block as it is, when it changed.
+		if (fits.length < n) {
+			this.drawn = [];
+			return all ? { block: fresh.slice(), due: SUN_CASCADES.map(() => true) } : null;
+		}
+		const due = SUN_CASCADES.map((_, k) => {
+			const drawn = this.drawn[k];
+			return all || !drawn || !cascadeCovers(drawn, fits[k]);
+		});
+		if (!due.some(Boolean)) return null;
 		const block = fresh.slice();
 		due.forEach((drawn, k) => {
-			if (drawn) return;
+			if (drawn) {
+				this.drawn[k] = fits[k];
+				return;
+			}
 			block.set(last.subarray(k * 16, k * 16 + 16), k * 16);
 			block[n * 16 + 4 + k] = last[n * 16 + 4 + k];
 		});
-		return { block, due, again: !due.every(Boolean) };
+		return { block, due };
 	}
 }

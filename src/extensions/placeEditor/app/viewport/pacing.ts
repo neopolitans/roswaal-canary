@@ -38,11 +38,14 @@ export class RefreshMeter {
 	private gaps: number[] = [];
 	private last = 0;
 
-	/** A frame drawn at `now`; the gap to the one before. */
-	drawn(now: number): number {
+	/**
+	 * A frame drawn at `now`; the gap to the one before. `measure` false: a
+	 * frame drawn on purpose late (a still one, halved), not the refresh's.
+	 */
+	drawn(now: number, measure = true): number {
 		const gap = now - this.last;
 		this.last = now;
-		if (gap > 0 && gap < 200) {
+		if (measure && gap > 0 && gap < 200) {
 			this.gaps.push(gap);
 			if (this.gaps.length > 120) this.gaps.shift();
 		}

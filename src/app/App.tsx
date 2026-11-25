@@ -505,6 +505,7 @@ export function App() {
 				textureResolution: sceneView.textureResolution ?? "full",
 				skyResolution: sceneView.skyResolution ?? "full",
 				reflectionUpdates: sceneView.reflectionUpdates ?? "auto",
+				stillFrames: sceneView.stillFrames ?? "auto",
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
@@ -530,6 +531,7 @@ export function App() {
 			sceneView.textureResolution,
 			sceneView.skyResolution,
 			sceneView.reflectionUpdates,
+			sceneView.stillFrames,
 		],
 	);
 	useEffect(() => viewport?.setOptions(viewOptions), [viewport, viewOptions]);

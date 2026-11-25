@@ -129,6 +129,13 @@ export const VIEWPORT_SKY_RESOLUTIONS = [
 	{ value: "quarter", label: "Quarter" },
 ] as const;
 
+/** Still frames: the effects' frames with the camera still, at the display's rate or half it. */
+export const VIEWPORT_STILL_FRAMES = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "full", label: "Full rate" },
+	{ value: "half", label: "Half rate" },
+] as const;
+
 /** Reflection updates: the place round the camera drawn following it, or kept on a grid. */
 export const VIEWPORT_REFLECTION_UPDATES = [
 	{ value: "auto", label: "Automatic" },
@@ -181,6 +188,8 @@ export interface PlaceEditorSettings {
 	lampResolution: "auto" | "full" | "half" | "quarter";
 	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
 	reflectionUpdates: "auto" | "follow" | "32" | "64" | "128";
+	/** Effects' frames with the camera still at half rate: see view.ts's stillFramesHalved. */
+	stillFrames: "auto" | "full" | "half";
 	/** The sky's share at fewer pixels: see the controller's skyModeNow. */
 	skyResolution: "full" | "half" | "quarter";
 	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
@@ -314,6 +323,16 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_SHADOW_MAPS,
+			},
+			{
+				key: "stillFrames",
+				title: "Effects while still",
+				help: "How often moving effects are drawn with the camera still.",
+				detail:
+					"Each of those frames draws the whole place. Half rate draws every other one, so a tablet rests between them and stays cool; moving the camera draws at full rate at once. Automatic halves them on a touch screen.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_STILL_FRAMES,
 			},
 			{
 				key: "reflectionUpdates",

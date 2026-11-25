@@ -42,6 +42,7 @@ import {
 	VIEWPORT_RENDERERS,
 	VIEWPORT_SHADOW_MAPS,
 	VIEWPORT_SKY_RESOLUTIONS,
+	VIEWPORT_STILL_FRAMES,
 	VIEWPORT_TEXTURE_RESOLUTIONS,
 	VIEWPORT_UPSCALES,
 	type ViewportFrameRate,
@@ -1077,6 +1078,7 @@ function SceneSettings({
 			{segmented("bloomResolution", VIEWPORT_BLOOM_RESOLUTIONS)}
 			{choice("shadowMapSize", VIEWPORT_SHADOW_MAPS)}
 			{segmented("textureResolution", VIEWPORT_TEXTURE_RESOLUTIONS)}
+			{choice("stillFrames", VIEWPORT_STILL_FRAMES)}
 			{choice("reflectionUpdates", VIEWPORT_REFLECTION_UPDATES)}
 			<PanelSetting settingKey="dynamicOptimization">
 				<input

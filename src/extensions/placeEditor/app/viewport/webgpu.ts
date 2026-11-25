@@ -80,6 +80,7 @@ import {
 	type Camera,
 	CameraHeading,
 	CascadeCadence,
+	type CascadeFit,
 	COST_FULL,
 	cascadeBlock,
 	DEFAULT_RENDER,
@@ -1414,8 +1415,8 @@ fn imageLit(i: IOut, t: vec4f) -> vec4f {
 @fragment fn fsImageRefl(i: IOut) -> @location(0) vec4f {
 	return imageLit(i, textureSampleBias(image, imageSampler, i.uv, u.lod.x));
 }
-// A solid part's Decal or Texture, where it is mostly opaque, into the depth:
-// a see-through part behind it is then hidden by it, one in front blends over it.
+// A Decal or Texture, where it is mostly opaque, into the depth: a see-through
+// part behind it is then hidden by it, one in front blends over it.
 @fragment fn fsImageDepth(i: IOut) -> @location(0) vec4f {
 	if (textureSample(image, imageSampler, i.uv).a * i.tint.a < 0.5) { discard; }
 	return vec4f(0.0);
@@ -3922,7 +3923,15 @@ fn at(c: vec2i) -> u32 {
 			pass.setPipeline(lean ? lit.solidWrite : lit.solid);
 			this.solids(pass);
 			this.count(this.draws);
-			if (images) this.drawImages(pass, "solid", camera.eye);
+			// The images, the see-through parts' too, before any see-through
+			// part, and into the depth where mostly opaque: one in front blends
+			// over them, one behind is hidden, and their own part, a lift
+			// behind them, stays under them. Drawn after them all, an image on
+			// a see-through part showed through every see-through part nearer.
+			if (images) {
+				this.drawImages(pass, "solid", camera.eye);
+				this.drawImages(pass, "seeThrough", camera.eye);
+			}
 			if (show.seeThrough && heat) {
 				// Each see-through layer adds its own share, Glass's included.
 				pass.setPipeline(this.heatAdded);
@@ -3945,8 +3954,6 @@ fn at(c: vec2i) -> u32 {
 					this.count(this.clear);
 				}
 			}
-			// Over the see-through parts they are on.
-			if (images) this.drawImages(pass, "seeThrough", camera.eye);
 			// Beams and particles, over everything see-through, farthest first.
 			this.drawEffects(pass, camera);
 		}
@@ -4636,8 +4643,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const order = imageOrder(this.imageList, layer, eye, (asset) => this.imageGroups.has(asset));
 		if (order.length === 0) return;
 		pass.setVertexBuffer(0, this.imageVertices);
-		// The solid parts' images then go into the depth, for the see-through parts drawn after.
-		for (const pipeline of layer === "solid" ? [colour, this.imageDepth] : [colour]) {
+		// Then into the depth, for the see-through parts drawn after.
+		for (const pipeline of [colour, this.imageDepth]) {
 			pass.setPipeline(pipeline);
 			let bound = "";
 			for (const q of order) {
@@ -6259,6 +6266,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		// Shadows frozen from the Rendering panel: the maps drawn last are sampled as they are.
 		if (this.render.freezeShadows) return;
 		const l = this.lighting;
+		const fits: CascadeFit[] = [];
 		const fresh = cascadeBlock(
 			camera,
 			this.width / this.height,
@@ -6269,20 +6277,19 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			true,
 			this.quality,
 			this.shadowMap,
+			fits,
 		);
-		// While only the camera moves, the far cascades on a cadence: see CascadeCadence.
-		const step = this.cadence.next(fresh, this.cascadeLast, l?.sun ?? [0, 1, 0], partsMoved);
+		// While only the camera moves, only the maps whose slice left them: see CascadeCadence.
+		const step = this.cadence.next(fresh, fits, this.cascadeLast, l?.sun ?? [0, 1, 0], partsMoved);
 		if (!step) return;
 		const { block, due } = step;
 		this.cascadeLast = block;
-		this.redrawn.sunMaps++;
 		const q = this.device.queue;
 		q.writeBuffer(this.cascadeUniform, 0, block);
-		// One frame more once the camera stops, for the cascades still behind.
-		if (step.again) this.onRedraw?.();
 		if (block[SUN_CASCADES.length * 16 + 7] !== 1) return;
 		this.cascadeGroups.forEach(({ buffer, group }, k) => {
 			if (!due[k]) return;
+			this.redrawn.sunMaps++;
 			q.writeBuffer(buffer, 0, block.subarray(k * 16, k * 16 + 16));
 			const pass = encoder.beginRenderPass({
 				timestampWrites: this.stamp("shadows"),

@@ -125,28 +125,43 @@ export function trustedOrigins(port: number, extra: readonly string[] = []): Set
  *    Not any loopback origin — a page served by some other server on this
  *    machine (a notebook, a dev server, a folder of downloaded HTML behind a
  *    static server) is somebody else's page, however local it is.
- *  - **Sec-Fetch-Site**, for the API, against the request that sends no
- *    `Origin`: an `<img>` or `<script>` on another site pointed at `/api/...`.
- *    The browser says where every request came from, and a page cannot change
- *    what it says. A navigation to the editor itself is not refused: following
- *    a link to it is how it is opened.
+ *  - **Sec-Fetch-Site**, against the request that sends no `Origin`: an
+ *    `<img>`, a `<script>` or a no-cors fetch on another site. The browser says
+ *    where every request came from, and a page cannot change what it says. The
+ *    API answers only its own pages. A page answers another site only when it
+ *    is a link being followed (`Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest:
+ *    document`), which is how the editor is opened; anything else is refused
+ *    before a file is read, so a site cannot keep the daemon busy serving it.
  *
  * A request with neither header is allowed: that is curl, the CLI, and
  * anything else that is not a browser, none of which a page can impersonate.
  */
 export function refusesConnection(
-	request: { host?: string; origin?: string; fetchSite?: string; api?: boolean },
+	request: {
+		host?: string;
+		origin?: string;
+		fetchSite?: string;
+		fetchMode?: string;
+		fetchDest?: string;
+		api?: boolean;
+	},
 	trusted: ReadonlySet<string>,
 ): string | null {
-	const { host, origin, fetchSite, api = false } = request;
+	const { host, origin, fetchSite, fetchMode, fetchDest, api = false } = request;
 	if (host !== undefined && !LOOPBACK.has(hostnameOf(host))) {
 		return `Roswaal only answers on localhost. This request asked for "${host}".`;
 	}
 	if (origin !== undefined && origin !== "" && !trusted.has(originKey(origin))) {
 		return `Roswaal does not serve other origins. This request came from "${origin}".`;
 	}
-	if (api && fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none") {
+	const elsewhere = fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none";
+	if (api && elsewhere) {
 		return "Roswaal answers its own pages. This request came from another site.";
+	}
+	// A page, asked for by another site: only as a link followed to open it.
+	// An <img>, a <script>, a fetch or a frame is refused before a file is read.
+	if (elsewhere && (fetchMode !== "navigate" || fetchDest !== "document")) {
+		return "Roswaal's pages open from a link. Another site cannot load them.";
 	}
 	return null;
 }
@@ -343,6 +358,8 @@ function guardConnections(app: express.Express, trusted: () => ReadonlySet<strin
 				host: req.headers.host,
 				origin: req.headers.origin,
 				fetchSite: req.header("sec-fetch-site"),
+				fetchMode: req.header("sec-fetch-mode"),
+				fetchDest: req.header("sec-fetch-dest"),
 				api: API_PATH.test(req.path),
 			},
 			trusted(),

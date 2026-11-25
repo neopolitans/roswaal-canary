@@ -289,9 +289,37 @@ describe("who the daemon answers", () => {
 		expect(ask(DAEMON, undefined, "none")).toBeNull();
 	});
 
+	/** A page, asked for in a given way, from a given site. */
+	const page = (fetchSite: string, fetchMode?: string, fetchDest?: string) =>
+		refusesConnection({ host: DAEMON, fetchSite, fetchMode, fetchDest, api: false }, own);
+
 	/** A link to the editor from anywhere is how it is opened. */
 	it("lets a page be opened from a link on another site", () => {
-		expect(ask(DAEMON, undefined, "cross-site", false)).toBeNull();
+		expect(page("cross-site", "navigate", "document")).toBeNull();
+		expect(page("same-site", "navigate", "document")).toBeNull();
+	});
+
+	/**
+	 * Anything else another site asks a page for: an `<img>`, a `<script>`, a
+	 * no-cors fetch or a frame. Refused before a file is read, so a site cannot
+	 * keep the daemon busy serving it.
+	 */
+	it("refuses a page to another site that embeds or fetches it", () => {
+		expect(page("cross-site", "no-cors", "image")).not.toBeNull();
+		expect(page("cross-site", "no-cors", "script")).not.toBeNull();
+		expect(page("cross-site", "cors", "empty")).not.toBeNull();
+		expect(page("cross-site", "navigate", "iframe")).not.toBeNull();
+		expect(page("same-site", "no-cors", "image")).not.toBeNull();
+		// The site's header with the others missing is not a navigation.
+		expect(page("cross-site")).not.toBeNull();
+	});
+
+	/** The editor's own pages, its workers and its assets, and typed addresses. */
+	it("serves a page to the editor itself however it asks", () => {
+		expect(page("same-origin", "no-cors", "script")).toBeNull();
+		expect(page("same-origin", "same-origin", "worker")).toBeNull();
+		expect(page("same-origin", "navigate", "iframe")).toBeNull();
+		expect(page("none", "navigate", "document")).toBeNull();
 	});
 
 	/**
@@ -366,6 +394,26 @@ describe("a daemon, before it listens", () => {
 		const health = await through(app, "GET", "/api/health");
 		expect(health.status).toBe(200);
 		expect(health.body).toMatchObject({ ok: true, project: null });
+	});
+
+	/** The guard comes before every page, so a refused embed never reaches a file. */
+	it("refuses a page another site embeds before looking for it", async () => {
+		const { app } = createDaemon({ token: KEY });
+		const embedded = await through(app, "GET", "/", {
+			"sec-fetch-site": "cross-site",
+			"sec-fetch-mode": "no-cors",
+			"sec-fetch-dest": "image",
+		});
+		expect(embedded.status).toBe(403);
+		expect(String(embedded.body.error)).toContain("open from a link");
+		// The same page followed from a link gets past the guard (and, with no
+		// editor mounted before the daemon starts, finds nothing).
+		const followed = await through(app, "GET", "/", {
+			"sec-fetch-site": "cross-site",
+			"sec-fetch-mode": "navigate",
+			"sec-fetch-dest": "document",
+		});
+		expect(followed.status).toBe(404);
 	});
 
 	it("answers a refusal in the one error shape", async () => {

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.72",
+		date: "2026-11-25",
+		headline: "Other sites cannot load the daemon's pages.",
+		changed: [
+			"**The daemon refuses a page that another site embeds or fetches**, as an image, a script or a fetch, before reading any file. Following a link to the editor from anywhere still opens it.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.71",
 		date: "2026-11-25",
 		headline: "The daemon holds up against unusual requests.",

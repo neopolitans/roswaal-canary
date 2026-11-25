@@ -281,11 +281,11 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Light objects resolution",
-						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU.",
+						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU, and WebGL2 where the light grid is off.",
 					],
 					[
 						"Light object grid",
-						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. **Off** has every pixel work out its own. WebGPU.",
+						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. **Off** has every pixel work out its own. WebGPU, and WebGL2 where it draws to float textures.",
 					],
 					[
 						"Sky light resolution",
@@ -305,11 +305,11 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Particle resolution",
-						"Pixels particles and beams are drawn at. **Half** draws them at half the pixels across and down, a quarter as many, into a layer laid over the place, smoothed: smoke and sparks that cover much of the view cost far less, and their edges against the parts in front soften a little. Where the place has no Neon glow, bloom or post effects, they are drawn at **Full**, the default. WebGPU.",
+						"Pixels particles and beams are drawn at. **Half** draws them at half the pixels across and down, a quarter as many, into a layer laid over the place, smoothed: smoke and sparks that cover much of the view cost far less, and their edges against the parts in front soften a little. Where the place has no Neon glow, bloom or post effects, they are drawn at **Full**, the default. WebGPU, and WebGL2 without MSAA.",
 					],
 					[
 						"Surface reflection accuracy",
-						"How closely reflections follow the camera. **Exact** draws the place round the camera again each 8 studs it moves, a cost while it moves; a **32**, **64** or **128-stud grid** draws one the first time the camera enters each cell, keeps the last eight and reads the one for where the camera is, which costs nothing once drawn and is less exact. **Automatic**, the default, is Exact on a computer and a 64-stud grid on a touch screen. WebGPU.",
+						"How closely reflections follow the camera. **Exact** draws the place round the camera again each 8 studs it moves, a cost while it moves; a **32**, **64** or **128-stud grid** draws one the first time the camera enters each cell, keeps the last eight and reads the one for where the camera is, which costs nothing once drawn and is less exact. **Automatic**, the default, is Exact on a computer and a 64-stud grid on a touch screen.",
 					],
 					[
 						"Texture resolution",

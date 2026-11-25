@@ -245,7 +245,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Renderer",
 				help: "WebGPU where the browser has it, WebGL2 where it does not.",
 				detail:
-					"Automatic draws with WebGPU where the browser has it, and WebGL2 where it does not. WebGPU falls back to WebGL2 on a device that has none. Upscaling, half-size light and the measured choices are WebGPU's.",
+					"Automatic draws with WebGPU where the browser has it, and WebGL2 where it does not. WebGPU falls back to WebGL2 on a device that has none. Upscaling and the sky's light at fewer pixels are WebGPU's.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_RENDERERS,
@@ -312,7 +312,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Light objects resolution",
 				help: "Pixels the lights are worked out at.",
 				detail:
-					"The light of PointLights, SpotLights and SurfaceLights. Automatic measures, as the view moves, whether half the pixels is faster in this place and keeps it only if so; it pays where many lights reach the same pixels. Full, Half or Quarter set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU.",
+					"The light of PointLights, SpotLights and SurfaceLights. Automatic measures, as the view moves, whether half the pixels is faster in this place and keeps it only if so; it pays where many lights reach the same pixels. Full, Half or Quarter set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU, and WebGL2 where the light grid is off.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LAMP_RESOLUTIONS,
@@ -322,7 +322,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Light object grid",
 				help: "Light objects worked out once in cells round the camera.",
 				detail:
-					"Rather than each pixel working out each light again every frame, the light is worked out into three grids round the camera, of cells 8, 16 or 32 studs as set and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size. It costs the same however many lights there are. Automatic follows the place's LightingStyle: Soft, 4-stud cells, flat as Studio draws it; Realistic, every pixel works out its own. Off, every pixel's own (Light objects resolution). WebGPU.",
+					"Rather than each pixel working out each light again every frame, the light is worked out into three grids round the camera, of cells 8, 16 or 32 studs as set and twice and four times that, again only when the lights change or the camera moves on. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size. It costs the same however many lights there are. Automatic follows the place's LightingStyle: Soft, 4-stud cells, flat as Studio draws it; Realistic, every pixel works out its own. Off, every pixel's own (Light objects resolution). WebGPU, and WebGL2 where it draws to float textures.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LIGHT_GRIDS,
@@ -372,7 +372,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Particle resolution",
 				help: "Pixels particles and beams are drawn at.",
 				detail:
-					"Half draws them at half the pixels across and down, a quarter as many, into a layer laid over the place, smoothed: smoke and sparks that cover much of the view cost far less, and their edges against the parts in front soften a little. Where the place has no Neon glow, bloom or post effects, they are drawn at Full. WebGPU.",
+					"Half draws them at half the pixels across and down, a quarter as many, into a layer laid over the place, smoothed: smoke and sparks that cover much of the view cost far less, and their edges against the parts in front soften a little. Where the place has no Neon glow, bloom or post effects, they are drawn at Full. WebGPU, and WebGL2 without MSAA.",
 				type: "choice",
 				default: "full",
 				choices: VIEWPORT_PARTICLE_RESOLUTIONS,
@@ -382,7 +382,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Surface reflection accuracy",
 				help: "How closely reflections follow the camera.",
 				detail:
-					"Exact draws the place round the camera again each 8 studs it moves: a cost while it moves. A grid draws one the first time the camera enters each cell of 32, 64 or 128 studs, keeps the last eight and reads the one for where the camera is: nothing to redraw once drawn, less exact. Automatic follows on a computer and keeps a 64-stud grid on a touch screen. WebGPU.",
+					"Exact draws the place round the camera again each 8 studs it moves: a cost while it moves. A grid draws one the first time the camera enters each cell of 32, 64 or 128 studs, keeps the last eight and reads the one for where the camera is: nothing to redraw once drawn, less exact. Automatic follows on a computer and keeps a 64-stud grid on a touch screen.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_REFLECTION_UPDATES,

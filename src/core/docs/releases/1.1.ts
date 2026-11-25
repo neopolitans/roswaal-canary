@@ -9,6 +9,21 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.110",
+		date: "2026-11-25",
+		headline: "WebGL2 catches up with WebGPU's savings: half-size lights and particles, and the reflection grid.",
+		added: [
+			"**Light object resolution on WebGL2**: light objects worked out at half or a quarter of the pixels, as on WebGPU, where the light grid is off. Automatic measures which one the device keeps up with.",
+			"**Reflection grid on WebGL2**: scene reflections drawn once a cell and kept, as on WebGPU.",
+			"**Particle resolution on WebGL2**: beams and particles at half size, where antialiasing is not MSAA.",
+		],
+		fixed: [
+			"**Thin Neon parts no longer flicker in the glow on WebGL2**, as on WebGPU.",
+			"**Reflections on WebGL2 are read from where they were drawn**, not from the camera.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.109",
 		date: "2026-11-25",
 		headline: "A canary's version stays inside its box on the landing page.",

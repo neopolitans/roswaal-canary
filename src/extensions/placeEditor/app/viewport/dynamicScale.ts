@@ -121,13 +121,14 @@ export class DynamicScale {
 /**
  * Dynamic optimization's savings, in the order they are taken while frames do
  * not fit, whatever the level, the least visible first: light objects at half
- * the pixels (the Full-resolution light switch off), bloom at half, bloom at a
- * quarter, light objects at a quarter. Each only lowers a resolution, never
+ * the pixels (the Full-resolution light switch off), the sky's light at half,
+ * bloom at half, bloom at a quarter, light objects at a quarter. Each only lowers a resolution, never
  * raises one Settings has set lower. On an iPad Mini at 150% and Native (25
  * Nov 2026), the lights and bloom at fewer pixels did most to hold 60 Hz.
  */
 export const DYNAMIC_SAVINGS = [
 	"fullResLamps",
+	"skyHalf",
 	"bloomHalf",
 	"bloomQuarter",
 	"lampsQuarter",
@@ -137,6 +138,7 @@ export type DynamicSaving = (typeof DYNAMIC_SAVINGS)[number];
 /** Each saving in words, for Inspect and a benchmark's report. */
 export const SAVING_LABELS: Record<DynamicSaving, string> = {
 	fullResLamps: "Light objects at half",
+	skyHalf: "Sky light at half",
 	bloomHalf: "Bloom at half",
 	bloomQuarter: "Bloom at a quarter",
 	lampsQuarter: "Light objects at a quarter",
@@ -146,10 +148,12 @@ export const SAVING_LABELS: Record<DynamicSaving, string> = {
 export function savingsCome(off: readonly string[]): {
 	lamps: "half" | "quarter" | null;
 	bloom: "half" | "quarter" | null;
+	sky: "half" | null;
 } {
 	return {
 		lamps: off.includes("lampsQuarter") ? "quarter" : off.includes("fullResLamps") ? "half" : null,
 		bloom: off.includes("bloomQuarter") ? "quarter" : off.includes("bloomHalf") ? "half" : null,
+		sky: off.includes("skyHalf") ? "half" : null,
 	};
 }
 

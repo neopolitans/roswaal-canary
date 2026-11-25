@@ -183,6 +183,8 @@ export interface ViewportOptions {
 	shadowMapSize?: "auto" | number;
 	/** The material textures, one or two mip levels smaller. See setTextureDetail. */
 	textureResolution?: "full" | "half" | "quarter";
+	/** The sky's share at fewer pixels, in the lights' half-size pass: see skyModeNow. */
+	skyResolution?: "full" | "half" | "quarter";
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -3028,6 +3030,13 @@ export class ViewportController {
 	/** The view's light objects as the setting, the switch, Dynamic optimization and the measurement say. */
 	private applyLampMode(): void {
 		this.view?.setLampMode?.(this.lampModeNow());
+		this.view?.setSkyMode?.(this.skyModeNow());
+	}
+
+	/** The sky's share as drawn now: Settings', or half where Dynamic optimization has taken that, never more pixels. */
+	private skyModeNow(): "full" | "half" | "quarter" {
+		const set = this.options.skyResolution ?? "full";
+		return set === "full" && this.savingsNow().sky === "half" ? "half" : set;
 	}
 
 	/** How light objects are drawn now: Settings', the switch's, Automatic's, less Dynamic optimization's savings. */

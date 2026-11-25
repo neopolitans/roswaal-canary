@@ -40,6 +40,7 @@ import {
 	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
 	VIEWPORT_SHADOW_MAPS,
+	VIEWPORT_SKY_RESOLUTIONS,
 	VIEWPORT_TEXTURE_RESOLUTIONS,
 	VIEWPORT_UPSCALES,
 	type ViewportFrameRate,
@@ -1071,6 +1072,7 @@ function SceneSettings({
 			{choice("renderScale", VIEWPORT_RENDER_SCALES, scaleLabels)}
 			{segmented("upscale", VIEWPORT_UPSCALES)}
 			{segmented("lampResolution", VIEWPORT_LAMP_RESOLUTIONS)}
+			{segmented("skyResolution", VIEWPORT_SKY_RESOLUTIONS)}
 			{segmented("bloomResolution", VIEWPORT_BLOOM_RESOLUTIONS)}
 			{choice("shadowMapSize", VIEWPORT_SHADOW_MAPS)}
 			{segmented("textureResolution", VIEWPORT_TEXTURE_RESOLUTIONS)}

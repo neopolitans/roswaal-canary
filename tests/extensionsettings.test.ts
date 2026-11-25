@@ -41,6 +41,7 @@ describe("an extension's settings", () => {
 			bloomResolution: "auto",
 			shadowMapSize: "auto",
 			textureResolution: "full",
+			skyResolution: "full",
 			antialiasing: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,

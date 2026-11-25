@@ -284,6 +284,10 @@ export function settingsPage(): DocPage {
 						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. WebGPU.",
 					],
 					[
+						"Sky light resolution",
+						"How many pixels the sky's light and shadow, Sky shadows' work, are worked out at. **Full**, the default, is every pixel; **Half** or **Quarter** works it out at fewer, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. It saves most on a tablet at a high render scale. WebGPU.",
+					],
+					[
 						"Bloom resolution",
 						"How many pixels Neon's glow and the place's BloomEffect are worked out at. **Automatic**, the default, is the quality level's: half the pixels at Level 12 and below, and a quarter where the view has more pixels than the screen has points. **Full**, **Half** or **Quarter** set it; fewer pixels are a little softer.",
 					],
@@ -297,7 +301,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Dynamic optimization",
-						"Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first: light objects at half the pixels, bloom at half and then a quarter, light objects at a quarter. It gives them back, the last first, once frames fit with room. With Render scale **Dynamic**, the savings go first. WebGPU. The Rendering panel offers it too, with Frame rate, Render scale, Upscaling and Renderer.",
+						"Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first: light objects at half the pixels, the sky's light at half, bloom at half and then a quarter, light objects at a quarter. It gives them back, the last first, once frames fit with room. With Render scale **Dynamic**, the savings go first. WebGPU. The Rendering panel offers it too, with Frame rate, Render scale, Upscaling and Renderer.",
 					],
 					[
 						"Antialiasing",

@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.84",
+		date: "2026-11-25",
+		headline: "The sky's light at half or a quarter of the pixels.",
+		added: [
+			"**Sky light resolution**, in Settings › Scene view and the Rendering panel: how much of the sky each surface sees, Sky shadows' work, at every pixel or at Half or Quarter, in the same pass as Light objects resolution's. It saves most on a tablet at a high render scale.",
+		],
+		changed: [
+			"**Dynamic optimization takes the sky's light at half second**, after light objects at half and before bloom.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.83",
 		date: "2026-11-25",
 		headline: "Hiding one panel from the Panels menu hides only it.",

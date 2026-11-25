@@ -477,6 +477,33 @@ fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	}
 	return partLights(i.world, n, v, gloss);
 }
+// A pixel's share of the sky from the half-size pass (FEATURE_BIT.halfSky),
+// read as lampsAt reads the lights: the four nearest whose distance from the
+// eye agrees with this pixel's, weighted as bilinear filtering would; where
+// none does, as at an edge, worked out here.
+fn skyAt(i: VOut, n: vec3f) -> f32 {
+	if (has(${FEATURE_BIT.halfSky}u)) {
+		let size = vec2i(textureDimensions(lampLight));
+		let at = i.clip.xy * (vec2f(size) / u.screen.xy) - 0.5;
+		let base = vec2i(floor(at));
+		let f = fract(at);
+		let dist = length(u.camPos.xyz - i.world);
+		let near = max(0.05, dist * 0.015);
+		var sky = 0.0;
+		var total = 0.0;
+		for (var k = 0; k < 4; k++) {
+			let o = vec2i(k & 1, k >> 1u);
+			let p = clamp(base + o, vec2i(0), size - vec2i(1));
+			if (abs(textureLoad(lampLight, p, 0).a - dist) < near) {
+				let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
+				sky = sky + textureLoad(lampShine, p, 0).a * w;
+				total = total + w;
+			}
+		}
+		if (total > 0.01) { return sky / total; }
+	}
+	return skyVisibility(i.world, n);
+}
 // The Rendering panel's heatmaps: the lights p is tested against, as
 // partLights walks them; those that reach it; and those weighed by how
 // strongly, by Range and cone as partLights eases them.
@@ -759,8 +786,9 @@ struct ReflU { viewProj: mat4x4f };
 	return o;
 }
 @fragment fn fsRefl(i: VOut) -> @location(0) vec4f { return vec4f(surface(i).rgb, 1.0); }
-// The half-size lamp pass: each solid part's lights at half the frame's
-// pixels, as surface() works them out, and its distance from the eye.
+// The half-size pass: each solid part's lights at half the frame's pixels,
+// as surface() works them out, its distance from the eye, and where the sky's
+// share is read from here too, that in the highlight's alpha.
 struct LampOut { @location(0) light: vec4f, @location(1) shine: vec4f };
 @fragment fn fsLamps(i: VOut) -> LampOut {
 	let a = u.mats[(i.look & 255u) * 3u];
@@ -769,10 +797,13 @@ struct LampOut { @location(0) light: vec4f, @location(1) shine: vec4f };
 	if (!has(${FEATURE_BIT.smooth}u)) { n = select(-faceN, faceN, dot(faceN, n) >= 0.0); }
 	let toEye = u.camPos.xyz - i.world;
 	let d = length(toEye);
-	let l = partLights(i.world, n, toEye / max(d, 1e-4), a.y * 2.0);
+	var l = Lamps(vec3f(0.0), vec3f(0.0));
+	if (has(${FEATURE_BIT.halfLamps}u)) { l = partLights(i.world, n, toEye / max(d, 1e-4), a.y * 2.0); }
+	var sky = 1.0;
+	if (has(${FEATURE_BIT.halfSky}u)) { sky = skyVisibility(i.world, n); }
 	var o: LampOut;
 	o.light = vec4f(l.diffuse, d);
-	o.shine = vec4f(l.spec, 1.0);
+	o.shine = vec4f(l.spec, sky);
 	return o;
 }
 // Highlight instances' mask: each pixel the Highlight of the part there, 1 to
@@ -1126,7 +1157,7 @@ fn surface(i: VOut) -> vec4f {
 		// Ambient everywhere, OutdoorAmbient and the sky as far as the sky
 		// reaches, and the sun where it does. A switch off leaves its light out
 		// of the lighting (renderFeatures.ts's litFor) or its bit unset.
-		let vis = skyVisibility(i.world, n);
+		let vis = skyAt(i, n);
 		// Turned from the sun, its light is nothing whatever the shadow: not looked up.
 		var sunK = 0.0;
 		if (ndl > 0.0) { sunK = sunSees(i.world, n); }
@@ -3756,7 +3787,12 @@ fn at(c: vec2i) -> u32 {
 		this.cull(camera, [...this.draws, ...this.glass]);
 		this.cpuCulling += performance.now() - culling;
 		// The lights at half size, before the passes that read them.
-		if (this.litBits() & FEATURE_BIT.halfLamps && !this.probe && !heat && !wire)
+		if (
+			this.litBits() & (FEATURE_BIT.halfLamps | FEATURE_BIT.halfSky) &&
+			!this.probe &&
+			!heat &&
+			!wire
+		)
 			this.drawLamps(encoder, lit.lamps);
 		// Occlusion: the solid parts' depth first, in a pass of its own.
 		const passes = passesOf(this.render.features);
@@ -5144,20 +5180,44 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** Light objects' resolution: full, the lamp pass not drawn; half or quarter its share. */
 	private lampModeNow: "full" | "half" | "quarter" = "full";
 
+	/** The sky's share at half or a quarter of the pixels: see skyAt. */
+	private skyModeNow: "full" | "half" | "quarter" = "full";
+
+	setSkyMode(mode: "full" | "half" | "quarter"): void {
+		if (mode === this.skyModeNow) return;
+		const was = this.halfShare();
+		this.skyModeNow = mode;
+		if (this.halfShare() !== was && this.device) {
+			this.makeLampTargets();
+			if (this.bind) this.rebind();
+		}
+		this.onRedraw?.();
+	}
+
+	/** The half-size pass's share of the frame across: a quarter where the lights or the sky ask for it. */
+	private halfShare(): number {
+		return this.lampModeNow === "quarter" || this.skyModeNow === "quarter" ? 4 : 2;
+	}
+
 	setLampMode(mode: "full" | "half" | "quarter"): void {
 		if (mode === this.lampModeNow) return;
-		const resized = (mode === "quarter") !== (this.lampModeNow === "quarter");
+		const was = this.halfShare();
 		this.lampModeNow = mode;
-		if (resized && this.device) {
+		if (this.halfShare() !== was && this.device) {
 			this.makeLampTargets();
 			if (this.bind) this.rebind();
 		}
 	}
 
-	/** The half-size bit as the lamp mode says, where the place has lights. */
+	/**
+	 * The half-size pass's bits: the lights' as the lamp mode says, where the
+	 * place has lights; the sky's as the sky mode says, where Sky shadows is on.
+	 */
 	private lampBit(bits: number): number {
-		const off = bits & ~FEATURE_BIT.halfLamps;
-		return this.lampModeNow !== "full" && this.hasLights ? off | FEATURE_BIT.halfLamps : off;
+		let out = bits & ~(FEATURE_BIT.halfLamps | FEATURE_BIT.halfSky);
+		if (this.lampModeNow !== "full" && this.hasLights) out |= FEATURE_BIT.halfLamps;
+		if (this.skyModeNow !== "full" && bits & FEATURE_BIT.skyShadows) out |= FEATURE_BIT.halfSky;
+		return out;
 	}
 
 	/** Whether the last frame drew with the pipelines for every switch, its own still being built. */
@@ -5172,7 +5232,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			format: "rgba16float",
 			usage: TEXTURE.TEXTURE_BINDING,
 		});
-		const share = this.lampModeNow === "quarter" ? 4 : 2;
+		const share = this.halfShare();
 		const size = [
 			Math.max(1, Math.ceil(this.width / share)),
 			Math.max(1, Math.ceil(this.height / share)),

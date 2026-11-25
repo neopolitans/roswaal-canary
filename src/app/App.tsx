@@ -503,6 +503,7 @@ export function App() {
 						? "auto"
 						: Number(sceneView.shadowMapSize),
 				textureResolution: sceneView.textureResolution ?? "full",
+				skyResolution: sceneView.skyResolution ?? "full",
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
@@ -526,6 +527,7 @@ export function App() {
 			sceneView.bloomResolution,
 			sceneView.shadowMapSize,
 			sceneView.textureResolution,
+			sceneView.skyResolution,
 		],
 	);
 	useEffect(() => viewport?.setOptions(viewOptions), [viewport, viewOptions]);

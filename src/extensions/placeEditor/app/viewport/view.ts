@@ -122,6 +122,8 @@ export interface ViewRenderer {
 	setLookLayers?(layers: readonly number[]): boolean;
 	/** Light objects' resolution, as the controller resolves it: see depthChoice.ts's lampMode. */
 	setLampMode?(mode: "full" | "half" | "quarter"): void;
+	/** The sky's share at half or a quarter of the pixels, in the lights' half-size pass. WebGPU. */
+	setSkyMode?(mode: "full" | "half" | "quarter"): void;
 	/**
 	 * The material textures read `step` mip levels smaller: 0 their own size,
 	 * 1 half, 2 a quarter. On WebGPU, Decals and Textures too.

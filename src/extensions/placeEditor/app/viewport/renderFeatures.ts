@@ -478,6 +478,8 @@ export const FEATURE_BIT = {
 	sceneReflect: 131072,
 	/** The lights' light read from the half-size pass, not worked out at each pixel: see lampsAt. */
 	halfLamps: 262144,
+	/** The sky's share read from the half-size pass too: see skyAt. */
+	halfSky: 524288,
 } as const;
 
 export function featureBits(features: RenderFeatures): number {

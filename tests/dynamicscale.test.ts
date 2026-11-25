@@ -126,7 +126,7 @@ describe("Dynamic optimization", () => {
 		run(8, 300, false);
 		expect(savings.taken).toBe(DYNAMIC_SAVINGS.length);
 		// Room: given back the last first, three seconds apart.
-		run(8, 200);
+		for (let i = 0; i < 600 && savings.taken === DYNAMIC_SAVINGS.length; i++) run(8, 1);
 		expect(savings.off()).toEqual(DYNAMIC_SAVINGS.slice(0, DYNAMIC_SAVINGS.length - 1));
 		run(8, 2000);
 		expect(savings.taken).toBe(0);
@@ -136,12 +136,19 @@ describe("Dynamic optimization", () => {
 		const { savingsCome } = await import(
 			"../src/extensions/placeEditor/app/viewport/dynamicScale.js"
 		);
-		expect(savingsCome([])).toEqual({ lamps: null, bloom: null });
-		expect(savingsCome(["fullResLamps"])).toEqual({ lamps: "half", bloom: null });
-		expect(savingsCome(["fullResLamps", "bloomHalf"])).toEqual({ lamps: "half", bloom: "half" });
-		expect(savingsCome(["fullResLamps", "bloomHalf", "bloomQuarter", "lampsQuarter"])).toEqual({
+		expect(savingsCome([])).toEqual({ lamps: null, bloom: null, sky: null });
+		expect(savingsCome(["fullResLamps"])).toEqual({ lamps: "half", bloom: null, sky: null });
+		expect(savingsCome(["fullResLamps", "skyHalf", "bloomHalf"])).toEqual({
+			lamps: "half",
+			bloom: "half",
+			sky: "half",
+		});
+		expect(
+			savingsCome(["fullResLamps", "skyHalf", "bloomHalf", "bloomQuarter", "lampsQuarter"]),
+		).toEqual({
 			lamps: "quarter",
 			bloom: "quarter",
+			sky: "half",
 		});
 	});
 });

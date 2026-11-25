@@ -122,6 +122,13 @@ export const VIEWPORT_SHADOW_MAPS = [
 	{ value: "4096", label: "4,096" },
 ] as const;
 
+/** Sky light resolution: the sky's share worked out at every pixel, or at fewer. */
+export const VIEWPORT_SKY_RESOLUTIONS = [
+	{ value: "full", label: "Full" },
+	{ value: "half", label: "Half" },
+	{ value: "quarter", label: "Quarter" },
+] as const;
+
 /** Texture resolution: the material textures read at their own size, or smaller. */
 export const VIEWPORT_TEXTURE_RESOLUTIONS = [
 	{ value: "full", label: "Full" },
@@ -163,6 +170,8 @@ export interface PlaceEditorSettings {
 	dynamicOptimization: boolean;
 	/** Light objects' resolution: see depthChoice.ts's lampMode. */
 	lampResolution: "auto" | "full" | "half" | "quarter";
+	/** The sky's share at fewer pixels: see the controller's skyModeNow. */
+	skyResolution: "full" | "half" | "quarter";
 	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
 	bloomResolution: "auto" | "full" | "half" | "quarter";
 	/** The sun's shadow maps, texels a side, or the quality level's. */
@@ -249,7 +258,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Dynamic optimization",
 				help: "Takes savings while frames do not fit.",
 				detail:
-					"Whatever the quality level, the view takes savings while frames do not fit the display, the least visible first: light objects at half the pixels, bloom at half and then a quarter, light objects at a quarter. It gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
+					"Whatever the quality level, the view takes savings while frames do not fit the display, the least visible first: light objects at half the pixels, the sky's light at half, bloom at half and then a quarter, light objects at a quarter. It gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
 				type: "boolean",
 				default: false,
 				on: "Takes savings while frames do not fit",
@@ -264,6 +273,16 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_LAMP_RESOLUTIONS,
+			},
+			{
+				key: "skyResolution",
+				title: "Sky light resolution",
+				help: "Pixels the sky's light and shadow are worked out at.",
+				detail:
+					"How much of the sky each surface sees, which Sky shadows works out from the sky's maps at every pixel: a tablet's costliest work at a high render scale. Half or Quarter works it out at fewer pixels, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. WebGPU.",
+				type: "choice",
+				default: "full",
+				choices: VIEWPORT_SKY_RESOLUTIONS,
 			},
 			{
 				key: "bloomResolution",

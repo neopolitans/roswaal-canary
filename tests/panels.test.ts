@@ -41,6 +41,7 @@ import {
 	type PanelFrame,
 	panelsFor,
 	panelsIn,
+	panelToggle,
 	readLayout,
 	reopenPanel,
 	resizeDock,
@@ -685,5 +686,65 @@ describe("the Panels menu", () => {
 			const offered = panelsFor(context, true);
 			expect(offered).toEqual(PANEL_IDS.filter((id) => offered.includes(id)));
 		}
+	});
+});
+
+/**
+ * The Panels menu, on a computer. Rendering, Performance and Mesh Debug merged
+ * into one card and taken apart again all land in one dock; hiding one hid
+ * that dock, so all three went together (canary.82).
+ */
+describe("the Panels menu hiding and showing one panel", () => {
+	const all = () => true;
+	/** Rendering, Performance and Mesh Debug docked on the left, cards of their own after a merge and a split. */
+	const merged = (): Layout => {
+		let layout = base();
+		// They start floating: docked on the left, as the author's were.
+		for (const id of ["render", "performance", "meshes"] as const)
+			layout = dropCard(reopenPanel(layout, id), id, { kind: "dock", side: "left" });
+		layout = dropCard(layout, "performance", { kind: "tab", host: "render" });
+		layout = dropCard(layout, "meshes", { kind: "tab", host: "render" });
+		layout = separate(layout, "performance");
+		layout = separate(layout, "meshes");
+		return layout;
+	};
+
+	it("closes only that panel where others share its dock", () => {
+		const layout = merged();
+		expect(layout.panels.render.floating).toBeFalsy();
+		expect(layout.panels.performance.tabOf).toBeUndefined();
+		expect(panelToggle(layout, "render", true, all)).toBe("close");
+		const after = closePanel(layout, "render");
+		expect(after.panels.render.open).toBe(false);
+		expect(after.panels.performance.open).toBe(true);
+		expect(after.panels.meshes.open).toBe(true);
+		expect(dockVisible(after, after.panels.performance.dock)).toBe(true);
+	});
+
+	it("closes a tab alone, out of its card", () => {
+		const layout = dropCard(merged(), "meshes", { kind: "tab", host: "render" });
+		expect(panelToggle(layout, "meshes", true, all)).toBe("close");
+		expect(closePanel(layout, "meshes").panels.render.open).toBe(true);
+	});
+
+	/** Alone in its dock, as the place's Explorer often is: its side goes, keeping where it was. */
+	it("hides the dock where the panel is alone in it", () => {
+		let layout = base();
+		layout = closePanel(layout, "variables");
+		expect(panelToggle(layout, "tree", true, all)).toBe("hideDock");
+	});
+
+	it("closes a floating panel, and opens a closed one or its hidden dock", () => {
+		const floating = floatPanel(merged(), "render", true);
+		expect(panelToggle(floating, "render", true, all)).toBe("close");
+		expect(panelToggle(closePanel(merged(), "render"), "render", false, all)).toBe("reopen");
+		expect(panelToggle(merged(), "render", false, all)).toBe("showDock");
+	});
+
+	/** A panel with nothing to show does not count as sharing the dock. */
+	it("counts only the panels with something to show", () => {
+		const layout = merged();
+		const onlyRender = (id: string) => id === "render";
+		expect(panelToggle(layout, "render", true, onlyRender)).toBe("hideDock");
 	});
 });

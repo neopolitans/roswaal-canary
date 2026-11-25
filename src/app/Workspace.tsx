@@ -73,6 +73,7 @@ import {
 	PANEL_TITLES,
 	type PanelFrame,
 	type PanelId,
+	panelToggle,
 	reopenPanel,
 	seeThroughCard,
 	separate,
@@ -400,12 +401,17 @@ export function Workspace({
 				toggleCard: (id) => {
 					if (contents[id] === undefined) return;
 					const head = effective.panels[cardOf(effective, id)];
-					if (cardOnScreen(id)) {
-						// A floating card shuts by itself; a docked one goes with its side.
-						if (head.floating) onLayout?.((l) => closePanel(l, id));
-						else onToggle?.(head.dock);
-					} else if (!effective.panels[id].open) onLayout?.((l) => reopenPanel(l, id));
-					else onToggle?.(head.dock);
+					// This panel alone, unless it is alone in its dock: see panelToggle.
+					switch (panelToggle(effective, id, cardOnScreen(id), shown)) {
+						case "close":
+							onLayout?.((l) => closePanel(l, id));
+							return;
+						case "reopen":
+							onLayout?.((l) => reopenPanel(l, id));
+							return;
+						default:
+							onToggle?.(head.dock);
+					}
 				},
 				available: (id) => contents[id] !== undefined,
 			};

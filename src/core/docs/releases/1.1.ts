@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.83",
+		date: "2026-11-25",
+		headline: "Hiding one panel from the Panels menu hides only it.",
+		fixed: [
+			"**Hiding a docked panel from the Panels menu closes only that panel** where others share its side. It hid the whole side, so panels merged into one card and taken apart again hid and showed together. A panel alone on its side still takes the side with it, as before.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.82",
 		date: "2026-11-25",
 		headline: "Neon glows the same with MSAA, and the corner says where the camera is.",

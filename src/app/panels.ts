@@ -1014,6 +1014,33 @@ export function closePanel(layout: Layout, panel: PanelId): Layout {
 	return patch(separate(layout, panel), panel, { open: false });
 }
 
+/**
+ * What the Panels menu does to one panel, on a computer, as it shows or hides
+ * it. Shown and floating, or shown in a dock other cards share: that panel
+ * closes, and only it. Shown alone in its dock: the dock goes, keeping where
+ * the card was, as a column's button hides its column. Closed: it opens again.
+ * Open in a hidden dock: the dock comes back.
+ *
+ * Hiding a docked panel used to hide its whole dock, so panels merged into one
+ * card and taken apart again, now all in one dock, hid and showed together.
+ */
+export function panelToggle(
+	layout: Layout,
+	panel: PanelId,
+	onScreen: boolean,
+	shown: (id: PanelId) => boolean,
+): "close" | "hideDock" | "reopen" | "showDock" {
+	const head = layout.panels[cardOf(layout, panel)];
+	if (!onScreen) return layout.panels[panel].open ? "showDock" : "reopen";
+	if (head.floating) return "close";
+	const sharing = PANEL_IDS.some((other) => {
+		if (other === panel || !shown(other) || !layout.panels[other].open) return false;
+		const card = layout.panels[cardOf(layout, other)];
+		return !card.floating && card.dock === head.dock;
+	});
+	return sharing ? "close" : "hideDock";
+}
+
 /** A closed panel back, as a card of its own at the end of its dock. */
 export function reopenPanel(layout: Layout, panel: PanelId): Layout {
 	const state = layout.panels[panel];

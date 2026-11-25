@@ -28,6 +28,37 @@ export const CHUNK_BIG = 4;
 /** How far the eye may be from where a depth image was drawn for it still to hide parts, studs. */
 export const DEPTH_EYE_SLACK = 0.05;
 
+/**
+ * Triangles a shape must have for occlusion to test its parts. A box part is
+ * 12 and drawn in one draw with every other: the depth pass already keeps
+ * what is hidden from being shaded, so leaving one out saves next to nothing,
+ * and testing splits the draw into runs. A mesh of thousands of triangles
+ * hidden behind a wall is what occlusion is for.
+ */
+export const OCCLUSION_MIN_TRIANGLES = 64;
+
+/** Whether occlusion tests a draw's parts: a shape of `indexCount` indices. */
+export function occlusionTests(indexCount: number): boolean {
+	return indexCount / 3 >= OCCLUSION_MIN_TRIANGLES;
+}
+
+/**
+ * Whether the eye has moved since the frame before, further than a depth image
+ * allows: its image could not be used, so it is not made or read back.
+ */
+export class EyeTrack {
+	private last: number[] | null = null;
+	/** This frame's eye, noted: true where it moved since the last one. */
+	moved(eye: readonly number[]): boolean {
+		const last = this.last;
+		this.last = [eye[0], eye[1], eye[2]];
+		return (
+			last === null ||
+			Math.hypot(eye[0] - last[0], eye[1] - last[1], eye[2] - last[2]) > DEPTH_EYE_SLACK
+		);
+	}
+}
+
 /** A run of instances, by their place in the draw's (reordered) buffer, and the box round them. */
 export interface Chunk {
 	first: number;

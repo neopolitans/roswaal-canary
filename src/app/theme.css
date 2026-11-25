@@ -24012,7 +24012,10 @@ textarea.tb:where(:disabled) {
 	white-space: nowrap;
 }
 
+/* A fixed share of the row, whatever its words: what lets a dropdown tell
+   whether its words fit, and say "Auto" where they do not (autoFit.ts). */
 .render-setting-head > select {
+	flex: 0 0 62%;
 	min-width: 0;
 	max-width: 62%;
 }

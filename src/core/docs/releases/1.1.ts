@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.79",
+		date: "2026-11-25",
+		headline: "Occlusion culling costs nothing where it cannot help, and Auto where Automatic does not fit.",
+		changed: [
+			"**Occlusion culling tests only meshes**, where leaving out what is hidden saves work; parts keep being drawn together, and a place without meshes pays nothing for the switch.",
+			"**Occlusion culling does no work while the camera moves**, when what it measured could not be used.",
+			"**Automatic reads Auto in the Rendering panel where a dropdown or a choice has not the room**, and in full where it has.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.78",
 		date: "2026-11-25",
 		headline: "Occlusion culling is off at every level.",

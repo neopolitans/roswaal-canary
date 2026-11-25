@@ -29,6 +29,8 @@ import {
 	type DepthImage,
 	depthCells,
 	depthFits,
+	EyeTrack,
+	occlusionTests,
 	rowRuns,
 	sameView,
 	sidePlanes,
@@ -1810,6 +1812,11 @@ export class WebGl2View implements ViewRenderer {
 	} | null = null;
 	private cullView: { vp: Float32Array; eye: number[] } | null = null;
 	private occlusionStale = false;
+	/** The camera's eye frame to frame: occlusion's image is not made while it moves. */
+	private eyes = new EyeTrack();
+	private eyeMoving = true;
+	/** Whether this frame's culling tests anything against occlusion's image. */
+	private occludable = false;
 
 	/** Takes up a read the GPU has finished, as the depth image for the next culling. */
 	private pollFar(): void {
@@ -1957,7 +1964,10 @@ export class WebGl2View implements ViewRenderer {
 	 * not hidden behind the last frame's solid parts. Found after the shadow
 	 * and sky maps, which draw every part, and cleared when the frame is done.
 	 */
-	private cull(camera: Camera, draws: readonly { chunks?: Chunk[]; count: number }[]): void {
+	private cull(
+		camera: Camera,
+		draws: readonly { chunks?: Chunk[]; count: number; indexCount: number }[],
+	): void {
 		this.runs.clear();
 		const passes = passesOf(this.render.features);
 		const distance = this.quality.distance;
@@ -1972,16 +1982,21 @@ export class WebGl2View implements ViewRenderer {
 		);
 		const planes = sidePlanes(vp);
 		this.pollFar();
+		// Occlusion's image is made only where a draw is tested against it (see
+		// occlusionTests), and not while the eye moves, which leaves it unusable.
+		this.eyeMoving = this.eyes.moved(camera.eye);
+		this.occludable =
+			passes.occlusion && draws.some((d) => d.chunks && occlusionTests(d.indexCount));
 		const depth =
-			passes.occlusion && depthFits(this.depthImage, camera.eye) ? this.depthImage : null;
+			this.occludable && depthFits(this.depthImage, camera.eye) ? this.depthImage : null;
 		this.cullView = { vp, eye: [...camera.eye] };
 		// Drawn with another view's depth: draw again once this view's arrives.
-		this.occlusionStale = passes.occlusion && !sameView(depth?.viewProj, vp);
+		this.occlusionStale = this.occludable && !sameView(depth?.viewProj, vp);
 		// Past the quality level's render distance nothing is drawn, as in Studio.
-		const seen = (min: readonly number[], max: readonly number[]) =>
+		const seen = (min: readonly number[], max: readonly number[], occlude = true) =>
 			(distance === null || !boxBeyond(camera.eye, min, max, distance)) &&
 			(!passes.frustum || boxInView(planes, min, max)) &&
-			!(depth && boxHidden(depth, min, max));
+			!(occlude && depth && boxHidden(depth, min, max));
 		let drawn = 0;
 		let of = 0;
 		for (const draw of draws) {
@@ -1990,7 +2005,9 @@ export class WebGl2View implements ViewRenderer {
 				drawn += draw.count;
 				continue;
 			}
-			const runs = visibleRuns(draw.chunks, (c) => seen(c.min, c.max));
+			// Only a shape of many triangles is tested for occlusion; the rest keep their runs whole.
+			const occlude = occlusionTests(draw.indexCount);
+			const runs = visibleRuns(draw.chunks, (c) => seen(c.min, c.max, occlude));
 			this.runs.set(draw, runs);
 			for (let i = 1; i < runs.length; i += 2) drawn += runs[i];
 		}
@@ -3406,7 +3423,8 @@ export class WebGl2View implements ViewRenderer {
 		// The camera's passes from here draw only the chunks in view.
 		this.cull(camera, [...this.draws, ...this.glass]);
 		const culling = passesOf(this.render.features);
-		if (culling.occlusion) {
+		// For occlusion alone: none while nothing is tested against it or the eye moves.
+		if (culling.occlusion && this.occludable && !this.eyeMoving) {
 			this.drawFar(camera);
 			clock?.mark("occlusion");
 		}

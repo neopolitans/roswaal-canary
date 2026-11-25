@@ -219,7 +219,7 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 				"occlusionCulling",
 				"Occlusion culling",
 				0,
-				"Parts hidden behind solid parts are not drawn, tested against the last frame. Off at every level: the depth pass it needs measured slower than what it saved on an iPad and on desktop GPUs. Turn it on where a place hides much behind walls; the wireframe shows what is left.",
+				"Meshes hidden behind solid parts are not drawn, tested against a recent frame while the camera is still. Off at every level: it measured slower than it saved on an iPad and on desktop GPUs. Turn it on where a place hides many detailed meshes behind walls; the wireframe shows what is left.",
 				undefined,
 				false,
 				true,

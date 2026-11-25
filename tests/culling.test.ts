@@ -11,6 +11,9 @@ import {
 	type DepthImage,
 	depthCells,
 	depthFits,
+	EyeTrack,
+	OCCLUSION_MIN_TRIANGLES,
+	occlusionTests,
 	sameView,
 	sidePlanes,
 	visibleRuns,
@@ -166,5 +169,28 @@ describe("culling", () => {
 		expect(sameView(vp, vp)).toBe(true);
 		expect(sameView(view([0, 1, 0], [0, 0, -1]), vp)).toBe(false);
 		expect(sameView(null, vp)).toBe(false);
+	});
+});
+
+/**
+ * Occlusion made cheaper (1.1.0-canary.79): only shapes of many triangles are
+ * tested, and no image is made while the eye moves, which could not use it.
+ */
+describe("what occlusion tests, and when", () => {
+	it("tests a mesh's parts, never a box part's", () => {
+		// A box: 12 triangles, 36 indices. A mesh of a thousand triangles.
+		expect(occlusionTests(36)).toBe(false);
+		expect(occlusionTests(3000)).toBe(true);
+		expect(occlusionTests(OCCLUSION_MIN_TRIANGLES * 3)).toBe(true);
+		expect(occlusionTests(OCCLUSION_MIN_TRIANGLES * 3 - 3)).toBe(false);
+	});
+
+	it("says the eye moved on the first frame and on any move past the slack, not when still", () => {
+		const eyes = new EyeTrack();
+		expect(eyes.moved([0, 5, 0])).toBe(true);
+		expect(eyes.moved([0, 5, 0])).toBe(false);
+		expect(eyes.moved([0, 5.01, 0])).toBe(false);
+		expect(eyes.moved([1, 5, 0])).toBe(true);
+		expect(eyes.moved([1, 5, 0])).toBe(false);
 	});
 });

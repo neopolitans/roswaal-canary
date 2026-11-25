@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.47.1",
+	version: "0.48.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.48.0",
+			roswaal: "1.1.0-canary.79",
+			date: "2026-11-25",
+			text: "Occlusion cheaper: occlusionTests (64+ triangles a shape) and EyeTrack in culling.ts; no depth image or read-back while the eye moves or nothing is tested, on WebGPU and WebGL2. autoFit.ts: FitSelect and SettingButtons say Auto when their full words do not fit.",
+		},
 		{
 			version: "0.47.1",
 			roswaal: "1.1.0-canary.78",

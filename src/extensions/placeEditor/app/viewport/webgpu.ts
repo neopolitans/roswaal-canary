@@ -36,6 +36,8 @@ import {
 	type DepthImage,
 	depthCells,
 	depthFits,
+	EyeTrack,
+	occlusionTests,
 	rowRuns,
 	sameView,
 	sidePlanes,
@@ -1767,7 +1769,10 @@ export class WebGpuView implements ViewRenderer {
 	 * not hidden behind the last frame's solid parts. Found after the shadow
 	 * and sky maps, which draw every part, and cleared when the frame is done.
 	 */
-	private cull(camera: Camera, draws: readonly { chunks?: Chunk[]; count: number }[]): void {
+	private cull(
+		camera: Camera,
+		draws: readonly { chunks?: Chunk[]; count: number; indexCount: number }[],
+	): void {
 		this.runs.clear();
 		const passes = passesOf(this.render.features);
 		const distance = this.quality.distance;
@@ -1781,16 +1786,21 @@ export class WebGpuView implements ViewRenderer {
 			lookAt(camera.eye, camera.at),
 		);
 		const planes = sidePlanes(vp);
+		// Occlusion's image is made only where a draw is tested against it (see
+		// occlusionTests), and not while the eye moves, which leaves it unusable.
+		this.eyeMoving = this.eyes.moved(camera.eye);
+		this.occludable =
+			passes.occlusion && draws.some((d) => d.chunks && occlusionTests(d.indexCount));
 		const depth =
-			passes.occlusion && depthFits(this.depthImage, camera.eye) ? this.depthImage : null;
+			this.occludable && depthFits(this.depthImage, camera.eye) ? this.depthImage : null;
 		this.cullView = { vp, eye: [...camera.eye] };
 		// Drawn with another view's depth: draw again once this view's arrives.
-		this.occlusionStale = passes.occlusion && !sameView(depth?.viewProj, vp);
+		this.occlusionStale = this.occludable && !sameView(depth?.viewProj, vp);
 		// Past the quality level's render distance nothing is drawn, as in Studio.
-		const seen = (min: readonly number[], max: readonly number[]) =>
+		const seen = (min: readonly number[], max: readonly number[], occlude = true) =>
 			(distance === null || !boxBeyond(camera.eye, min, max, distance)) &&
 			(!passes.frustum || boxInView(planes, min, max)) &&
-			!(depth && boxHidden(depth, min, max));
+			!(occlude && depth && boxHidden(depth, min, max));
 		let drawn = 0;
 		let of = 0;
 		for (const draw of draws) {
@@ -1799,7 +1809,9 @@ export class WebGpuView implements ViewRenderer {
 				drawn += draw.count;
 				continue;
 			}
-			const runs = visibleRuns(draw.chunks, (c) => seen(c.min, c.max));
+			// Only a shape of many triangles is tested for occlusion; the rest keep their runs whole.
+			const occlude = occlusionTests(draw.indexCount);
+			const runs = visibleRuns(draw.chunks, (c) => seen(c.min, c.max, occlude));
 			this.runs.set(draw, runs);
 			for (let i = 1; i < runs.length; i += 2) drawn += runs[i];
 		}
@@ -3788,8 +3800,14 @@ fn at(c: vec2i) -> u32 {
 			encoder = this.cut(encoder, "glowSources");
 		}
 		// After the glow, which clears the same depth for its own pass.
+		// The lean path's small depth is for occlusion alone: none while nothing
+		// is tested against it or the eye moves. The full path's is the main
+		// pass's depth as well, and is drawn; only its image is left unmade.
 		const readBack =
-			passes.occlusion && (lean ? this.drawFarSmall(encoder) : this.drawFar(encoder));
+			passes.occlusion &&
+			(lean
+				? this.occludable && !this.eyeMoving && this.drawFarSmall(encoder)
+				: this.drawFar(encoder));
 		if (passes.occlusion) encoder = this.cut(encoder, "occlusion");
 		let pass = encoder.beginRenderPass({
 			timestampWrites: this.stamp("scene"),
@@ -4101,6 +4119,11 @@ fn at(c: vec2i) -> u32 {
 	/** The view the culling used this frame, and whether its depth image was another view's. */
 	private cullView: { vp: Float32Array; eye: number[] } | null = null;
 	private occlusionStale = false;
+	/** The camera's eye frame to frame: occlusion's image is not made while it moves. */
+	private eyes = new EyeTrack();
+	private eyeMoving = true;
+	/** Whether this frame's culling tests anything against occlusion's image. */
+	private occludable = false;
 
 	/**
 	 * The solid parts' depth in a pass of its own, so Glass and the rest drawn
@@ -4129,6 +4152,7 @@ fn at(c: vec2i) -> u32 {
 		pass.setPipeline(this.solidDepth);
 		this.solids(pass);
 		pass.end();
+		if (!this.occludable || this.eyeMoving) return false;
 		return this.reduceFar(encoder, this.depth!, this.width, this.height, this.samples);
 	}
 

@@ -43,6 +43,7 @@ import {
 	type ViewportRenderer,
 } from "../settings.js";
 import { AutomaticSection, automaticText } from "./AutomaticSection.jsx";
+import { shortAuto, useTight } from "./autoFit.js";
 import { GizmoSection } from "./GizmoSection.jsx";
 import { StartLogSection } from "./StartLogSection.jsx";
 import { placeScene, type SceneSince } from "./sceneApi.js";
@@ -935,6 +936,72 @@ function PanelSetting({
 }
 
 /**
+ * A dropdown whose options say "Auto" for "Automatic" while it has not the
+ * room for its chosen words (see autoFit.ts). Its options are drawn by
+ * `children`, told whether it is tight; each option that shortens carries
+ * its full words in `data-full`.
+ */
+function FitSelect({
+	label,
+	value,
+	words,
+	onChoose,
+	children,
+}: {
+	label: string;
+	value: string;
+	/** Whatever changes the options' words. */
+	words: string;
+	onChoose: (value: string) => void;
+	children: (tight: boolean) => ReactNode;
+}) {
+	const [ref, tight] = useTight<HTMLSelectElement>(`${value}|${words}`);
+	return (
+		<select
+			ref={ref}
+			className="tb place-edit-field"
+			aria-label={label}
+			value={value}
+			onChange={(e) => onChoose(e.target.value)}
+		>
+			{children(tight)}
+		</select>
+	);
+}
+
+/** Choices side by side, "Auto" for "Automatic" while a button has not the room. */
+function SettingButtons({
+	label,
+	choices,
+	value,
+	onChoose,
+}: {
+	label: string;
+	choices: readonly { value: string; label: string }[];
+	value: string;
+	onChoose: (value: string) => void;
+}) {
+	const [ref, tight] = useTight<HTMLDivElement>(choices.map((c) => c.label).join("|"));
+	return (
+		<div ref={ref} className="segmented render-segmented" role="group" aria-label={label}>
+			{choices.map((c) => (
+				<button
+					key={c.value}
+					type="button"
+					data-full={c.label}
+					className={value === c.value ? "on" : ""}
+					aria-pressed={value === c.value}
+					aria-label={tight && shortAuto(c.label, true) !== c.label ? c.label : undefined}
+					onClick={() => onChoose(c.value)}
+				>
+					{shortAuto(c.label, tight)}
+				</button>
+			))}
+		</div>
+	);
+}
+
+/**
  * The Scene view settings the Rendering panel offers beside Quality and
  * Antialiasing, so they are at hand while looking at the view: each saved
  * as Settings saves it. Three or four short choices are side by side, so all
@@ -959,47 +1026,35 @@ function SceneSettings({
 		labels: Record<string, string> = {},
 	) => (
 		<PanelSetting settingKey={key} key={key}>
-			<select
-				className="tb place-edit-field"
-				aria-label={SCENE_WORDS.get(key)?.title}
+			<FitSelect
+				label={SCENE_WORDS.get(key)?.title ?? key}
 				value={valueOf(key, choices)}
-				onChange={(e) => onScene(key, e.target.value)}
+				words={choices.map((c) => labels[c.value] ?? c.label).join("|")}
+				onChoose={(value) => onScene(key, value)}
 			>
-				{choices.map((c) => (
-					<option key={c.value} value={c.value}>
-						{labels[c.value] ?? c.label}
-					</option>
-				))}
-			</select>
+				{(tight) =>
+					choices.map((c) => (
+						<option key={c.value} value={c.value} data-full={labels[c.value] ?? c.label}>
+							{shortAuto(labels[c.value] ?? c.label, tight)}
+						</option>
+					))
+				}
+			</FitSelect>
 		</PanelSetting>
 	);
 	const segmented = (
 		key: keyof PlaceEditorSettings,
 		choices: readonly { value: string; label: string }[],
-	) => {
-		const value = valueOf(key, choices);
-		return (
-			<PanelSetting settingKey={key} key={key} below>
-				<div
-					className="segmented render-segmented"
-					role="group"
-					aria-label={SCENE_WORDS.get(key)?.title}
-				>
-					{choices.map((c) => (
-						<button
-							key={c.value}
-							type="button"
-							className={value === c.value ? "on" : ""}
-							aria-pressed={value === c.value}
-							onClick={() => onScene(key, c.value)}
-						>
-							{c.label}
-						</button>
-					))}
-				</div>
-			</PanelSetting>
-		);
-	};
+	) => (
+		<PanelSetting settingKey={key} key={key} below>
+			<SettingButtons
+				label={SCENE_WORDS.get(key)?.title ?? key}
+				choices={choices}
+				value={valueOf(key, choices)}
+				onChoose={(value) => onScene(key, value)}
+			/>
+		</PanelSetting>
+	);
 	return (
 		<>
 			{choice("frameRate", VIEWPORT_FRAME_RATES)}
@@ -2048,9 +2103,8 @@ export function RenderPanel({
 					{place.tab === "picture" && (
 						<div className="place-group">
 							<PanelSetting label="View" words={VIEW_WORDS}>
-								<select
-									className="tb place-edit-field"
-									aria-label="View"
+								<FitSelect
+									label="View"
 									value={
 										render.mode !== "lit"
 											? `mode:${render.mode}`
@@ -2060,54 +2114,77 @@ export function RenderPanel({
 													? "quality:auto"
 													: `quality:${presetLevel(base.id)}`
 									}
-									onChange={(e) => pick(e.target.value)}
+									words={`${quality.auto}${quality.level}`}
+									onChoose={pick}
 								>
-									<optgroup label="Quality">
-										<option value="quality:auto">
-											{quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"}
-										</option>
-										{QUALITY_PRESETS.map((p) => (
-											<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
-												{p.label}
-											</option>
-										))}
-									</optgroup>
-									<optgroup label="Final output, one feature">
-										{DEBUG_PRESETS.map((p) => (
-											<option key={p.id} value={`preset:${p.id}`}>
-												{p.label}
-											</option>
-										))}
-									</optgroup>
-									<optgroup label="Inspect, as the switches leave it">
-										{RENDER_MODES.filter(([mode]) => mode !== "lit").map(([mode, label]) => (
-											<option key={mode} value={`mode:${mode}`}>
-												{label}
-											</option>
-										))}
-									</optgroup>
-								</select>
+									{(tight) => (
+										<>
+											<optgroup label="Quality">
+												<option
+													value="quality:auto"
+													data-full={
+														quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"
+													}
+												>
+													{shortAuto(
+														quality.auto ? `Automatic · Level ${quality.level}` : "Automatic",
+														tight,
+													)}
+												</option>
+												{QUALITY_PRESETS.map((p) => (
+													<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
+														{p.label}
+													</option>
+												))}
+											</optgroup>
+											<optgroup label="Final output, one feature">
+												{DEBUG_PRESETS.map((p) => (
+													<option key={p.id} value={`preset:${p.id}`}>
+														{p.label}
+													</option>
+												))}
+											</optgroup>
+											<optgroup label="Inspect, as the switches leave it">
+												{RENDER_MODES.filter(([mode]) => mode !== "lit").map(([mode, label]) => (
+													<option key={mode} value={`mode:${mode}`}>
+														{label}
+													</option>
+												))}
+											</optgroup>
+										</>
+									)}
+								</FitSelect>
 							</PanelSetting>
 							<ModeLegends render={render} apply={apply} />
 							<PanelSetting settingKey="antialiasing">
-								<select
-									className="tb place-edit-field"
-									aria-label="Antialiasing"
+								<FitSelect
+									label="Antialiasing"
 									value={antialias}
-									onChange={(e) => onAntialias(e.target.value)}
+									words={antialiasInfo(qualityLevel(quality.level).antialias).label}
+									onChoose={onAntialias}
 								>
-									<option value="auto">
-										{`Automatic · ${antialiasInfo(qualityLevel(quality.level).antialias).label}`}
-									</option>
-									{VIEWPORT_ANTIALIAS.filter((a) => {
-										const mode = antialiasSetting(a.value);
-										return mode !== undefined && antialiasModes.includes(mode);
-									}).map((a) => (
-										<option key={a.value} value={a.value}>
-											{a.label}
-										</option>
-									))}
-								</select>
+									{(tight) => (
+										<>
+											<option
+												value="auto"
+												data-full={`Automatic · ${antialiasInfo(qualityLevel(quality.level).antialias).label}`}
+											>
+												{shortAuto(
+													`Automatic · ${antialiasInfo(qualityLevel(quality.level).antialias).label}`,
+													tight,
+												)}
+											</option>
+											{VIEWPORT_ANTIALIAS.filter((a) => {
+												const mode = antialiasSetting(a.value);
+												return mode !== undefined && antialiasModes.includes(mode);
+											}).map((a) => (
+												<option key={a.value} value={a.value}>
+													{a.label}
+												</option>
+											))}
+										</>
+									)}
+								</FitSelect>
 							</PanelSetting>
 							{scene && onScene && <SceneSettings scene={scene} onScene={onScene} />}
 						</div>

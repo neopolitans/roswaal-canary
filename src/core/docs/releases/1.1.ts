@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.68",
+		date: "2026-11-25",
+		headline: "The Rendering panel's light groups say which light they mean.",
+		changed: [
+			"**The Rendering panel's Light and Lights groups are Environment light and Light objects**: the sun, the sky and Ambient in one, PointLights, SpotLights and SurfaceLights in the other. The step through a frame that adds the second is Light objects too.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.67",
 		date: "2026-11-24",
 		headline: "The GPU holds only the material textures a place uses.",

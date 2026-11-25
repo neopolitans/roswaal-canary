@@ -73,7 +73,7 @@ export const RENDER_STEPS: readonly (readonly [string, string])[] = [
 	["Surfaces", "No light: the parts in their colours and materials."],
 	["Sun and sky light", "The sun, the sky's light and Ambient, without shadows."],
 	["Shadows", "The sun's shadows, and the sky kept out of rooms."],
-	["Lights", "PointLights, SpotLights and SurfaceLights."],
+	["Light objects", "PointLights, SpotLights and SurfaceLights."],
 	["Decals and Textures", "Images on faces."],
 	["See-through parts", "Glass and parts with a Transparency."],
 	["Glow", "Neon's halo and CrackedLava's cracks."],
@@ -115,7 +115,7 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 		],
 	},
 	{
-		title: "Light",
+		title: "Environment light",
 		features: [
 			f("sun", "Sunlight", 2, "Direct light from the sun."),
 			f("skyFill", "Sky's light", 2, "OutdoorAmbient and the light of the sky."),
@@ -161,7 +161,7 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 		],
 	},
 	{
-		title: "Lights",
+		title: "Light objects",
 		features: [
 			f("pointLights", "PointLights", 4, "PointLights, without shadows."),
 			f("spotLights", "SpotLights", 4, "SpotLights, without shadows."),

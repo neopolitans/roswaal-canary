@@ -4200,7 +4200,7 @@ export class ViewportController {
 }
 
 /** The Rendering panel's groups whose switches a profile turns off one at a time. */
-const WITHOUT_GROUPS = ["Light", "Shadows"];
+const WITHOUT_GROUPS = ["Environment light", "Shadows"];
 
 /** How long one of a profile's measurements may take, and the fewest frames it times. */
 const PROFILE_BUDGET = 1500;

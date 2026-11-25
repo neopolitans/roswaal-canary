@@ -776,6 +776,12 @@ export const api = {
 
 	readSource: (path: string) =>
 		request<{ text: string }>(`/api/source?path=${encodeURIComponent(path)}`),
+	/** A graph as its generated file now says, edited since it was compiled: see syncback. */
+	syncback: (path: string) =>
+		post<{ script: NodeScript; report: ImportReport }>("/api/script/syncback", { path }),
+	/** Saves a hand-written Luau file's text. The host refuses a generated one. */
+	writeSource: (path: string, text: string) =>
+		request<{ ok: true }>("/api/source", { method: "PUT", body: JSON.stringify({ path, text }) }),
 
 	compile: (opts: { path?: string; write?: boolean; force?: boolean }) =>
 		post<{ results: CompileOutcome[] }>("/api/compile", opts),

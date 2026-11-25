@@ -84,6 +84,34 @@ export async function readText(project: OpenProject, relPath: string): Promise<s
 	return fs.readFile(safeJoin(project.root, relPath), "utf8");
 }
 
+/** A file Roswaal wrote: its header names the graph it came from. */
+const GENERATED_HEADER = /^-- roswaal-graph: /m;
+
+/**
+ * Saves a hand-written Luau file the project already has, as typed in its
+ * tab. Never a generated one, which the next compile writes over (its graph
+ * is where to change it), never another kind of file, and never a new one:
+ * this only changes what the tree already shows.
+ */
+export async function writeSource(
+	project: OpenProject,
+	relPath: string,
+	text: string,
+): Promise<void> {
+	if (!/\.luau?$/i.test(relPath))
+		throw new UserError(`Only a .luau or .lua file is saved here, and ${relPath} is not one.`);
+	const abs = safeJoin(project.root, relPath);
+	let was: string;
+	try {
+		was = await fs.readFile(abs, "utf8");
+	} catch {
+		throw new UserError(`${relPath} is not in the project.`);
+	}
+	if (GENERATED_HEADER.test(was.slice(0, 512)))
+		throw new UserError(`Roswaal writes ${relPath}: change its graph instead.`);
+	await writeTextAtomically(abs, text);
+}
+
 // ---------------------------------------------------------------------------
 // Node maps
 // ---------------------------------------------------------------------------

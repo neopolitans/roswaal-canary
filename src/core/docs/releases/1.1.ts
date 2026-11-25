@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.107",
+		date: "2026-11-25",
+		headline: "Hand-written Luau is edited in its tab, and a hand-edited generated file can come back into its graph.",
+		added: [
+			"**A hand-written Luau file is edited in its tab**, saved as you type, on leaving it and on Ctrl+S, with completion and hover: on a tablet there is no other editor to hand it to. Generated Luau stays read-only.",
+			"**Syncback: bring into graph.** Where a compile skips a generated file edited since it was written, the compile results offer to rebuild its graph from the file, as Import as graph builds one, and compile it over the file. Undo puts the graph back.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.106",
 		date: "2026-11-25",
 		headline: "Render scale is its own setting, and a Full sweep measures each one.",

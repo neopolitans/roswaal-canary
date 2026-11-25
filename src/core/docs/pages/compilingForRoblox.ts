@@ -110,6 +110,12 @@ export function compilingForRobloxPage(): DocPage {
 					"To overwrite one anyway, click **overwrite** in the compile results, or run `roswaal " +
 					"compile --force`. **The hand edit is lost.**",
 			},
+			{
+				t: "p",
+				text:
+					"To keep the hand edit, click **bring into graph** instead. The graph is rebuilt from " +
+					"the file as Import as graph builds one, then compiled over it. Undo puts the graph back.",
+			},
 
 			{ t: "h", level: 2, text: "Moving and deleting graphs" },
 			{

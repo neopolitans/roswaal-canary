@@ -445,6 +445,21 @@ async function checkHandEdited(abs: string): Promise<string | null> {
 	return null;
 }
 
+/**
+ * A generated file edited since Roswaal wrote it, as Luau to import back into
+ * its graph (syncback): its body, after the lines its header begins with
+ * that Luau reads (`--!strict`, `--!native`, `--!optimize 2`). Null when
+ * Roswaal did not write it, or nobody has changed it.
+ */
+export function editedOutput(text: string): string | null {
+	const parts = splitGenerated(text);
+	if (!parts || hashBody(parts.body) === parts.declaredHash) return null;
+	const head = text.split("\n");
+	const end = head.findIndex((l) => l.startsWith("-- roswaal-output:"));
+	const directives = head.slice(0, end).filter((l) => l.startsWith("--!"));
+	return [...directives, parts.body].join("\n");
+}
+
 /** Splits a generated file into its header hash and its body. */
 export function splitGenerated(text: string): { declaredHash: string; body: string } | null {
 	const lines = text.split("\n");

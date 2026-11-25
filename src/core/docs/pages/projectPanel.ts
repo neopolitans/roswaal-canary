@@ -51,7 +51,7 @@ export function projectPanelPage(): DocPage {
 					],
 					[
 						"**Output**",
-						"What Roswaal writes, and code it did not, from inside `src` as Graphs is from inside its folder, then `place/` and `.luaurc`. A folder of generated Luau folds to a count. What needs a look is marked: **stale** (its graph is gone; Remove on its menu), **hand-written**, **imported** and **place**, and the heading counts those. Luau there opens read-only",
+						"What Roswaal writes, and code it did not, from inside `src` as Graphs is from inside its folder, then `place/` and `.luaurc`. A folder of generated Luau folds to a count. What needs a look is marked: **stale** (its graph is gone; Remove on its menu), **hand-written**, **imported** and **place**, and the heading counts those. Generated Luau opens read-only; hand-written Luau opens to edit, saved as you type",
 					],
 					[
 						"**Node packs**",

@@ -6,26 +6,25 @@
  * most want to *read* carefully, and the hand-written one is the thing you
  * most want to *edit*.
  *
- * So it is a real editor view, read-only, using the same tokeniser and the
- * same colours as the pop-out code editor. And it says which kind of file it
- * is, because that changes what you should do with it:
+ * So it is a real editor view, using the same tokeniser and the same
+ * colours as the code editor. And it says which kind of file it is, because
+ * that changes what you should do with it:
  *
- *  - **generated** — Roswaal owns it. Editing it is temporary; the next compile
- *    wins. The header says so and offers the graph that produced it.
- *  - **hand-written** — yours. Roswaal will not touch it, and **Open in VS
- *    Code** hands it to an editor that can actually change it.
- *
- * Read-only rather than editable on purpose. An editable pane would need a save
- * path, a conflict story with the watcher, and an answer for what happens when
- * a compile overwrites what you typed. Handing the file to the editor you
- * already use is a better answer than a second-rate one built in here.
+ *  - **generated** — Roswaal owns it, and the next compile writes over it, so
+ *    it is read-only here. The header says so and offers the graph that
+ *    produced it.
+ *  - **hand-written** — yours, and edited here (1.1.0): on a tablet there is
+ *    no other editor to hand it to. What is typed is saved after a pause, on
+ *    leaving the editor, and on Ctrl+S. The file changing on disk shows here
+ *    unless there is typing not yet saved, which wins until it is. **Open in
+ *    VS Code** still hands it over where there is a VS Code.
  */
 
 import { lintGutter } from "@codemirror/lint";
-import { Compartment, EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { Annotation, Compartment, EditorState, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
-
+import { errorMessage } from "../core/errorMessage.js";
 import { argumentProblems } from "../core/luau/argumentTypes.js";
 import type { ModuleInfo } from "../core/luau/hover.js";
 import type { TableMember } from "../core/luau/infer.js";
@@ -35,6 +34,7 @@ import { api } from "./api.js";
 import type { SourceDoc } from "./centreDocument.js";
 import { cx } from "./cx.js";
 import { NOT_HERE, useHostCan } from "./host.js";
+import { luauCompletionSource } from "./luauCompletions.js";
 import { luauExtensions } from "./luauExtensions.js";
 import { luauWarnings } from "./luauLint.js";
 import { useMedia } from "./Popout.js";
@@ -48,7 +48,17 @@ export interface SourceViewProps {
 	/** Hands the file to VS Code, reporting which editor answered. */
 	onEdit: (path: string) => void;
 	onReveal: (path: string) => void;
+	/** Saves a hand-written file's text; without it, the file is read-only here. */
+	onSave?: (path: string, text: string) => Promise<void>;
 }
+
+/** A change that came from the file on disk, not from typing: not saved back. */
+const fromDisk = Annotation.define<boolean>();
+
+/** How long typing pauses before it is saved. */
+const SAVE_AFTER_MS = 800;
+
+type SaveState = "saved" | "saving" | "unsaved" | { error: string };
 
 /**
  * Whether a file is Lune code or Roblox code, for what its hover offers.
@@ -61,7 +71,7 @@ function targetOfSource(text: string): Target {
 	return /require\s*\(?\s*["']@lune\//.test(text) ? "lune" : "roblox";
 }
 
-export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewProps) {
+export function SourceView({ doc, onOpenGraph, onEdit, onReveal, onSave }: SourceViewProps) {
 	// Both need a machine: an editor to hand the file to, and a file manager
 	// to show it in. Disabled rather than gone -- they describe what the tool
 	// does, and their titles say where it does it.
@@ -73,6 +83,39 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView | null>(null);
 	const [copied, setCopied] = useState(false);
+	const generated = doc.generatedFrom !== undefined;
+	const editable = !generated && onSave !== undefined;
+	// The text as it is in the editor, typed or not: for the line count and Copy.
+	const [text, setText] = useState(doc.text);
+	const [saveState, setSaveState] = useState<SaveState>("saved");
+	// Typing the file on disk has not had yet, and the pause before it does.
+	const dirty = useRef(false);
+	const timer = useRef<number | undefined>(undefined);
+	const latest = useRef({ path: doc.path, text: doc.text, onSave });
+	latest.current = { path: doc.path, text: doc.text, onSave };
+	const save = useRef(async () => {
+		window.clearTimeout(timer.current);
+		const v = view.current;
+		const write = latest.current.onSave;
+		if (!v || !dirty.current || !write) return;
+		const now = v.state.doc.toString();
+		dirty.current = false;
+		setSaveState("saving");
+		try {
+			await write(latest.current.path, now);
+			setSaveState(dirty.current ? "unsaved" : "saved");
+		} catch (err) {
+			dirty.current = true;
+			setSaveState({ error: errorMessage(err) });
+		}
+	});
+	// Leaving the tab saves what is waiting rather than dropping it.
+	useEffect(
+		() => () => {
+			if (dirty.current) void save.current();
+		},
+		[],
+	);
 
 	// Rebuilt when the file changes rather than reconfigured: the document is
 	// read-only, so there is no state in here worth preserving across a switch.
@@ -111,18 +154,61 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 
 	useEffect(() => {
 		if (!host.current) return;
+		const target = () => targetOfSource(view.current?.state.doc.toString() ?? latest.current.text);
+		const editing = editable
+			? [
+					EditorView.updateListener.of((update) => {
+						if (!update.docChanged) return;
+						setText(update.state.doc.toString());
+						if (update.transactions.some((t) => t.annotation(fromDisk))) return;
+						dirty.current = true;
+						setSaveState("unsaved");
+						window.clearTimeout(timer.current);
+						timer.current = window.setTimeout(() => void save.current(), SAVE_AFTER_MS);
+					}),
+					EditorView.domEventHandlers({
+						blur: () => {
+							void save.current();
+							return false;
+						},
+					}),
+					Prec.high(
+						keymap.of([
+							{
+								key: "Mod-s",
+								preventDefault: true,
+								run: () => {
+									void save.current();
+									return true;
+								},
+							},
+						]),
+					),
+				]
+			: [];
 		const instance = new EditorView({
 			state: EditorState.create({
-				doc: doc.text,
-				// Read-only, but focusable: the cursor shows and moves with the
-				// arrow keys, and the highlighted line follows it. `editable.of(false)`
-				// would hide the cursor, so the line only moved where it was clicked.
+				doc: latest.current.text,
+				// Read-only where it is not edited here, but focusable: the cursor
+				// shows and moves with the arrow keys, and the highlighted line
+				// follows it. `editable.of(false)` would hide the cursor, so the
+				// line only moved where it was clicked.
 				extensions: luauExtensions({
-					readOnly: true,
+					readOnly: !editable,
+					...(editable
+						? {
+								completion: luauCompletionSource(
+									() => [],
+									target,
+									() => members.current,
+									() => instancesRef.current,
+								),
+							}
+						: {}),
 					// The code editor's hover, here too: what every name is and
 					// where its Roblox docs page is, in a file that cannot be edited.
 					hover: {
-						target: () => targetOfSource(doc.text),
+						target,
 						members: () => members.current,
 						modules: () => modules.current,
 						instances: () => instancesRef.current,
@@ -130,17 +216,30 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 					// Names the place and the project do not have, under the
 					// containers that are settled before the game runs: filled in
 					// once the host answers, without rebuilding the view.
-					extra: [warnings.current.of([]), ...(phone ? [EditorView.lineWrapping] : [])],
+					extra: [warnings.current.of([]), ...(phone ? [EditorView.lineWrapping] : []), ...editing],
 				}),
 			}),
 			parent: host.current,
 		});
 		view.current = instance;
+		setText(instance.state.doc.toString());
 		return () => {
 			instance.destroy();
 			view.current = null;
 		};
-	}, [doc.path, doc.text, phone]);
+	}, [doc.path, phone, editable]);
+
+	// The file as it is on disk now -- a compile, a save from elsewhere --
+	// unless there is typing here it has not had, which wins until saved.
+	useEffect(() => {
+		const v = view.current;
+		if (!v || dirty.current) return;
+		if (v.state.doc.toString() === doc.text) return;
+		v.dispatch({
+			changes: { from: 0, to: v.state.doc.length, insert: doc.text },
+			annotations: fromDisk.of(true),
+		});
+	}, [doc.text]);
 
 	useEffect(() => {
 		const known = instances;
@@ -166,8 +265,15 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 	}, [copied]);
 
 	const name = doc.path.split("/").pop() ?? doc.path;
-	const generated = doc.generatedFrom !== undefined;
-	const lines = doc.text === "" ? 0 : doc.text.split(NEWLINE).length;
+	const lines = text === "" ? 0 : text.split(NEWLINE).length;
+	const saveText =
+		typeof saveState === "object"
+			? `Not saved: ${saveState.error}`
+			: saveState === "saving"
+				? "Saving…"
+				: saveState === "unsaved"
+					? "Unsaved"
+					: "Saved";
 
 	return (
 		<div className="source">
@@ -177,6 +283,14 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 					{generated ? "generated" : "hand-written"}
 				</span>
 				<span className="meta">{lines} lines</span>
+				{editable && (
+					<span
+						className={cx("meta", "source-save", typeof saveState === "object" && "failed")}
+						role="status"
+					>
+						{saveText}
+					</span>
+				)}
 
 				<span style={{ flex: 1 }} />
 
@@ -209,7 +323,7 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 				<button
 					className="tb"
 					onClick={() => {
-						void navigator.clipboard.writeText(doc.text).then(
+						void navigator.clipboard.writeText(text).then(
 							() => setCopied(true),
 							// A refused clipboard is not worth a dialog: the text is
 							// selectable and Ctrl+C is right there.
@@ -227,6 +341,8 @@ export function SourceView({ doc, onOpenGraph, onEdit, onReveal }: SourceViewPro
 						Roswaal writes this file. Anything you change here is replaced by the next compile —
 						edit the graph instead.
 					</>
+				) : editable ? (
+					<>Roswaal does not touch this file. What you type here is saved as you go.</>
 				) : (
 					<>
 						Roswaal does not touch this file. It is read-only here so nothing can be changed by

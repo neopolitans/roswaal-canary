@@ -20,6 +20,7 @@ export {
 	compileMap,
 	compileScript,
 	describeOutcome,
+	editedOutput,
 	type MapOutcome,
 	outputCollision,
 	splitGenerated,
@@ -53,6 +54,7 @@ export {
 	readText,
 	writeMap,
 	writeScript,
+	writeSource,
 } from "./documents.js";
 export {
 	assertNoNameClash,

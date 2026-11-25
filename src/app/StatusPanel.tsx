@@ -84,6 +84,8 @@ export interface StatusPanelProps {
 	onRemoveOrphans: () => void;
 	/** Overwrite the file this outcome skipped, once its changes have been shown. */
 	onForce: (outcome: CompileOutcome) => void;
+	/** Bring a hand-edited generated file's changes into its graph (syncback). */
+	onSyncback?: (outcome: CompileOutcome) => void;
 	/** Opens a graph, if it is not the open one, and frames the node. */
 	onGoTo: (path: string, nodeId?: string) => void;
 	/** The open graph's path, for a problem on it. */
@@ -256,15 +258,27 @@ function Problem(props: { d: Diagnostic; onClick?: () => void }) {
 }
 
 /** A graph's compile, when it wrote nothing: skipped, with Overwrite, or failed. */
-function Held(props: { outcome: CompileOutcome; onForce: (o: CompileOutcome) => void }) {
+function Held(props: {
+	outcome: CompileOutcome;
+	onForce: (o: CompileOutcome) => void;
+	onSyncback?: (o: CompileOutcome) => void;
+}) {
 	const { outcome } = props;
 	// A graph held back by its errors would write nothing if overwritten. Only
 	// a file edited by hand, or one Roswaal did not make, has anything to take.
 	const failed = outcome.diagnostics.some((d) => d.severity === "error");
+	// A file Roswaal wrote and somebody changed since: its changes can come
+	// back into the graph instead of being written over.
+	const edited = !failed && /edited by hand/.test(outcome.skipped ?? "");
 	return (
 		<div className={`entry ${failed ? "error" : "warning"}`}>
 			<span className="sev">{failed ? "failed" : "skipped"}</span>
 			<span className="msg">{outcome.skipped}</span>
+			{edited && props.onSyncback && (
+				<button type="button" className="where link" onClick={() => props.onSyncback?.(outcome)}>
+					bring into graph
+				</button>
+			)}
 			{!failed && (
 				<button type="button" className="where link" onClick={() => props.onForce(outcome)}>
 					overwrite
@@ -499,7 +513,13 @@ export function StatusPanel(props: StatusPanelProps) {
 										}
 									/>
 								))}
-								{props.outcome?.skipped && <Held outcome={props.outcome} onForce={props.onForce} />}
+								{props.outcome?.skipped && (
+									<Held
+										outcome={props.outcome}
+										onForce={props.onForce}
+										onSyncback={props.onSyncback}
+									/>
+								)}
 								{props.outcome?.written && (
 									<>
 										<div className="entry ok">
@@ -570,7 +590,11 @@ export function StatusPanel(props: StatusPanelProps) {
 												/>
 											))}
 											{g.held && !g.held.diagnostics.some((d) => d.severity === "error") && (
-												<Held outcome={g.held} onForce={props.onForce} />
+												<Held
+													outcome={g.held}
+													onForce={props.onForce}
+													onSyncback={props.onSyncback}
+												/>
 											)}
 										</Fragment>,
 									),

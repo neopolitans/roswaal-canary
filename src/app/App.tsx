@@ -2054,6 +2054,35 @@ export function App() {
 	overwriteRef.current = overwriteWith;
 
 	/**
+	 * Syncback: a generated file somebody changed since it was compiled, brought
+	 * into its graph. The graph is rebuilt from the file, as Import as graph
+	 * builds one, as one edit that Undo puts back; then it is compiled over
+	 * the file, which is the graph's again.
+	 */
+	const syncBack = useCallback(
+		async (outcome: CompileOutcome) => {
+			const ok = await ask({
+				kind: "confirm",
+				title: `Bring ${outcome.outputPath.split("/").pop()} into its graph?`,
+				message:
+					"The graph is rebuilt from the file as it is now, as Import as graph builds one: its nodes and layout become the import's. Undo puts the graph back.",
+				confirmLabel: "Bring into graph",
+			});
+			if (ok !== true) return;
+			try {
+				const { script } = await api.syncback(outcome.scriptPath);
+				if (openPath.current !== outcome.scriptPath) await openGraphPath(outcome.scriptPath);
+				if (openPath.current !== outcome.scriptPath) return;
+				store.edit(() => script);
+				await runCompile(outcome.scriptPath, true, true);
+			} catch (err) {
+				notify("Not brought into the graph", errorMessage(err));
+			}
+		},
+		[ask, openGraphPath, runCompile],
+	);
+
+	/**
 	 * Writes `roswaal.json` and takes the daemon's answer as the truth.
 	 *
 	 * A rejection used to be an unhandled promise, which was survivable while
@@ -3001,6 +3030,7 @@ export function App() {
 								await refreshTree();
 							}}
 							onForce={(outcome) => void overwriteWith(outcome)}
+							onSyncback={(outcome) => void syncBack(outcome)}
 						/>
 					),
 				}}
@@ -3068,6 +3098,13 @@ export function App() {
 										}
 									}}
 									onReveal={(path) => void api.reveal(path)}
+									onSave={async (path, text) => {
+										await api.writeSource(path, text);
+										// The tab's copy follows, so coming back to it shows what was saved.
+										store.updateSide(`luau:${path}`, (side) =>
+											side.kind === "luau" ? { kind: "luau", doc: { ...side.doc, text } } : side,
+										);
+									}}
 								/>
 							) : editor.script ? (
 								<>

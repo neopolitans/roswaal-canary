@@ -122,6 +122,7 @@ import {
 	deletePack,
 	deletePackNode,
 	duplicatePack,
+	editedOutput,
 	exportedModuleFunctions,
 	exportedTypes,
 	exportPlace,
@@ -168,6 +169,7 @@ import {
 	writeMap,
 	writePlaceFile,
 	writeScript,
+	writeSource,
 } from "./project.js";
 import { fields, need, optionalQuery, query, type RouteRequest, realmOf, text } from "./request.js";
 import { instancePathOf, modulesRequiredBy, projectInstances, requireCycles } from "./requires.js";
@@ -1647,6 +1649,60 @@ export class ApiSession {
 			},
 
 			/**
+			 * Syncback: a generated file edited since it was compiled, imported
+			 * back as its graph, so the graph says what the file now does.
+			 *
+			 * Answers the graph rather than writing it: the editor takes it as one
+			 * edit, which Undo puts back. It keeps the graph's identity (its id,
+			 * name, kind and target) and imports as the graph was last imported,
+			 * or as Import as graph would.
+			 */
+			"POST /script/syncback": async (req) => {
+				const project = this.project();
+				const relPath = need(fields<{ path: string }>(req).path, "path");
+				const graph = await readScript(project, relPath);
+				const outputPath = await graphOutputPath(project, relPath);
+				if (!outputPath) throw new HttpError(409, `${relPath} writes no file to bring back.`);
+				const text = await readText(project, outputPath).catch(() => null);
+				if (text === null) throw new HttpError(409, `${outputPath} is not there.`);
+				if (text.length > LARGEST_IMPORT)
+					throw new HttpError(
+						422,
+						`${outputPath} is larger than ${LARGEST_IMPORT / 1024 / 1024} MiB, more than Roswaal imports as a graph.`,
+					);
+				const source = editedOutput(text);
+				if (source === null)
+					throw new HttpError(
+						409,
+						`${outputPath} is as the graph wrote it, or Roswaal did not write it: nothing to bring back.`,
+					);
+				const result = importLuau(source, {
+					name: graph.name,
+					scriptClass: graph.scriptClass,
+					target: graph.target,
+					locals: graph.importedAs?.locals,
+					mode: graph.importedAs?.mode,
+					...(graph.importedAs?.codeRuns !== undefined
+						? { codeRuns: graph.importedAs.codeRuns }
+						: {}),
+					idPrefix: newId().slice(0, 8),
+				});
+				if (!result.ok)
+					throw new HttpError(422, `${outputPath} could not be read as Luau. ${result.error}`);
+				const script: NodeScript = {
+					...result.script,
+					id: graph.id,
+					name: graph.name,
+					scriptClass: graph.scriptClass,
+					target: graph.target,
+					...(graph.runContext ? { runContext: graph.runContext } : {}),
+					...(graph.init ? { init: graph.init } : {}),
+					...(graph.importedAs ? { importedAs: graph.importedAs } : {}),
+				};
+				return { script, report: result.report };
+			},
+
+			/**
 			 * Moves a graph, or a folder with every graph in it. Their meta files
 			 * follow their Luau, Dynamic mode compiles them where they are now,
 			 * and a script left with no children may flatten: see `reshape.ts`.
@@ -1785,6 +1841,14 @@ export class ApiSession {
 			"GET /source": async (req) => ({
 				text: await readText(this.project(), query(req, "path")),
 			}),
+
+			/** A hand-written Luau file, saved from its tab: see writeSource. */
+			"PUT /source": async (req) => {
+				const { path: relPath, text } = fields<{ path: string; text: string }>(req);
+				if (typeof text !== "string") throw new HttpError(400, "text is required");
+				await writeSource(this.project(), need(relPath, "path"), text);
+				return { ok: true };
+			},
 		};
 	}
 
@@ -2062,7 +2126,8 @@ export class ApiSession {
 		// something every object has.
 		const key = `${method.toUpperCase()} ${routePath}`;
 		const handler = Object.hasOwn(this.routes, key) ? this.routes[key] : undefined;
-		if (typeof handler !== "function") throw new HttpError(404, `No such route: ${method} ${routePath}`);
+		if (typeof handler !== "function")
+			throw new HttpError(404, `No such route: ${method} ${routePath}`);
 		return handler(req);
 	}
 }

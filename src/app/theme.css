@@ -24125,6 +24125,56 @@ textarea.tb:where(:disabled) {
 	outline-offset: 1px;
 }
 
+/* The start log, in Inspect: a start's steps and their times, and where the
+   start before this page's stopped if it never finished. */
+.start-stopped {
+	margin: 4px 6px;
+	border-left: 3px solid var(--warning);
+	color: var(--fg);
+}
+
+.start-head {
+	padding: 2px 6px;
+}
+
+.start-steps {
+	display: grid;
+	gap: 2px;
+	margin: 2px 6px 6px;
+	padding: 0;
+	list-style: none;
+	font-size: var(--text-sm);
+	color: var(--fg);
+}
+
+.start-steps li {
+	display: grid;
+	grid-template-columns: 4.5em minmax(0, 1fr);
+	gap: 8px;
+}
+
+.start-at {
+	text-align: right;
+	color: var(--fg-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+.start-note {
+	color: var(--fg-muted);
+}
+
+.start-actions {
+	display: flex;
+	gap: 6px;
+	padding: 0 6px 6px;
+}
+
+@media (pointer: coarse) {
+	.start-actions .tb {
+		min-height: 44px;
+	}
+}
+
 /* Picture, Switches and Inspect, under the panel's head. */
 .render-tabs {
 	display: flex;

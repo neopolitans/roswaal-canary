@@ -103,6 +103,7 @@ import {
 	upToStep,
 } from "./renderFeatures.js";
 import { clampSpeed, SPEED_NOTCH } from "./speed.js";
+import { beginStart, endStart, logStep, startOpen } from "./startLog.js";
 import { layersUsed, loadLayer } from "./textures.js";
 import {
 	type DragMode,
@@ -531,6 +532,9 @@ export class ViewportController {
 		// Another place: Automatic's depth path and light resolution are measured for it afresh.
 		this.depth.reset();
 		this.lamps.reset();
+		// The start log: another place into the view there is, or the view's own start.
+		beginStart(this.view ? "Place opened" : "View starting", `${partCount(place)} parts`);
+		this.pipelinesLogged = 0;
 		this.place = place;
 		this.host = place;
 		this.adopt(place);
@@ -546,6 +550,8 @@ export class ViewportController {
 			this.loadUnions(this.view, place);
 			this.view.setOverlay(this.overlayLines());
 			this.refreshSelection();
+			logStep("Scene given to the view");
+			this.firstFrameLog = true;
 		} else void this.start();
 		if (!this.framed) {
 			this.framed = true;
@@ -1898,6 +1904,7 @@ export class ViewportController {
 			await view.init(canvas, place, (shaders) => {
 				if (shaders === startup.shaders) return;
 				startup.shaders = shaders;
+				logStep("Shaders compiled", String(shaders), true);
 				this.showRate();
 			});
 		} finally {
@@ -1927,6 +1934,7 @@ export class ViewportController {
 		const gl2 = this.options.renderer === "webgl2";
 		if (this.gpuSeen === null) {
 			this.gpuSeen = await gpuName(gl2);
+			logStep("GPU found", String(this.gpuSeen));
 			setOffOnThisDevice(offForGpu(this.gpuSeen));
 			// The level's own switches, as this device has them.
 			const q = this.level();
@@ -1943,6 +1951,7 @@ export class ViewportController {
 			});
 			this.auto = new AutoQuality(level);
 			void this.toLevel(level, true);
+			logStep("Level chosen", `Level ${level}`);
 		}
 		const samples = this.antialiasMode();
 		const map = this.level().shadowMap;
@@ -1953,6 +1962,7 @@ export class ViewportController {
 			gpu.half = this.options.half ?? true;
 			view = gpu;
 		}
+		logStep("Renderer starting", gl2 ? "WebGL2" : "WebGPU");
 		let fellBack = false;
 		try {
 			try {
@@ -1962,15 +1972,18 @@ export class ViewportController {
 				fellBack = true;
 				// Kept for a benchmark's report: a run drawn by WebGL2 is not one by WebGPU.
 				this.fellBackWhy = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+				logStep("WebGPU did not start; WebGL2 starting", this.fellBackWhy);
 				view = new WebGl2View(samples, map);
 				await this.initView(view, make(), place);
 			}
 		} catch (err) {
 			this.starting = false;
+			endStart("No renderer started", String(err));
 			this.set({ error: `Neither WebGPU nor WebGL2 is available here: ${String(err)}` });
 			return;
 		}
 		this.starting = false;
+		logStep("Renderer started", view.backend);
 		// Taken back while it started.
 		if (run !== this.mounted || this.els !== els) {
 			view.destroy();
@@ -1989,7 +2002,10 @@ export class ViewportController {
 		this.view = view;
 		this.applyLampMode();
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
-		view.onRedraw = () => this.redraw();
+		view.onRedraw = () => {
+			if (startOpen()) logStep("Pipelines ready", String(++this.pipelinesLogged), true);
+			this.redraw();
+		};
 		this.set({
 			backend: view.backend,
 			fellBack,
@@ -2004,6 +2020,8 @@ export class ViewportController {
 		this.loadSunImage(view, (this.place ?? place).lighting);
 		this.loadMeshes(view, this.place ?? place);
 		this.loadUnions(view, this.place ?? place);
+		logStep("Scene given to the view");
+		this.firstFrameLog = true;
 		this.attach(this.canvas as HTMLCanvasElement);
 		this.refreshSelection();
 		this.fit();
@@ -2021,12 +2039,24 @@ export class ViewportController {
 		noteShaders(fingerprint);
 		if (this.options.buildShaders === false || !autoBuildWanted()) return;
 		if (readShaderRecord()?.built === fingerprint) return;
+		this.warmAhead = true;
+		logStep("Shader build waiting", "starts 4 s after the view");
 		setTimeout(() => {
 			if (this.view === view && !this.state.profiling) void this.buildShaders();
+			else {
+				this.warmAhead = false;
+				endStart("Shader build not run", "the view changed or a profile ran");
+			}
 		}, 4000);
 	}
 
 	private warming = false;
+	/** The start log: the first frame after a start is still to be noted. */
+	private firstFrameLog = false;
+	/** The start log: the shaders' background build is still to come, and the start waits for it. */
+	private warmAhead = false;
+	/** The start log: pipelines the view has said are ready, this start. */
+	private pipelinesLogged = 0;
 
 	/**
 	 * The shaders for every quality level built ahead, for this place: so
@@ -2045,22 +2075,28 @@ export class ViewportController {
 		}
 		if (this.warming) return;
 		this.warming = true;
+		logStep("Shader build started");
 		const from = performance.now();
 		const sets = [
 			...Array.from({ length: TOP_LEVEL }, (_, i) => this.levelFeatures(qualityLevel(i + 1))),
 			this.state.render.features,
 		];
 		try {
-			const pipelines = await view.warmShaders(sets, (done, of) =>
-				reportShaders({ state: "building", done, of }),
-			);
+			const pipelines = await view.warmShaders(sets, (done, of) => {
+				logStep("Shader build", `${done} of ${of}`, true);
+				reportShaders({ state: "building", done, of });
+			});
 			const ms = performance.now() - from;
 			markShadersBuilt(shaderFingerprint(), ms, pipelines);
 			reportShaders({ state: "built", ms, of: pipelines });
+			endStart("Shader build finished", `${pipelines} pipelines in ${Math.round(ms)} ms`);
 		} catch (err) {
-			reportShaders({ state: "failed", message: err instanceof Error ? err.message : String(err) });
+			const message = err instanceof Error ? err.message : String(err);
+			reportShaders({ state: "failed", message });
+			endStart("Shader build failed", message);
 		} finally {
 			this.warming = false;
+			this.warmAhead = false;
 		}
 	}
 
@@ -2531,6 +2567,7 @@ export class ViewportController {
 				frameMs: lastFrame,
 			});
 		};
+		beginStart("Benchmark", `${run.stations.length} stations`);
 		try {
 			for (const want of levels) {
 				if (run.cancelled()) break;
@@ -2672,6 +2709,7 @@ export class ViewportController {
 				});
 			}
 		} finally {
+			endStart(run.cancelled() ? "Benchmark stopped" : "Benchmark finished");
 			this.set({ profiling: null });
 			this.view?.setProbe(null);
 			this.options = options;
@@ -3117,6 +3155,14 @@ export class ViewportController {
 		this.drawPivot();
 		this.frames.push(now);
 		this.recordFrame(now);
+		if (this.firstFrameLog) {
+			this.firstFrameLog = false;
+			logStep("First frame drawn");
+			// A page that freezes before this leaves its start unfinished, which the next one reports.
+			setTimeout(() => {
+				if (!this.warmAhead) endStart("Settled");
+			}, 10_000);
+		}
 	}
 
 	/**
@@ -4297,4 +4343,11 @@ async function gpuName(gl2: boolean): Promise<string> {
 	} catch {
 		return "";
 	}
+}
+
+/** How many parts a place draws, opaque and see-through: for the start log. */
+function partCount(place: PlaceScene): number {
+	const sum = (rows: Record<string, { count: number }>) =>
+		Object.values(rows).reduce((n, row) => n + row.count, 0);
+	return sum(place.kinds) + sum(place.translucent);
 }

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.75",
+		date: "2026-11-25",
+		headline: "A start log says where opening a place stopped, after a freeze.",
+		added: [
+			"**Start log, in the Rendering panel's Inspect tab**: each step of opening a place or starting the view, with its time, kept in this browser for the last three starts. A start that never finished, because the page froze or was closed, is named at the next start with the step it stopped after. **Copy log** copies it for a report.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.74",
 		date: "2026-11-25",
 		headline: "The Rendering panel has three tabs, and comes up from the bottom on a tablet held upright.",

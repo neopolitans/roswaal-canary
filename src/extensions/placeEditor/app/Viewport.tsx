@@ -42,6 +42,7 @@ import {
 	type ViewportRenderer,
 } from "../settings.js";
 import { GizmoSection } from "./GizmoSection.jsx";
+import { StartLogSection } from "./StartLogSection.jsx";
 import { placeScene, type SceneSince } from "./sceneApi.js";
 import { antialiasInfo } from "./viewport/antialias.js";
 import {
@@ -2217,6 +2218,7 @@ export function RenderPanel({
 					)}
 					{place.tab === "inspect" && (
 						<>
+							<StartLogSection />
 							<GizmoSection controller={controller} />
 							<div className="place-group">
 								<SectionHead title="Tools" open={toolsOpen} onToggle={toggleTools} />

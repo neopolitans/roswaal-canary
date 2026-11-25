@@ -269,7 +269,9 @@ export function placeEditorRenderingPage(): DocPage {
 					"the Scene view settings, **Switches** a switch for each part of the picture, and " +
 					"**Inspect** the tools for looking into a frame. On a touch screen held upright it comes " +
 					"up from the bottom: drag or tap its grab for **Peek**, which shows the switches changed " +
-					"last, **Half** or **Full**.",
+					"last, **Half** or **Full**. Inspect's **Start log** lists each step of opening a " +
+					"place with its time; if the page froze or was closed before a start finished, the next " +
+					"start says which step it stopped after. **Copy log** puts it in a report.",
 			},
 			{ t: "h", level: 2, text: "Quality levels" },
 			{

@@ -151,11 +151,21 @@ export interface GpuEffectsHost {
 	imageGroup(asset: string): GPUBindGroup | undefined;
 }
 
+/**
+ * The half-size layer's colour: the effects premultiplied over nothing, its
+ * alpha how much of what is behind they cover, so laid over the frame in one
+ * blend it is as they would have been drawn into it.
+ */
+export const HALF_LAYER: GPUTextureFormat = "rgba16float";
+
 export class GpuEffects {
 	private sim = new EffectsSim(undefined);
 	private drawn!: GPURenderPipeline;
 	/** Particles: an instance each, the quad built by vsParticle. */
 	private particlePipe!: GPURenderPipeline;
+	/** The two again, for the half-size layer (HALF_LAYER): one sample, half floats. */
+	private halfDrawn: GPURenderPipeline | null = null;
+	private halfParticlePipe: GPURenderPipeline | null = null;
 	private instances: GPUBuffer | null = null;
 	/** Instances the buffer holds room for. */
 	private instanceRoom = 0;
@@ -193,80 +203,100 @@ export class GpuEffects {
 		const pipeLayout = d.createPipelineLayout({
 			bindGroupLayouts: [this.layout, host.imageLayout],
 		});
-		const fragment: GPUFragmentState = {
-			module,
-			entryPoint: "fsFx",
-			targets: [
-				{
-					format: host.format,
-					blend: {
-						color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-						alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-					},
-				},
-			],
-		};
-		const stride = PARTICLE_INSTANCE * 4;
-		host.pipeline((p) => (this.particlePipe = p), {
-			layout: pipeLayout,
-			vertex: {
-				module,
-				entryPoint: "vsParticle",
-				buffers: [
-					{
-						arrayStride: stride,
-						stepMode: "instance",
-						attributes: [
-							{ shaderLocation: 0, offset: 0, format: "float32x4" },
-							{ shaderLocation: 1, offset: 16, format: "float32x4" },
-							{ shaderLocation: 2, offset: 32, format: "float32x2" },
-							{ shaderLocation: 3, offset: 40, format: "float32x4" },
-							{ shaderLocation: 4, offset: 56, format: "unorm8x4" },
-							{ shaderLocation: 5, offset: 60, format: "float32x4" },
-						],
-					},
-				],
-			},
-			fragment,
-			primitive: { topology: "triangle-list", cullMode: "none" },
-			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-			multisample: { count: host.samples },
-		});
-		host.pipeline((p) => (this.drawn = p), {
-			layout: pipeLayout,
-			vertex: {
-				module,
-				entryPoint: "vsFx",
-				buffers: [
-					{
-						arrayStride: EFFECT_VERTEX * 4,
-						attributes: [
-							{ shaderLocation: 0, offset: 0, format: "float32x3" },
-							{ shaderLocation: 1, offset: 12, format: "float32x2" },
-							{ shaderLocation: 2, offset: 20, format: "unorm8x4" },
-							{ shaderLocation: 3, offset: 24, format: "float32x3" },
-						],
-					},
-				],
-			},
-			fragment: {
+		// The frame's pipelines, and the half-size layer's: see HALF_LAYER.
+		const pipes = (
+			format: GPUTextureFormat,
+			samples: number,
+			particle: (p: GPURenderPipeline) => void,
+			drawn: (p: GPURenderPipeline) => void,
+		) => {
+			const fragment: GPUFragmentState = {
 				module,
 				entryPoint: "fsFx",
 				targets: [
 					{
-						format: host.format,
+						format,
 						blend: {
 							color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
 							alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
 						},
 					},
 				],
-			},
-			// Both sides: a beam or a turned particle is seen from behind too.
-			primitive: { topology: "triangle-list", cullMode: "none" },
-			depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
-			multisample: { count: host.samples },
-		});
+			};
+			const stride = PARTICLE_INSTANCE * 4;
+			host.pipeline((p) => particle(p), {
+				layout: pipeLayout,
+				vertex: {
+					module,
+					entryPoint: "vsParticle",
+					buffers: [
+						{
+							arrayStride: stride,
+							stepMode: "instance",
+							attributes: [
+								{ shaderLocation: 0, offset: 0, format: "float32x4" },
+								{ shaderLocation: 1, offset: 16, format: "float32x4" },
+								{ shaderLocation: 2, offset: 32, format: "float32x2" },
+								{ shaderLocation: 3, offset: 40, format: "float32x4" },
+								{ shaderLocation: 4, offset: 56, format: "unorm8x4" },
+								{ shaderLocation: 5, offset: 60, format: "float32x4" },
+							],
+						},
+					],
+				},
+				fragment,
+				primitive: { topology: "triangle-list", cullMode: "none" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
+				multisample: { count: samples },
+			});
+			host.pipeline((p) => drawn(p), {
+				layout: pipeLayout,
+				vertex: {
+					module,
+					entryPoint: "vsFx",
+					buffers: [
+						{
+							arrayStride: EFFECT_VERTEX * 4,
+							attributes: [
+								{ shaderLocation: 0, offset: 0, format: "float32x3" },
+								{ shaderLocation: 1, offset: 12, format: "float32x2" },
+								{ shaderLocation: 2, offset: 20, format: "unorm8x4" },
+								{ shaderLocation: 3, offset: 24, format: "float32x3" },
+							],
+						},
+					],
+				},
+				fragment: {
+					module,
+					entryPoint: "fsFx",
+					targets: [
+						{
+							format,
+							blend: {
+								color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+								alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+							},
+						},
+					],
+				},
+				// Both sides: a beam or a turned particle is seen from behind too.
+				primitive: { topology: "triangle-list", cullMode: "none" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: false, depthCompare: "greater" },
+				multisample: { count: samples },
+			});
+		};
+		pipes(
+			host.format,
+			host.samples,
+			(p) => (this.particlePipe = p),
+			(p) => (this.drawn = p),
+		);
+		pipes(
+			HALF_LAYER,
+			1,
+			(p) => (this.halfParticlePipe = p),
+			(p) => (this.halfDrawn = p),
+		);
 		for (const kind of [FALLBACK_WHITE, FALLBACK_DOT, FALLBACK_BAND]) {
 			const size = 64;
 			const texture = d.createTexture({
@@ -311,11 +341,14 @@ export class GpuEffects {
 		render: RenderSettings,
 		show: EffectShow,
 		now: number,
+		half = false,
 	): void {
 		const mode = render.mode;
 		const none = { beams: 0, particles: 0, moving: false, draws: 0, quads: 0 };
 		// The lighting heatmap is of lights reaching surfaces; the wireframe of the place's shapes.
-		if (this.sim.empty || !lighting || !effectsShown(mode) || !this.drawn) {
+		const drawnPipe = half ? this.halfDrawn : this.drawn;
+		const particlePipe = half ? this.halfParticlePipe : this.particlePipe;
+		if (this.sim.empty || !lighting || !effectsShown(mode) || !drawnPipe) {
 			this.last = none;
 			return;
 		}
@@ -384,12 +417,12 @@ export class GpuEffects {
 			// Beams' quads and particles' instances, farthest first, whichever comes next.
 			if (batch.kind !== bound) {
 				if (batch.kind === "particles") {
-					if (!this.instances || !this.particlePipe) continue;
-					pass.setPipeline(this.particlePipe);
+					if (!this.instances || !particlePipe) continue;
+					pass.setPipeline(particlePipe);
 					pass.setVertexBuffer(0, this.instances);
 				} else {
 					if (!this.vertices || !this.indices) continue;
-					pass.setPipeline(this.drawn);
+					pass.setPipeline(drawnPipe);
 					pass.setVertexBuffer(0, this.vertices);
 					pass.setIndexBuffer(this.indices, "uint32");
 				}

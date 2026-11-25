@@ -194,6 +194,8 @@ export interface ViewportOptions {
 	reflectionUpdates?: "auto" | "follow" | "32" | "64" | "128";
 	/** Effects' frames with the camera still, every display frame or fewer: see view.ts's stillSkip. */
 	stillFrames?: "auto" | "full" | "half" | "third" | "quarter";
+	/** Beams and particles at half size: see WebGpuView.drawHalfEffects. */
+	particleResolution?: "full" | "half";
 	/**
 	 * Upscaling: the place drawn at the render scale and brought up to the
 	 * screen's own pixels by the renderer, still frames gathered to its
@@ -3041,6 +3043,7 @@ export class ViewportController {
 		this.view?.setLampMode?.(this.lampModeNow());
 		this.view?.setSkyMode?.(this.skyModeNow());
 		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid));
+		this.view?.setParticleHalf?.(this.options.particleResolution === "half");
 		this.view?.setReflectionGrid?.(
 			reflectionGrid(
 				this.options.reflectionUpdates,

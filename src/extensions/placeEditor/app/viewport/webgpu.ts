@@ -43,7 +43,7 @@ import {
 	sidePlanes,
 	visibleRuns,
 } from "./culling.js";
-import { EFFECT_SHADER, GpuEffects } from "./effectsGpu.js";
+import { EFFECT_SHADER, GpuEffects, HALF_LAYER } from "./effectsGpu.js";
 import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geometry.js";
 import { canvasBytes, GpuMemory, trackWebGpu } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
@@ -407,6 +407,40 @@ fn lightCell(p: vec3f) -> u32 {
 	textureStore(gridA, vec3u(id.xy, z), vec4f(light, w));
 	textureStore(gridB, vec3u(id.xy, z), vec4f(source, 0.0));
 }
+`;
+
+/**
+ * Particle resolution's half-size layer (see drawHalfEffects): the frame's
+ * depth made half size, each pixel the nearest of its four, which reverse
+ * depth makes the greatest; and the layer laid over the frame, smoothed.
+ */
+const FX_FULL_TRIANGLE = /* wgsl */ `
+struct VO { @builtin(position) clip: vec4f, @location(0) uv: vec2f };
+@vertex fn vsUp(@builtin(vertex_index) k: u32) -> VO {
+	let p = vec2f(f32((k << 1u) & 2u), f32(k & 2u));
+	var o: VO;
+	o.clip = vec4f(p * 2.0 - 1.0, 0.0, 1.0);
+	o.uv = vec2f(p.x, 1.0 - p.y);
+	return o;
+}
+`;
+const fxHalfDepth = (samples: number) => /* wgsl */ `${FX_FULL_TRIANGLE}
+@group(0) @binding(0) var depthIn: ${samples > 1 ? "texture_depth_multisampled_2d" : "texture_depth_2d"};
+@fragment fn fsDepth(i: VO) -> @builtin(frag_depth) f32 {
+	let size = vec2i(textureDimensions(depthIn));
+	let at = vec2i(i.clip.xy) * 2;
+	var d = 0.0;
+	for (var k = 0; k < 4; k++) {
+		let p = min(at + vec2i(k & 1, k >> 1u), size - vec2i(1));
+		d = max(d, textureLoad(depthIn, p, 0));
+	}
+	return d;
+}
+`;
+const FX_UP = /* wgsl */ `${FX_FULL_TRIANGLE}
+@group(0) @binding(0) var layer: texture_2d<f32>;
+@group(0) @binding(1) var layerSampler: sampler;
+@fragment fn fsUp(i: VO) -> @location(0) vec4f { return textureSampleLevel(layer, layerSampler, i.uv, 0.0); }
 `;
 
 const SHADER = /* wgsl */ `
@@ -4222,13 +4256,19 @@ fn at(c: vec2i) -> u32 {
 					this.count(this.clear);
 				}
 			}
-			// Beams and particles, over everything see-through, farthest first.
-			this.drawEffects(pass, camera);
+			// Beams and particles, over everything see-through, farthest first:
+			// here, or at half size once the pass ends (drawHalfEffects).
+			this.fxLater = this.particleHalf && !!glow;
+			if (!this.fxLater) this.drawEffects(pass, camera);
 		}
 		// The glow is part of the place, added once the place is drawn; what
 		// marks the place goes over it, against the place's own depth.
 		if (glow) {
 			pass.end();
+			if (this.fxLater) {
+				this.fxLater = false;
+				this.drawHalfEffects(encoder, camera);
+			}
 			encoder = this.cut(encoder, "place");
 			if (glowing) {
 				const b = this.lighting?.post.bloom;
@@ -4409,7 +4449,7 @@ fn at(c: vec2i) -> u32 {
 	/** The place's Beams and ParticleEmitters: see `effectsGpu.ts`. */
 	private effects?: GpuEffects;
 
-	private drawEffects(pass: GPURenderPassEncoder, camera: Camera): void {
+	private drawEffects(pass: GPURenderPassEncoder, camera: Camera, half = false): void {
 		const fx = this.effects;
 		if (!fx) return;
 		const show = passesOf(this.render.features);
@@ -4424,12 +4464,149 @@ fn at(c: vec2i) -> u32 {
 			this.render,
 			on,
 			performance.now() / 1000,
+			half,
 		);
 		this.cpuEffects += performance.now() - simulating;
 		if (fx.last.draws === 0) return;
 		pass.setBindGroup(0, this.bind);
 		this.tally.draws += fx.last.draws;
 		this.tally.triangles += fx.last.quads * 2;
+	}
+
+	// -- Particle resolution's half-size layer ---------------------------------------
+
+	/** Particle resolution Half: effects drawn at half size, where the frame has a glow pass. */
+	private particleHalf = false;
+	/** This frame's effects are left for drawHalfEffects. */
+	private fxLater = false;
+	private fxLayer: GPUTexture | null = null;
+	private fxLayerDepth: GPUTexture | null = null;
+	private fxDepthPipe: GPURenderPipeline | null = null;
+	private fxDepthSamples = 0;
+	private fxUpPipe: GPURenderPipeline | null = null;
+
+	setParticleHalf(on: boolean): void {
+		if (on === this.particleHalf) return;
+		this.particleHalf = on;
+		if (!on) {
+			this.fxLayer?.destroy();
+			this.fxLayerDepth?.destroy();
+			this.fxLayer = null;
+			this.fxLayerDepth = null;
+		}
+		this.onRedraw?.();
+	}
+
+	/**
+	 * Beams and particles at half the frame's size across and down, a quarter
+	 * of the pixels: against the frame's depth made half size, the nearest of
+	 * each four, into a layer of their own, which is laid over the frame,
+	 * smoothed, before the glow and the grade read it, as they were drawn
+	 * into it. Their blend is premultiplied, so one blend lays it over.
+	 */
+	private drawHalfEffects(encoder: GPUCommandEncoder, camera: Camera): void {
+		const d = this.device;
+		if (!this.frame || !this.depth) return;
+		const size = [Math.max(1, Math.ceil(this.width / 2)), Math.max(1, Math.ceil(this.height / 2))];
+		if (!this.fxLayer || this.fxLayer.width !== size[0] || this.fxLayer.height !== size[1]) {
+			this.fxLayer?.destroy();
+			this.fxLayerDepth?.destroy();
+			this.fxLayer = d.createTexture({
+				size,
+				format: HALF_LAYER,
+				usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
+			});
+			this.fxLayerDepth = d.createTexture({
+				size,
+				format: "depth32float",
+				usage: TEXTURE.RENDER_ATTACHMENT,
+			});
+		}
+		const layerDepth = this.fxLayerDepth!;
+		if (!this.fxDepthPipe || this.fxDepthSamples !== this.samples) {
+			const module = d.createShaderModule({ code: fxHalfDepth(this.samples) });
+			this.fxDepthPipe = d.createRenderPipeline({
+				layout: "auto",
+				vertex: { module, entryPoint: "vsUp" },
+				fragment: { module, entryPoint: "fsDepth", targets: [] },
+				primitive: { topology: "triangle-list" },
+				depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "always" },
+			});
+			this.fxDepthSamples = this.samples;
+		}
+		if (!this.fxUpPipe) {
+			const module = d.createShaderModule({ code: FX_UP });
+			this.fxUpPipe = d.createRenderPipeline({
+				layout: "auto",
+				vertex: { module, entryPoint: "vsUp" },
+				fragment: {
+					module,
+					entryPoint: "fsUp",
+					targets: [
+						{
+							format: this.format,
+							blend: {
+								color: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+								alpha: { srcFactor: "zero", dstFactor: "one" },
+							},
+						},
+					],
+				},
+				primitive: { topology: "triangle-list" },
+			});
+		}
+		const down = encoder.beginRenderPass({
+			colorAttachments: [],
+			depthStencilAttachment: {
+				view: layerDepth.createView(),
+				depthClearValue: 0,
+				depthLoadOp: "clear",
+				depthStoreOp: "store",
+			},
+		});
+		down.setPipeline(this.fxDepthPipe);
+		down.setBindGroup(
+			0,
+			d.createBindGroup({
+				layout: this.fxDepthPipe.getBindGroupLayout(0),
+				entries: [{ binding: 0, resource: this.depth.createView({ aspect: "depth-only" }) }],
+			}),
+		);
+		down.draw(3);
+		down.end();
+		const fx = encoder.beginRenderPass({
+			colorAttachments: [
+				{
+					view: this.fxLayer.createView(),
+					clearValue: { r: 0, g: 0, b: 0, a: 0 },
+					loadOp: "clear",
+					storeOp: "store",
+				},
+			],
+			depthStencilAttachment: {
+				view: layerDepth.createView(),
+				depthLoadOp: "load",
+				depthStoreOp: "discard",
+			},
+		});
+		this.drawEffects(fx, camera, true);
+		fx.end();
+		const up = encoder.beginRenderPass({
+			colorAttachments: [{ view: this.frame.createView(), loadOp: "load", storeOp: "store" }],
+		});
+		up.setPipeline(this.fxUpPipe);
+		up.setBindGroup(
+			0,
+			d.createBindGroup({
+				layout: this.fxUpPipe.getBindGroupLayout(0),
+				entries: [
+					{ binding: 0, resource: this.fxLayer.createView() },
+					{ binding: 1, resource: this.sampler },
+				],
+			}),
+		);
+		up.draw(3);
+		up.end();
 	}
 
 	animates(): boolean {

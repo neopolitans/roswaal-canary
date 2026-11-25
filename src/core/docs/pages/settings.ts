@@ -304,6 +304,10 @@ export function settingsPage(): DocPage {
 						"How often moving particles and beams are drawn while the camera is still: every display frame (**Full**), or one in two, three or four (**Half**, **Third**, **Quarter**). Each of those frames draws the whole place, so fewer let a tablet rest between them and stay cool; moving the camera draws at full rate at once. **Automatic**, the default, is Half on a touch screen and Full on a computer.",
 					],
 					[
+						"Particle resolution",
+						"Pixels particles and beams are drawn at. **Half** draws them at half the pixels across and down, a quarter as many, into a layer laid over the place, smoothed: smoke and sparks that cover much of the view cost far less, and their edges against the parts in front soften a little. Where the place has no Neon glow, bloom or post effects, they are drawn at **Full**, the default. WebGPU.",
+					],
+					[
 						"Surface reflection accuracy",
 						"How closely reflections follow the camera. **Exact** draws the place round the camera again each 8 studs it moves, a cost while it moves; a **32**, **64** or **128-stud grid** draws one the first time the camera enters each cell, keeps the last eight and reads the one for where the camera is, which costs nothing once drawn and is less exact. **Automatic**, the default, is Exact on a computer and a 64-stud grid on a touch screen. WebGPU.",
 					],

@@ -38,6 +38,7 @@ import {
 	VIEWPORT_FRAME_RATES,
 	VIEWPORT_LAMP_RESOLUTIONS,
 	VIEWPORT_LIGHT_GRIDS,
+	VIEWPORT_PARTICLE_RESOLUTIONS,
 	VIEWPORT_REFLECTION_UPDATES,
 	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
@@ -1081,6 +1082,7 @@ function SceneSettings({
 			{choice("shadowMapSize", VIEWPORT_SHADOW_MAPS)}
 			{segmented("textureResolution", VIEWPORT_TEXTURE_RESOLUTIONS)}
 			{choice("stillFrames", VIEWPORT_STILL_FRAMES)}
+			{segmented("particleResolution", VIEWPORT_PARTICLE_RESOLUTIONS)}
 			{choice("reflectionUpdates", VIEWPORT_REFLECTION_UPDATES)}
 			<PanelSetting settingKey="dynamicOptimization">
 				<input

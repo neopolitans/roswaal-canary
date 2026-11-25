@@ -133,6 +133,8 @@ export interface ViewRenderer {
 	setReflectionGrid?(cell: number | null): void;
 	/** Light objects from a grid round the camera, its finest cell in studs; null, every pixel's own. */
 	setLightGrid?(cell: number | null): void;
+	/** Beams and particles at half size, where the frame has a glow pass: see Particle resolution. */
+	setParticleHalf?(on: boolean): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
 	readonly genericFrame?: boolean;
 	/**

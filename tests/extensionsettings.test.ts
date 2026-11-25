@@ -45,6 +45,7 @@ describe("an extension's settings", () => {
 			skyResolution: "full",
 			reflectionUpdates: "auto",
 			stillFrames: "auto",
+			particleResolution: "full",
 			antialiasing: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,

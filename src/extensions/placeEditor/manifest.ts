@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.59.0",
+	version: "0.60.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.60.0",
+			roswaal: "1.1.0-canary.93",
+			date: "2026-11-25",
+			text: "particleResolution (Particle resolution): with a glow pass, drawHalfEffects draws the effects into a half-size HALF_LAYER (rgba16float) against the frame depth made half size (the nearest of four; MSAA-aware), and lays it over the frame before the glow and grade. GpuEffects has a half-size pipeline pair.",
+		},
 		{
 			version: "0.59.0",
 			roswaal: "1.1.0-canary.92",

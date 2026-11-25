@@ -137,6 +137,12 @@ export const VIEWPORT_SKY_RESOLUTIONS = [
 	{ value: "quarter", label: "Quarter" },
 ] as const;
 
+/** Particle resolution: beams and particles at the frame's pixels or half across and down. */
+export const VIEWPORT_PARTICLE_RESOLUTIONS = [
+	{ value: "full", label: "Full" },
+	{ value: "half", label: "Half" },
+] as const;
+
 /** Particle animation rate: the effects' frames with the camera still, every display frame or fewer. */
 export const VIEWPORT_STILL_FRAMES = [
 	{ value: "auto", label: "Automatic" },
@@ -202,6 +208,8 @@ export interface PlaceEditorSettings {
 	reflectionUpdates: "auto" | "follow" | "32" | "64" | "128";
 	/** Effects' frames with the camera still, every display frame or fewer: see view.ts's stillSkip. */
 	stillFrames: "auto" | "full" | "half" | "third" | "quarter";
+	/** Beams and particles at half size: see WebGpuView.drawHalfEffects. */
+	particleResolution: "full" | "half";
 	/** The sky's share at fewer pixels: see the controller's skyModeNow. */
 	skyResolution: "full" | "half" | "quarter";
 	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
@@ -355,6 +363,16 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_STILL_FRAMES,
+			},
+			{
+				key: "particleResolution",
+				title: "Particle resolution",
+				help: "Pixels particles and beams are drawn at.",
+				detail:
+					"Half draws them at half the pixels across and down, a quarter as many, into a layer laid over the place, smoothed: smoke and sparks that cover much of the view cost far less, and their edges against the parts in front soften a little. Where the place has no Neon glow, bloom or post effects, they are drawn at Full. WebGPU.",
+				type: "choice",
+				default: "full",
+				choices: VIEWPORT_PARTICLE_RESOLUTIONS,
 			},
 			{
 				key: "reflectionUpdates",

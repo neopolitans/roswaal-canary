@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.93",
+		date: "2026-11-25",
+		headline: "Particle resolution: beams and particles at half size.",
+		added: [
+			"**Particle resolution**, in Settings › Scene view and the Rendering panel: Half draws beams and particles at half the pixels across and down, a quarter as many, into a layer laid over the place, so smoke and sparks that cover much of the view cost far less. Where the place has no Neon glow, bloom or post effects, they stay at Full, the default. WebGPU.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.92",
 		date: "2026-11-25",
 		headline: "Light object grid: light objects worked out once round the camera.",

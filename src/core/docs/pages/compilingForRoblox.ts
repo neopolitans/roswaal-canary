@@ -58,6 +58,13 @@ export function compilingForRobloxPage(): DocPage {
 					["ModuleScript", "`Greeter.luau`", "A `ModuleScript`, run by whatever requires it"],
 				],
 			},
+			{
+				t: "p",
+				text:
+					"The same place sets the lines at the top of the file: **Type checking** writes " +
+					"`--!strict` or `--!nonstrict`, **Optimization** writes `--!optimize` with its level, " +
+					"and **Native code** writes `--!native`. Each writes nothing when left at its default.",
+			},
 
 			{ t: "h", level: 2, text: "Compiling" },
 			{

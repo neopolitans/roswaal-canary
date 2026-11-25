@@ -30,7 +30,7 @@ import { parseChunk } from "../luau/parser.js";
 import { visitBlock } from "../luau/visit.js";
 import { nodeBounds, resolvePins } from "../nodeBox.js";
 import { COMPOUND_NODES } from "../nodes/compound.js";
-import { FUNCTION_NODES } from "../nodes/flow.js";
+import { FUNCTION_ATTRIBUTES, FUNCTION_NODES } from "../nodes/flow.js";
 import { BUILTIN_NODES, createRegistry, type Registry } from "../nodes/index.js";
 import { isInstanceClass, isService, isSubclassOf } from "../roblox.js";
 import { valueProperties } from "../robloxEngine.js";
@@ -1922,6 +1922,15 @@ class Importer {
 	): Tail | undefined {
 		const sig = this.signature(stat.func);
 		if (!sig) return undefined;
+		// `@native` and `@deprecated`, written plainly, are the node's to keep.
+		// Any other attribute, or one with arguments, keeps the line as code.
+		const attributes = new Set<string>();
+		for (const a of stat.attributes) {
+			const raw = this.src.slice(a.start, a.end).replace(/\s+/g, "");
+			if (!FUNCTION_ATTRIBUTES.has(a.name) || (raw !== `@${a.name}` && raw !== `@[${a.name}]`))
+				return undefined;
+			attributes.add(a.name);
+		}
 		let name: string;
 		let owner: Value | undefined;
 		let global = false;
@@ -1931,7 +1940,7 @@ class Importer {
 		} else {
 			// `function T.f()` and `function T:m()`: one table, then the name.
 			const tables = stat.method ? stat.path : stat.path.slice(0, -1);
-			if (tables.length > 1 || stat.attributes.length > 0) return undefined;
+			if (tables.length > 1) return undefined;
 			name = stat.method ? stat.method.name : stat.path[stat.path.length - 1].name;
 			if (tables.length === 1) {
 				owner = this.expr(
@@ -1959,6 +1968,8 @@ class Importer {
 				...(sig.returnsWritten === false ? { returnsWritten: false } : {}),
 				...(method ? { method: true } : {}),
 				...(global ? { global: true } : {}),
+				...(attributes.has("native") ? { native: true } : {}),
+				...(attributes.has("deprecated") ? { deprecated: true } : {}),
 			},
 		});
 		if (owner) this.feed(owner, { node: id, pin: "owner" });
@@ -2171,6 +2182,15 @@ function typecheckOf(src: string): NodeScript["typecheck"] {
 	return mode === "strict" || mode === "nonstrict" ? mode : "default";
 }
 
+/** The file's `--!native` and `--!optimize N`, as the graph's settings. */
+function directivesOf(src: string): Pick<NodeScript, "native" | "optimize"> {
+	const level = /^\s*--!optimize\s+([012])\b/m.exec(src)?.[1];
+	return {
+		...(/^\s*--!native\b/m.test(src) ? { native: true } : {}),
+		...(level !== undefined ? { optimize: Number(level) as 0 | 1 | 2 } : {}),
+	};
+}
+
 /** The built-in nodes an import is made of, made once. */
 let builtIn: Registry | undefined;
 function registry(): Registry {
@@ -2248,6 +2268,7 @@ function importFrom(file: string, options: ImportOptions): ImportResult {
 		scriptClass: options.scriptClass,
 		target: options.target,
 		typecheck: typecheckOf(src),
+		...directivesOf(src),
 		asWritten: true,
 		...(services && services.names.length > 0 ? { services: services.names } : {}),
 		...(services && Object.keys(services.locals).length > 0

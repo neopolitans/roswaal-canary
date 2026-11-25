@@ -2783,6 +2783,8 @@ export function App() {
 								scriptClass={editor.script.scriptClass}
 								target={editor.script.target}
 								typecheck={editor.script.typecheck}
+								native={editor.script.native === true}
+								optimize={editor.script.optimize}
 								locked={locked}
 								nodes={editor.script.nodes.length}
 								functions={editor.script.nodes.filter((n) => FUNCTION_NODES.has(n.def)).length}
@@ -2808,6 +2810,14 @@ export function App() {
 									store.edit((s) => ({ ...s, target: value }));
 								}}
 								onTypecheck={(value) => store.edit((s) => ({ ...s, typecheck: value }))}
+								onNative={(value) =>
+									store.edit(({ native: _, ...s }) => (value ? { ...s, native: true } : s))
+								}
+								onOptimize={(value) =>
+									store.edit(({ optimize: _, ...s }) =>
+										value === undefined ? s : { ...s, optimize: value },
+									)
+								}
 							/>
 						) : undefined,
 					refactor:

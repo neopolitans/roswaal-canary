@@ -64,6 +64,16 @@ export function fileFormatPage(): DocPage {
 						"string",
 						"How strictly the program is type-checked, in the profile's terms.",
 					],
+					[
+						"`native`",
+						"boolean, optional",
+						"The whole program is compiled to native code, where the profile has it. Absent is off.",
+					],
+					[
+						"`optimize`",
+						"number, optional",
+						"The optimization level the program declares, where the profile has one. Absent declares none.",
+					],
 					["`variables`", "array", "The graph's variables (§9.3)."],
 					[
 						"`modules`",

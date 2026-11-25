@@ -50,6 +50,21 @@ export function signatureOf(config: NodeConfig | undefined): Signature {
 }
 
 /**
+ * The attributes a function is declared with, `@native` and `@deprecated`,
+ * from its node's `native` and `deprecated` flags, each on its own line
+ * above the `function`.
+ */
+export function functionAttributes(config: NodeConfig | undefined): string[] {
+	const out: string[] = [];
+	if (config?.native === true) out.push("@native");
+	if (config?.deprecated === true) out.push("@deprecated");
+	return out;
+}
+
+/** The attributes a function node can carry, by name. */
+export const FUNCTION_ATTRIBUTES: ReadonlySet<string> = new Set(["native", "deprecated"]);
+
+/**
  * Whether a Declare Function is a method: `function T:name()`, called with
  * `T:name()`, its receiver read as `self`.
  *

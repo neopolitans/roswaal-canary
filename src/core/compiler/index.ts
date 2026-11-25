@@ -210,6 +210,9 @@ function semanticJson(script: NodeScript, layout: { headers?: Map<string, Commen
 		runContext: script.runContext ?? null,
 		target: script.target,
 		typecheck: script.typecheck,
+		// Only when set, so a graph without them hashes as it always did.
+		...(script.native ? { native: true } : {}),
+		...(script.optimize !== undefined ? { optimize: script.optimize } : {}),
 		variables: (script.variables ?? []).map((v) => ({
 			id: v.id,
 			name: v.name,
@@ -282,6 +285,8 @@ export function serialiseScript(script: NodeScript): string {
 		...(script.runContext ? { runContext: script.runContext } : {}),
 		target: script.target,
 		typecheck: script.typecheck,
+		...(script.native ? { native: true } : {}),
+		...(script.optimize !== undefined ? { optimize: script.optimize } : {}),
 		// Declaration order is the author's and shows up in the generated file,
 		// so this is the one list that is not sorted on the way to disk.
 		variables: (script.variables ?? []).map((v) => ({

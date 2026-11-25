@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.104",
+		date: "2026-11-25",
+		headline: "Native code and optimization, for a graph and for its functions.",
+		added: [
+			"**Optimization and Native code in a graph's settings**, beside Type checking: they write `--!optimize` with its level and `--!native` at the top of the file.",
+			"**Native code and Deprecated on a function**, in the Inspector: they write `@native` and `@deprecated` above it.",
+			"**Import as graph reads them back**: the file's `--!native` and `--!optimize`, and a function's `@native` and `@deprecated`. A function with any other attribute stays as code.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.103",
 		date: "2026-11-25",
 		headline: "Cast To on an output pin, a wider drop to grow a pin, and fixes.",

@@ -9,6 +9,7 @@ import { LUAU_PRIMITIVES } from "../luneTypes.js";
 import { compoundOf } from "../nodes/compound.js";
 import {
 	boundValueOf,
+	functionAttributes,
 	isGlobalFunction,
 	isMethod,
 	loopNamesOf,
@@ -509,6 +510,7 @@ function declareFunction(e: Emitter, r: ResolvedNode, scope: Scope): string | un
 	// as one long block with an `end` somewhere in the middle of it.
 	// `blank` will not double up, so a run of them gets one line each.
 	e.blank();
+	for (const line of functionAttributes(r.node.config)) e.push(line, id);
 	const header = method ? `${owner}:${name}` : ident;
 	e.push(`${owner || global ? "" : "local "}function ${header}(${params})${returns}`, id);
 	e.indent++;

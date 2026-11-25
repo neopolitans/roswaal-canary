@@ -11,6 +11,7 @@ import { bodyPinOf } from "../functionBody.js";
 import { checkLuau } from "../luau/check.js";
 import { checkSpecifier, parseInstancePath, renderInstancePath } from "../modules.js";
 import {
+	functionAttributes,
 	type Signature,
 	signatureOf,
 	type TypeDeclaration,
@@ -602,6 +603,7 @@ export function emitFunctions(e: Emitter, root: Scope): void {
 		const { params, returns } = luauSignature(e, sig, fn.node.id, scope);
 
 		e.blank();
+		for (const line of functionAttributes(fn.node.config)) e.push(line, fn.node.id);
 		e.push(`local function ${name}(${params})${returns}`, fn.node.id);
 		e.indent++;
 		e.walk(bodyOf(e, fn), scope);

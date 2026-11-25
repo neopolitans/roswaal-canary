@@ -495,7 +495,45 @@ function FunctionEditor({ node }: { node: GraphNode }) {
 				title="Returns"
 				hint="Return nodes inside this function follow along automatically."
 			/>
+			<AttributeToggle
+				node={node}
+				flag="native"
+				label="Native code"
+				title="Writes @native: this function is compiled to native code."
+			/>
+			<AttributeToggle
+				node={node}
+				flag="deprecated"
+				label="Deprecated"
+				title="Writes @deprecated: the Luau linter warns where it is called."
+			/>
 		</>
+	);
+}
+
+/** A function attribute, `@native` or `@deprecated`, as a box; unticked leaves it out of the config. */
+function AttributeToggle({
+	node,
+	flag,
+	label,
+	title,
+}: {
+	node: GraphNode;
+	flag: "native" | "deprecated";
+	label: string;
+	title: string;
+}) {
+	return (
+		<label className="check-row" title={title}>
+			<input
+				type="checkbox"
+				checked={configFlag(node, flag)}
+				onChange={(e) =>
+					store.edit((s) => setConfig(s, node.id, { [flag]: e.target.checked ? true : undefined }))
+				}
+			/>
+			<span>{label}</span>
+		</label>
 	);
 }
 

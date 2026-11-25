@@ -414,6 +414,14 @@ export type TypecheckMode = "default" | "nonstrict" | "strict";
 export const TYPECHECK_MODES: readonly TypecheckMode[] = ["default", "nonstrict", "strict"];
 
 /**
+ * The `--!optimize` level the generated file declares: 0, 1 or 2. Absent
+ * writes no line, leaving it to the engine.
+ */
+export type OptimizeLevel = 0 | 1 | 2;
+
+export const OPTIMIZE_LEVELS: readonly OptimizeLevel[] = [0, 1, 2];
+
+/**
  * Free-form per-node configuration (function signature, exports list, ...).
  *
  * One key is understood by the registry rather than by any one node:
@@ -622,6 +630,10 @@ export interface NodeScript {
 	runContext?: RunContext;
 	target: Target;
 	typecheck: TypecheckMode;
+	/** Writes `--!native`: the whole file is compiled to native code. Absent is off. */
+	native?: boolean;
+	/** Writes `--!optimize` with this level. Absent writes none. */
+	optimize?: OptimizeLevel;
 	variables: ScriptVariable[];
 	/**
 	 * What this script requires. Absent on a graph written before 0.63.0, which

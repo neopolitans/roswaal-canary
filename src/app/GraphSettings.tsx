@@ -7,7 +7,7 @@
  * node to describe, it describes the graph. The tools keep only what acts.
  */
 
-import type { ScriptClass, Target, TypecheckMode } from "../core/schema.js";
+import type { OptimizeLevel, ScriptClass, Target, TypecheckMode } from "../core/schema.js";
 import { PanelHead } from "./Cards.jsx";
 import { cx } from "./cx.js";
 import { Field } from "./InspectorSections.jsx";
@@ -19,6 +19,8 @@ export interface GraphSettingsProps {
 	scriptClass: ScriptClass;
 	target: Target;
 	typecheck: TypecheckMode;
+	native: boolean;
+	optimize: OptimizeLevel | undefined;
 	/** The graph is being compiled and must not be edited. */
 	locked: boolean;
 	/** How many nodes it has, and how many functions, for a line of figures. */
@@ -27,6 +29,8 @@ export interface GraphSettingsProps {
 	onScriptClass: (value: ScriptClass) => void;
 	onTarget: (value: Target) => void;
 	onTypecheck: (value: TypecheckMode) => void;
+	onNative: (value: boolean) => void;
+	onOptimize: (value: OptimizeLevel | undefined) => void;
 }
 
 export function GraphSettings(props: GraphSettingsProps) {
@@ -72,6 +76,40 @@ export function GraphSettings(props: GraphSettingsProps) {
 						<option value="strict">Strict</option>
 					</select>
 				</Field>
+				<Field
+					label="Optimization"
+					hint="The --!optimize level the file declares. Default writes none."
+				>
+					<select
+						className="tb"
+						value={props.optimize ?? "default"}
+						disabled={props.locked}
+						onChange={(e) =>
+							props.onOptimize(
+								e.target.value === "default"
+									? undefined
+									: (Number(e.target.value) as OptimizeLevel),
+							)
+						}
+					>
+						<option value="default">Default</option>
+						<option value="0">0</option>
+						<option value="1">1</option>
+						<option value="2">2</option>
+					</select>
+				</Field>
+				<label
+					className="check-row"
+					title="Writes --!native: the whole file is compiled to native code."
+				>
+					<input
+						type="checkbox"
+						checked={props.native}
+						disabled={props.locked}
+						onChange={(e) => props.onNative(e.target.checked)}
+					/>
+					<span>Native code</span>
+				</label>
 				<Field
 					label="Target"
 					hint={

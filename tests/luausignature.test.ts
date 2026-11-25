@@ -6,11 +6,12 @@
 import { describe, expect, it } from "vitest";
 
 import { signatureAt } from "../src/core/luau/signature.js";
+import { cursorIn } from "./helpers.js";
 
 /** `label(a, [b])` with the active parameter bracketed, at `|`. */
 function at(source: string, roblox = true): string | null {
-	const pos = source.indexOf("|");
-	const s = signatureAt(source.replace("|", ""), pos, roblox);
+	const { doc, pos } = cursorIn(source);
+	const s = signatureAt(doc, pos, roblox);
 	if (!s) return null;
 	const params = s.params.map((p, i) => (i === s.active ? `[${p.name}]` : p.name));
 	return `${s.label}(${params.join(", ")})${s.returns ? ` -> ${s.returns}` : ""}`;
@@ -60,7 +61,8 @@ describe("a function put on a table", () => {
 
 	it("keeps a parameter whose type is a function type whole", () => {
 		const src = "local M = {}\nfunction M.on(cb: (x: number) -> (), n: number) end\nM.on(f, |";
-		const signature = signatureAt(src.replace("|", ""), src.indexOf("|"));
+		const { doc, pos } = cursorIn(src);
+		const signature = signatureAt(doc, pos);
 		expect(signature?.params).toEqual([
 			{ name: "cb", type: "(x: number) -> ()" },
 			{ name: "n", type: "number" },

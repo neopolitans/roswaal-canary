@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.71",
+		date: "2026-11-25",
+		headline: "The daemon holds up against unusual requests.",
+		fixed: [
+			"**The daemon answers a request for a route it does not have with No such route, whatever the name**, and reads an Origin header in time that grows with its length, where a long run of slashes took far longer.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.70",
 		date: "2026-11-25",
 		headline: "Reports go to Roswaal's own issues.",

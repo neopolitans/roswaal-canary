@@ -26,6 +26,7 @@ import { type NodeMap, serialiseMap } from "../src/core/nodemap.js";
 import { openProject } from "../src/server/project.js";
 import { projectInstances } from "../src/server/requires.js";
 import { ApiSession } from "../src/server/routes.js";
+import { cursorIn } from "./helpers.js";
 
 /** ReplicatedStorage.Shared.{Util, Remotes}, and a Workspace. */
 const OUTLINE: InstanceOutline = {
@@ -195,8 +196,7 @@ describe("what the project's files add", () => {
 
 describe("completing an instance path", () => {
 	const offered = (source: string) => {
-		const pos = source.indexOf("|");
-		const doc = source.replace("|", "");
+		const { doc, pos } = cursorIn(source);
 		const context = new CompletionContext(EditorState.create({ doc }), pos, false);
 		const result = luauCompletionSource(
 			() => [],

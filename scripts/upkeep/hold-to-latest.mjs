@@ -27,7 +27,7 @@ let text = readFileSync(FILE, "utf8");
 const after = JSON.parse(text);
 
 async function latest(name) {
-	const response = await fetch(`https://registry.npmjs.org/${name.replace("/", "%2F")}`, {
+	const response = await fetch(`https://registry.npmjs.org/${name.replaceAll("/", "%2F")}`, {
 		headers: { Accept: "application/vnd.npm.install-v1+json" },
 	});
 	if (!response.ok) throw new Error(`${name}: npm answered ${response.status}`);

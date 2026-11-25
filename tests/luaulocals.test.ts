@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { localsAt, localsInFile, topLevelLocals } from "../src/core/luau/scope.js";
+import { cursorIn } from "./helpers.js";
 
 describe("finding locals in hand-written Luau", () => {
 	it("finds a simple declaration", () => {
@@ -60,14 +61,14 @@ describe("what a block leaves in scope", () => {
 
 /** Names in scope at `|`, as `name:kind`. */
 function at(source: string): string[] {
-	const offset = source.indexOf("|");
-	return localsAt(source.replace("|", ""), offset).map((n) => `${n.name}:${n.kind}`);
+	const { doc, pos } = cursorIn(source);
+	return localsAt(doc, pos).map((n) => `${n.name}:${n.kind}`);
 }
 
 /** `at`, reading the whole file as it stands. */
 function atInFile(source: string): string[] {
-	const offset = source.indexOf("|");
-	return (localsInFile(source.replace("|", ""), offset) ?? []).map((n) => `${n.name}:${n.kind}`);
+	const { doc, pos } = cursorIn(source);
+	return (localsInFile(doc, pos) ?? []).map((n) => `${n.name}:${n.kind}`);
 }
 
 describe("what is in scope at the cursor", () => {

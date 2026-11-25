@@ -20,6 +20,7 @@ import { compile } from "../src/core/compiler/index.js";
 import { RELEASES } from "../src/core/docs/releases.js";
 import { hoverAt } from "../src/core/luau/hover.js";
 import { BUILTIN_NODES, createRegistry } from "../src/core/nodes/index.js";
+import { withoutTags } from "./helpers.js";
 
 const { hoverableCode, releaseHref, SLIDES, TOUR_SCRIPT, welcomeScript } = tourModule;
 
@@ -190,7 +191,7 @@ describe("the tour's hovers", () => {
 
 	it("keeps the code as written", () => {
 		const { html: code } = hoverableCode(source);
-		const text = code.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"');
+		const text = withoutTags(code).replace(/&quot;/g, '"');
 		expect(text).toBe(source);
 	});
 
@@ -294,8 +295,8 @@ describe("the slides added in 0.149.0", () => {
 			slide.indexOf('class="tour-import tour-import-tidy"'),
 		);
 		const modern = slide.slice(slide.indexOf('class="tour-import tour-import-modern"'));
-		expect(verbatim.replace(/<[^>]+>/g, "")).toContain("bonus and &quot;Bonus round&quot; or");
-		expect(modern.replace(/<[^>]+>/g, "")).toContain("if bonus then &quot;Bonus round&quot; else");
+		expect(withoutTags(verbatim)).toContain("bonus and &quot;Bonus round&quot; or");
+		expect(withoutTags(modern)).toContain("if bonus then &quot;Bonus round&quot; else");
 		// Every statement is a node since Repeat Until (0.206.0).
 		expect(slide).not.toContain("Kept as code");
 		expect(slide).toContain('title="Repeat Until"');

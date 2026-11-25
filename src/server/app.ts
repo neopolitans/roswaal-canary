@@ -81,7 +81,12 @@ function hostnameOf(value: string): string {
 
 /** An origin as a browser sends it, compared without case or a trailing slash. */
 function originKey(origin: string): string {
-	return origin.trim().toLowerCase().replace(/\/+$/, "");
+	// Counted back rather than matched: a pattern takes time that grows with
+	// the square of a header made of slashes.
+	const key = origin.trim().toLowerCase();
+	let end = key.length;
+	while (end > 0 && key[end - 1] === "/") end -= 1;
+	return key.slice(0, end);
 }
 
 /**

@@ -14,11 +14,11 @@ import { describe, expect, it } from "vitest";
 
 import { luauCompletionSource } from "../src/app/luauCompletions.js";
 import type { Target } from "../src/core/schema.js";
+import { cursorIn } from "./helpers.js";
 
 /** The labels offered at `|`. */
 function offered(source: string, target: Target = "roblox"): string[] {
-	const pos = source.indexOf("|");
-	const doc = source.replace("|", "");
+	const { doc, pos } = cursorIn(source);
 	const context = new CompletionContext(EditorState.create({ doc }), pos, false);
 	const result = luauCompletionSource(
 		() => [],

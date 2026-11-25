@@ -116,9 +116,9 @@ describe("downloading an asset", () => {
 		const roblox = fakeRoblox({});
 		const { assets } = cache(roblox);
 		await assets.fetchAll(await project(), ["5"]);
-		const cdn = roblox.seen.find((s) => s.url.includes("rbxcdn.com"));
+		const cdn = roblox.seen.find((s) => isRobloxCdn(s.url));
 		expect(cdn?.auth).toBeNull();
-		expect(roblox.seen.filter((s) => s.url.includes("apis.roblox.com")).every((s) => s.auth)).toBe(
+		expect(roblox.seen.filter((s) => new URL(s.url).hostname === "apis.roblox.com").every((s) => s.auth)).toBe(
 			true,
 		);
 	});
@@ -255,7 +255,7 @@ describe("downloading on the website, into the browser's own storage", () => {
 		const roblox = fakeRoblox({});
 		const { assets } = browserCache(roblox);
 		await Promise.all([assets.fetchAll("/p", ["22"]), assets.fetchAll("/p", ["22"])]);
-		expect(roblox.seen.filter((s) => s.url.includes("rbxcdn.com"))).toHaveLength(1);
+		expect(roblox.seen.filter((s) => isRobloxCdn(s.url))).toHaveLength(1);
 	});
 
 	it("remembers Roblox's own as skipped, and expires what goes unused", async () => {

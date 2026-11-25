@@ -21,14 +21,13 @@ import {
 import type { InstanceNode } from "../src/core/luau/instances.js";
 import { createRegistry } from "../src/core/nodes/index.js";
 import type { NodeScript } from "../src/core/schema.js";
-import { Builder } from "./helpers.js";
+import { Builder, cursorIn } from "./helpers.js";
 
 const registry = createRegistry();
 
 /** The labels offered at `|`, with the graph's types. */
 function offered(source: string, types: GraphTypes): string[] {
-	const pos = source.indexOf("|");
-	const doc = source.replace("|", "");
+	const { doc, pos } = cursorIn(source);
 	const context = new CompletionContext(EditorState.create({ doc }), pos, false);
 	const result = luauCompletionSource(
 		() => [],

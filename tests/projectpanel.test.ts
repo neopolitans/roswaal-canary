@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TreeEntry } from "../src/app/api.js";
 import { ProjectTree, type ProjectTreeProps } from "../src/app/ProjectTree.jsx";
+import { escapeRegExp } from "./helpers.js";
 
 const dir = (path: string, children: TreeEntry[], more: Partial<TreeEntry> = {}): TreeEntry => ({
 	path,
@@ -181,7 +182,7 @@ describe("rows under Graphs", () => {
 		}));
 	const rowClass = (html: string, path: string) =>
 		html.match(
-			new RegExp(`<div class="([^"]*)"[^>]*data-entry="${path.replace(/[.]/g, "\\.")}"`),
+			new RegExp(`<div class="([^"]*)"[^>]*data-entry="${escapeRegExp(path)}"`),
 		)?.[1] ?? "";
 
 	it("offer New graph and New folder on a graph and on a folder, and no New node map", () => {

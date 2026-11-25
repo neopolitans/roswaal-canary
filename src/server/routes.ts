@@ -2058,8 +2058,11 @@ export class ApiSession {
 	 * answer the editor can report.
 	 */
 	async handle(method: string, routePath: string, req: RouteRequest = {}): Promise<unknown> {
-		const handler = this.routes[`${method.toUpperCase()} ${routePath}`];
-		if (!handler) throw new HttpError(404, `No such route: ${method} ${routePath}`);
+		// Its own entries only: a name the request makes up never reaches
+		// something every object has.
+		const key = `${method.toUpperCase()} ${routePath}`;
+		const handler = Object.hasOwn(this.routes, key) ? this.routes[key] : undefined;
+		if (typeof handler !== "function") throw new HttpError(404, `No such route: ${method} ${routePath}`);
 		return handler(req);
 	}
 }

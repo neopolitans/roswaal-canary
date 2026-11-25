@@ -66,3 +66,34 @@ export function body(code: string): string {
 		.join("\n")
 		.trim();
 }
+
+/**
+ * A test source with its cursor marker taken out, and where the marker was.
+ * Only the first `|`: Luau's union types use the character too.
+ */
+export function cursorIn(source: string): { doc: string; pos: number } {
+	const pos = source.indexOf("|");
+	if (pos < 0) return { doc: source, pos };
+	return { doc: source.slice(0, pos) + source.slice(pos + 1), pos };
+}
+
+/**
+ * Markup's text with every tag taken out, read a character at a time: a
+ * pattern can leave a tag behind where removing one joins the halves of
+ * another.
+ */
+export function withoutTags(html: string): string {
+	let text = "";
+	let inTag = false;
+	for (const ch of html) {
+		if (ch === "<") inTag = true;
+		else if (ch === ">" && inTag) inTag = false;
+		else if (!inTag) text += ch;
+	}
+	return text;
+}
+
+/** `text` matched literally inside a regular expression. */
+export function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

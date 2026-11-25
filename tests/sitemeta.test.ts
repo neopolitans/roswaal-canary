@@ -95,7 +95,7 @@ describe("a page's preview tags", () => {
 describe("the front page's structured data", () => {
 	it("is free software for developers, and cannot close its own element", () => {
 		const html = softwareJsonLd(stable);
-		const data = JSON.parse(html.replace(/^<script[^>]*>|<\/script>$/g, ""));
+		const data = JSON.parse(html.slice(html.indexOf(">") + 1, html.lastIndexOf("</script>")));
 		expect(data["@type"]).toBe("SoftwareApplication");
 		expect(data.offers.price).toBe("0");
 		expect(data.url).toBe("https://roswaal.app/");

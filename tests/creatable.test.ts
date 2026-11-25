@@ -21,7 +21,7 @@ import {
 } from "../src/core/creatable.js";
 import { createRegistry } from "../src/core/nodes/index.js";
 import { CLASS_OPTIONS } from "../src/core/roblox.js";
-import { Builder } from "./helpers.js";
+import { Builder, cursorIn } from "./helpers.js";
 
 const registry = createRegistry();
 
@@ -81,8 +81,7 @@ describe("New Instance", () => {
 
 describe("completing a class name in Code Block", () => {
 	function offered(source: string): string[] {
-		const pos = source.indexOf("|");
-		const doc = source.replace("|", "");
+		const { doc, pos } = cursorIn(source);
 		const context = new CompletionContext(EditorState.create({ doc }), pos, false);
 		const result = luauCompletionSource(() => [])(context);
 		return result ? result.options.map((o) => o.label) : [];

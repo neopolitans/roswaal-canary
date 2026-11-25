@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error -- build tooling, plain JS, no declarations to import.
 import { landingPage } from "../scripts/lib/landing.mjs";
 import { taglineFor } from "../src/core/docs/releases.js";
+import { withoutTags } from "./helpers.js";
 
 /**
  * The stable page, said out loud rather than taken from the environment.
@@ -34,8 +35,7 @@ const html: string = landingPage("9.9.9", { canary: false });
  * The code block is highlighted, so `game:GetService` is three elements and
  * never appears in the markup as one string. What matters is what it reads as.
  */
-const text = html
-	.replace(/<[^>]+>/g, "")
+const text = withoutTags(html)
 	.replace(/&quot;/g, '"')
 	// Collapsed, because a sentence in the source is wrapped across lines and
 	// indented; what a reader sees is one run of words.

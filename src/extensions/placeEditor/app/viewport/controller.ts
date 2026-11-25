@@ -52,7 +52,7 @@ import {
 import { DynamicSavings, DynamicScale } from "./dynamicScale.js";
 import { FRAME_RUN, FrameHistory, frameInterval } from "./frameGraph.js";
 import { rayHit, rayPick } from "./geometry.js";
-import { gizmoCell, lightGizmoLines } from "./gizmos.js";
+import { gizmoCell, Lines, lightGizmoLines } from "./gizmos.js";
 import { HandleBuilder } from "./handles.js";
 import { type Heaviest, heaviest, meshCosts } from "./heaviest.js";
 import { loadImages } from "./images.js";
@@ -67,6 +67,7 @@ import {
 } from "./marquee.js";
 import { loadMeshes } from "./meshes.js";
 import { FrameCap, RefreshMeter, SteadyVsync } from "./pacing.js";
+import { type ProbeResult, probeAt } from "./probe.js";
 import {
 	type LevelRow,
 	type MovingRow,
@@ -257,7 +258,15 @@ export interface ViewportState {
 	heaviest: Heaviest | null;
 	/** The place's assets: needed, arrived, on the GPU, and not coming. Null while it needs none. */
 	assets: AssetProgress | null;
+	/**
+	 * The pixel probe: while armed, a tap on the view probes the spot rather
+	 * than picking, and what it found stays until the next tap or it is put away.
+	 */
+	probe: { armed: boolean; result: ProbeReport | null };
 }
+
+/** What the probe found, with the part's name and class as the tree shows them. */
+export type ProbeReport = ProbeResult & { name: string; className: string };
 
 export interface Snap {
 	move: number;
@@ -466,6 +475,7 @@ export class ViewportController {
 		gizmos: DEFAULT_GIZMOS,
 		heaviest: null,
 		assets: null,
+		probe: { armed: false, result: null },
 	};
 	private listeners = new Set<() => void>();
 	private place: ViewportPlace | null = null;
@@ -535,6 +545,7 @@ export class ViewportController {
 		this.lamps.reset();
 		// The start log: another place into the view there is, or the view's own start.
 		beginStart(this.view ? "Place opened" : "View starting", `${partCount(place)} parts`);
+		if (this.state.probe.result) this.set({ probe: { ...this.state.probe, result: null } });
 		this.pipelinesLogged = 0;
 		this.place = place;
 		this.host = place;
@@ -2991,6 +3002,86 @@ export class ViewportController {
 	}
 
 	/**
+	 * What costs most at this view: each switch that is on, turned off alone,
+	 * and what the frame saves without it; the three that save most. Quicker
+	 * than a profile: a dozen frames for each, waited for, and nothing else.
+	 */
+	async costlyHere(): Promise<
+		{ key: keyof RenderFeatures; label: string; saves: number }[] | null
+	> {
+		if (!this.view || this.state.profiling) return null;
+		const render = this.state.render;
+		const on = FEATURES.filter((f) => featureOn(render.features, f.key));
+		this.set({ profiling: { phase: "As set", done: 0, of: on.length + 1 } });
+		const rows: { key: keyof RenderFeatures; label: string; saves: number }[] = [];
+		let frame = 0;
+		try {
+			const asSet = await this.timeWaited("As set", 12);
+			frame = asSet.median;
+			for (const [i, info] of on.entries()) {
+				this.set({ profiling: { phase: `Without ${info.label}`, done: i + 1, of: on.length + 1 } });
+				this.setRender({ ...render, features: { ...render.features, [info.key]: false } });
+				const timed = await this.timeWaited(info.label, 12);
+				rows.push({ key: info.key, label: info.label, saves: asSet.median - timed.median });
+			}
+		} finally {
+			this.setRender(render);
+			this.set({ profiling: null });
+		}
+		return (
+			rows
+				// Above the frames' own spread: 0.2 ms, and a twentieth of the frame.
+				.filter((row) => row.saves > Math.max(0.2, frame * 0.05))
+				.sort((a, b) => b.saves - a.saves)
+				.slice(0, 3)
+		);
+	}
+
+	/** The pixel probe armed, so a tap on the view probes; or put away, with what it found. */
+	armProbe(on: boolean): void {
+		this.set({ probe: { armed: on, result: on ? this.state.probe.result : null } });
+		this.view?.setOverlay(this.overlayLines());
+		this.redraw();
+	}
+
+	/** What is at a point on the view, in client pixels: the probe's answer, and its mark there. */
+	private probeHere(clientX: number, clientY: number): void {
+		const canvas = this.canvas;
+		const place = this.place;
+		if (!canvas || !place) return;
+		const box = canvas.getBoundingClientRect();
+		const found = probeAt(
+			place,
+			this.eye(),
+			this.rayAt(clientX - box.left, clientY - box.top, box),
+			place.lighting?.sun ?? [0, 1, 0],
+		);
+		const result = found ? { ...found, ...this.rowName(found.row) } : null;
+		this.set({ probe: { armed: true, result } });
+		this.view?.setOverlay(this.overlayLines());
+		this.redraw();
+	}
+
+	/** The probe's mark: a cross on the face it found, and its normal, sized to how far away it is. */
+	private probeLines(): number[] {
+		const found = this.state.probe.result;
+		if (!found) return [];
+		const lines = new Lines([1, 0.35, 0.95]);
+		const n = found.normal;
+		const a = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+		const u = [a[1] * n[2] - a[2] * n[1], a[2] * n[0] - a[0] * n[2], a[0] * n[1] - a[1] * n[0]];
+		const ul = Math.hypot(u[0], u[1], u[2]) || 1;
+		const t = u.map((x) => x / ul);
+		const b = [n[1] * t[2] - n[2] * t[1], n[2] * t[0] - n[0] * t[2], n[0] * t[1] - n[1] * t[0]];
+		const s = Math.max(0.15, found.distance * 0.02);
+		const at = (v: number[], k: number) => found.point.map((p, i) => p + v[i] * k);
+		lines.line(at(t, -s), at(t, s));
+		lines.line(at(b, -s), at(b, s));
+		lines.line(found.point, at(n, s * 2));
+		return lines.out;
+	}
+
+	/**
 	 * What Automatic measured and chose in this place, for the Rendering
 	 * panel's Inspect tab: the renderer, the level, the depth path, light
 	 * objects' resolution and Dynamic, with the times behind them.
@@ -3917,6 +4008,17 @@ export class ViewportController {
 	 * `eye`, and the gizmos that are on (see `visualGizmos.ts`).
 	 */
 	private overlayLines(eye: number[] = this.eye()): Float32Array {
+		const probe = this.probeLines();
+		const lines = this.overlayWithout(eye);
+		if (probe.length === 0) return lines;
+		const out = new Float32Array(lines.length + probe.length);
+		out.set(lines);
+		out.set(probe, lines.length);
+		return out;
+	}
+
+	/** The overlay's lines but the probe's mark: the frustum, light ranges and gizmos. */
+	private overlayWithout(eye: number[]): Float32Array {
 		const frustum = this.frustumLines();
 		if (!this.overlayFollows()) {
 			this.gizmoAt = null;
@@ -4097,6 +4199,10 @@ export class ViewportController {
 		// `toggle` is Ctrl, Cmd on a Mac: what the click reaches joins what is
 		// picked, or leaves it, rather than replacing it.
 		const pickAt = async (x: number, y: number, reach: Reach, toggle = false) => {
+			if (this.state.probe.armed) {
+				this.probeHere(x, y);
+				return;
+			}
 			if (!this.view || !picks(this.state.tool)) return;
 			const id = await idAt(x, y);
 			if (!toggle) this.pickHere(id >= 0 ? [this.clickTarget(id, reach)] : []);

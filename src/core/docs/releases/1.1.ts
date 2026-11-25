@@ -9,6 +9,19 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.77",
+		date: "2026-11-25",
+		headline: "Probe a spot in the view, and find what is costly at this view.",
+		added: [
+			"**Probe, in the Rendering panel's Inspect tab**: armed, a tap on the view says which part and material is there, how many light objects reach it and of which kinds, whether the sun reaches it, how much of the sky it sees, and what it costs to shade, and marks the spot.",
+			"**What's costly here**: each switch that is on, turned off alone at this view, and the three that save most, each with Turn off.",
+		],
+		changed: [
+			"**The view is no longer dimmed under the Rendering panel on a touch screen**, and still takes a touch to move the camera or probe a spot; its button or the sheet's grab puts the panel away.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.76",
 		date: "2026-11-25",
 		headline: "Inspect shows what Automatic chose, this frame's time, and a held comparison.",

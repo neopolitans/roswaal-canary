@@ -17416,6 +17416,13 @@ p.licence-meta,
 	background: rgba(0, 0, 0, 0.25);
 }
 
+/* The Rendering panel is for watching the view change: no dimming over it,
+   and the view under it still takes a touch, to move the camera or probe a
+   spot. Its button, or the sheet's grab, puts it away. */
+.workspace:has(.dock.drawer.drawer-open > .panel-render:not(.panel-away)) .drawer-backdrop {
+	display: none;
+}
+
 /* The bar along the bottom: the two sides' cards at its ends, and what can be
    done to the selection between them. One glass group, as the top clusters are. */
 .drawer-toggles {
@@ -24211,6 +24218,7 @@ textarea.tb:where(:disabled) {
 	touch-action: none;
 }
 
+.render-hold.on,
 .render-hold:active:not(:disabled) {
 	border-color: var(--accent);
 	background: color-mix(in srgb, var(--accent) 20%, transparent);
@@ -24219,6 +24227,34 @@ textarea.tb:where(:disabled) {
 .render-hold-line {
 	display: block;
 	padding: 0 6px 4px;
+}
+
+/* What's costly here: a switch, what it saves, and a tap to turn it off. */
+.costly-rows {
+	display: grid;
+	gap: 4px;
+	margin: 4px 6px;
+	padding: 0;
+	list-style: none;
+}
+
+.costly-rows li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	color: var(--fg);
+}
+
+.costly-rows li > span {
+	display: grid;
+	min-width: 0;
+}
+
+@media (pointer: coarse) {
+	.costly-rows .tb {
+		min-height: 44px;
+	}
 }
 
 /* The views as tiles: two across, one tap each. */

@@ -72,6 +72,7 @@ import { memoryRows } from "./viewport/gpuMemory.js";
 import { type HeavyMesh, shortCount } from "./viewport/heaviest.js";
 import { downloadFailures, onDownloadFailures } from "./viewport/images.js";
 import { prepareScene } from "./viewport/prepare.js";
+import { probeCost } from "./viewport/probe.js";
 import {
 	fpsText,
 	type LevelRow,
@@ -2199,6 +2200,8 @@ export function RenderPanel({
 					{place.tab === "inspect" && (
 						<>
 							<StartLogSection />
+							<ProbeSection controller={controller} />
+							<CostlySection controller={controller} onTurnOff={(key) => flip(key, false)} />
 							<AutomaticSection controller={controller} />
 							<FrameSection controller={controller} />
 							<div className="place-group">
@@ -2391,6 +2394,171 @@ function CopyReport({ controller }: { controller: ViewportController }) {
 			<span className="render-setting-line">
 				The version, the browser, Automatic's choices and the start log, to paste into an issue.
 			</span>
+		</div>
+	);
+}
+
+/**
+ * What's costly here: each switch that is on, turned off alone at this view,
+ * and the three that save most, each a tap from being turned off.
+ */
+function CostlySection({
+	controller,
+	onTurnOff,
+}: {
+	controller: ViewportController;
+	onTurnOff: (key: keyof RenderFeatures) => void;
+}) {
+	const { profiling } = useViewport(controller);
+	const [open, toggle] = useFold(true);
+	const [rows, setRows] = useState<
+		{ key: keyof RenderFeatures; label: string; saves: number }[] | null
+	>(null);
+	const [ran, setRan] = useState(false);
+	const run = async () => {
+		setRows(null);
+		setRows(await controller.costlyHere());
+		setRan(true);
+	};
+	return (
+		<div className="place-group">
+			<SectionHead title="What's costly here" open={open} onToggle={toggle} />
+			{open && (
+				<>
+					<button
+						type="button"
+						className="tb render-hold"
+						disabled={profiling !== null}
+						onClick={() => void run()}
+					>
+						{profiling
+							? `${profiling.phase} · ${profiling.done} of ${profiling.of}`
+							: "Find what's costly here"}
+					</button>
+					{rows && rows.length > 0 ? (
+						<ol className="costly-rows" aria-live="polite">
+							{rows.map((row) => (
+								<li key={row.key}>
+									<span>
+										{row.label}
+										<span className="render-setting-line">
+											saves {row.saves.toFixed(1)} ms a frame
+										</span>
+									</span>
+									<button type="button" className="tb" onClick={() => onTurnOff(row.key)}>
+										Turn off
+									</button>
+								</li>
+							))}
+						</ol>
+					) : (
+						<span className="render-setting-line render-hold-line">
+							{ran
+								? "Nothing saves a measurable time here: the frame is cheap at this view."
+								: "Turns each switch that is on off alone, here, and names the three that save most. A few seconds: keep the view still."}
+						</span>
+					)}
+				</>
+			)}
+		</div>
+	);
+}
+
+/** Light objects by kind, in words: "9 SurfaceLights, 2 PointLights". */
+function lightKinds(lights: { point: number; spot: number; surface: number }): string {
+	const kinds: [number, string][] = [
+		[lights.surface, "SurfaceLight"],
+		[lights.point, "PointLight"],
+		[lights.spot, "SpotLight"],
+	];
+	return kinds
+		.filter(([n]) => n > 0)
+		.map(([n, kind]) => `${n} ${kind}${n === 1 ? "" : "s"}`)
+		.join(", ");
+}
+
+/**
+ * The pixel probe: armed, a tap on the view says what is there and what it
+ * costs to shade, and marks the spot. Put away when Inspect is left, so a tap
+ * picks again.
+ */
+function ProbeSection({ controller }: { controller: ViewportController }) {
+	const { probe } = useViewport(controller);
+	const [open, toggle] = useFold(true);
+	useEffect(() => () => controller.armProbe(false), [controller]);
+	const found = probe.result;
+	const cost = found ? probeCost(found) : null;
+	return (
+		<div className="place-group">
+			<SectionHead title="Probe" open={open} onToggle={toggle} />
+			{open && (
+				<>
+					<button
+						type="button"
+						className={cx("tb render-hold", probe.armed && "on")}
+						aria-pressed={probe.armed}
+						onClick={() => controller.armProbe(!probe.armed)}
+					>
+						{probe.armed ? "Probing: tap the view" : "Probe a spot"}
+					</button>
+					{found && cost ? (
+						<dl className="auto-lines" aria-live="polite">
+							<div>
+								<dt>Part</dt>
+								<dd>
+									{found.name || "A part"}
+									<span className="render-setting-line">
+										{found.className && found.className !== found.name
+											? `${found.className} · `
+											: ""}
+										{found.distance.toFixed(1)} studs away
+									</span>
+								</dd>
+							</div>
+							<div>
+								<dt>Material</dt>
+								<dd>{found.material}</dd>
+							</div>
+							<div>
+								<dt>Light objects</dt>
+								<dd>
+									{found.lights.total === 0 ? "None reach it" : found.lights.total}
+									{found.lights.total > 0 && (
+										<span className="render-setting-line">{lightKinds(found.lights)}</span>
+									)}
+								</dd>
+							</div>
+							<div>
+								<dt>Sun</dt>
+								<dd>
+									{found.sun === "lit"
+										? "Lit"
+										: found.sun === "in shadow"
+											? "In shadow"
+											: "Faces away"}
+								</dd>
+							</div>
+							<div>
+								<dt>Sky</dt>
+								<dd>{`${Math.round(found.sky * 100)}% seen`}</dd>
+							</div>
+							<div>
+								<dt>Cost</dt>
+								<dd>
+									{cost.level === "high" ? "High" : cost.level === "medium" ? "Medium" : "Low"}
+									<span className="render-setting-line">{cost.why}.</span>
+								</dd>
+							</div>
+						</dl>
+					) : (
+						<span className="render-setting-line render-hold-line">
+							{probe.armed
+								? "Tap anywhere on the place. The sky has nothing to probe."
+								: "Arm it, then tap the view: what is there, and what it costs to shade."}
+						</span>
+					)}
+				</>
+			)}
 		</div>
 	);
 }

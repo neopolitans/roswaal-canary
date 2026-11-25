@@ -274,7 +274,10 @@ export function placeEditorRenderingPage(): DocPage {
 					"start says which step it stopped after. **Automatic's choices** shows what the view " +
 					"measured and chose in this place, with the times behind each; **This frame** its time " +
 					"stage by stage; **Compare**, held, turns back the switch changed last until it is let go; " +
-					"**Views** shows the wireframe and heatmaps as tiles; and **Copy report** copies the " +
+					"**Views** shows the wireframe and heatmaps as tiles; **Probe**, armed, says what a tap " +
+					"on the view finds (the part, its material, the light objects reaching it, the sun, the " +
+					"sky it sees and what it costs) and marks the spot; **What's costly here** turns each " +
+					"switch off alone at this view and names the three that save most; and **Copy report** copies the " +
 					"version, the browser, the choices and the start log for an issue.",
 			},
 			{ t: "h", level: 2, text: "Quality levels" },

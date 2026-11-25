@@ -45,6 +45,13 @@ describe("the Rendering panel's sheet", () => {
 		}
 	});
 
+	/** The panel is for watching the view: no dimming over it, and the view still takes a touch. */
+	it("leaves the view clear and touchable while it is open", () => {
+		expect(css).toMatch(
+			/\.workspace:has\(\.dock\.drawer\.drawer-open > \.panel-render:not\(\.panel-away\)\) \.drawer-backdrop \{\s*display: none;/,
+		);
+	});
+
 	it("has a height for each of Peek, Half and Full", () => {
 		expect(sheet).toMatch(/height: 50%/);
 		expect(sheet).toContain('[data-detent="peek"]');

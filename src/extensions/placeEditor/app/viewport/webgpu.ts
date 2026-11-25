@@ -451,7 +451,8 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	if (has(${FEATURE_BIT.halfLamps}u)) {
 		let size = vec2i(textureDimensions(lampLight));
-		let at = i.clip.xy * 0.5 - 0.5;
+		// Half or a quarter of the frame across and down: its share from the two sizes.
+		let at = i.clip.xy * (vec2f(size) / u.screen.xy) - 0.5;
 		let base = vec2i(floor(at));
 		let f = fract(at);
 		let dist = length(u.camPos.xyz - i.world);
@@ -2026,7 +2027,7 @@ export class WebGpuView implements ViewRenderer {
 			);
 		if (!this.glowing) bits &= ~(FEATURE_BIT.neon | FEATURE_BIT.neonGlow | FEATURE_BIT.lava);
 		if (!this.grainy) bits &= ~FEATURE_BIT.grain;
-		return bits;
+		return this.lampBit(bits);
 	}
 
 	private lit(kind: LitKind, desc: GPURenderPipelineDescriptor): GPURenderPipelineDescriptor {
@@ -3611,7 +3612,9 @@ fn at(c: vec2i) -> u32 {
 		const sky = skyImages ? (this.lighting.skyboxSun ? 2 : 1) : 0;
 		u.set([this.width, this.height, this.band(), sky], 76);
 		u.set(this.shape.gate, 80);
-		u.set(renderDebug(this.render), 84);
+		const debug = renderDebug(this.render);
+		debug[1] = this.lampBit(debug[1]);
+		u.set(debug, 84);
 		u.set([this.lodBias, 0, 0, 0], 88);
 		this.device.queue.writeBuffer(this.uniform, 0, u);
 	}
@@ -3677,7 +3680,9 @@ fn at(c: vec2i) -> u32 {
 		this.shape = glowShape(this.lighting?.post, postOn);
 		this.setCamera(camera);
 		let encoder = this.device.createCommandEncoder();
-		const lit = this.litFor(this.litBits());
+		const litBits = this.litBits();
+		const lit = this.litFor(litBits);
+		this.genericFrame = !this.litBuilt.get(litBits);
 		const clock = this.clock;
 		clock?.start();
 		const canvasView = this.context.getCurrentTexture().createView();
@@ -5097,7 +5102,29 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private lampBind!: GPUBindGroup;
 	private lampsPipe!: GPURenderPipeline;
 
-	/** The lamp pass's targets, half the frame across and down. */
+	/** Light objects' resolution: full, the lamp pass not drawn; half or quarter its share. */
+	private lampModeNow: "full" | "half" | "quarter" = "full";
+
+	setLampMode(mode: "full" | "half" | "quarter"): void {
+		if (mode === this.lampModeNow) return;
+		const resized = (mode === "quarter") !== (this.lampModeNow === "quarter");
+		this.lampModeNow = mode;
+		if (resized && this.device) {
+			this.makeLampTargets();
+			if (this.bind) this.rebind();
+		}
+	}
+
+	/** The half-size bit as the lamp mode says, where the place has lights. */
+	private lampBit(bits: number): number {
+		const off = bits & ~FEATURE_BIT.halfLamps;
+		return this.lampModeNow !== "full" && this.hasLights ? off | FEATURE_BIT.halfLamps : off;
+	}
+
+	/** Whether the last frame drew with the pipelines for every switch, its own still being built. */
+	genericFrame = false;
+
+	/** The lamp pass's targets, half or a quarter of the frame across and down. */
 	private makeLampTargets(): void {
 		const d = this.device;
 		for (const t of [this.lampLight, this.lampShine, this.lampDepth]) t?.destroy();
@@ -5106,7 +5133,11 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			format: "rgba16float",
 			usage: TEXTURE.TEXTURE_BINDING,
 		});
-		const size = [Math.max(1, Math.ceil(this.width / 2)), Math.max(1, Math.ceil(this.height / 2))];
+		const share = this.lampModeNow === "quarter" ? 4 : 2;
+		const size = [
+			Math.max(1, Math.ceil(this.width / share)),
+			Math.max(1, Math.ceil(this.height / share)),
+		];
 		const target = (format: GPUTextureFormat, binding: boolean) =>
 			d.createTexture({
 				size,

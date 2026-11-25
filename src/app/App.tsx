@@ -496,6 +496,7 @@ export function App() {
 						: "off",
 				antialias: antialiasSetting(sceneView.antialiasing),
 				dynamicOptimization: sceneView.dynamicOptimization === true,
+				lampResolution: sceneView.lampResolution ?? "auto",
 				quality:
 					sceneView.quality === "auto" || sceneView.quality === undefined
 						? "auto"
@@ -515,6 +516,7 @@ export function App() {
 			sceneView.antialiasing,
 			sceneView.quality,
 			sceneView.dynamicOptimization,
+			sceneView.lampResolution,
 		],
 	);
 	useEffect(() => viewport?.setOptions(viewOptions), [viewport, viewOptions]);

@@ -120,6 +120,10 @@ export interface ViewRenderer {
 	 * again, which empties it: every texture is then given again.
 	 */
 	setLookLayers?(layers: readonly number[]): boolean;
+	/** Light objects' resolution, as the controller resolves it: see depthChoice.ts's lampMode. */
+	setLampMode?(mode: "full" | "half" | "quarter"): void;
+	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
+	readonly genericFrame?: boolean;
 	/**
 	 * A Decal's or Texture's image, by the asset id the scene's `images` name;
 	 * the faces showing it are drawn from then on.

@@ -29,6 +29,7 @@ import {
 	renderScaleLabels,
 	VIEWPORT_ANTIALIAS,
 	VIEWPORT_FRAME_RATES,
+	VIEWPORT_LAMP_RESOLUTIONS,
 	VIEWPORT_RENDER_SCALES,
 	VIEWPORT_RENDERERS,
 	VIEWPORT_UPSCALES,
@@ -902,6 +903,7 @@ function SceneSettings({
 			{choice("renderScale", "Render scale", VIEWPORT_RENDER_SCALES, scaleLabels)}
 			{choice("upscale", "Upscaling", VIEWPORT_UPSCALES)}
 			{choice("renderer", "Renderer", VIEWPORT_RENDERERS)}
+			{choice("lampResolution", "Light objects resolution", VIEWPORT_LAMP_RESOLUTIONS)}
 			<label className="render-heat">
 				<span>Dynamic optimization</span>
 				<select

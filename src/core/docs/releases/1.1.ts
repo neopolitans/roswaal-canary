@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.69",
+		date: "2026-11-25",
+		headline: "Light objects resolution: measured per place, or Full, Half or Quarter.",
+		added: [
+			"**Light objects resolution**, in Settings › Scene view and the Rendering panel. Automatic, the default, measures as the view moves whether working out the light of PointLights, SpotLights and SurfaceLights at half the pixels is faster in this place, and keeps it only if so; Full, Half or Quarter set it.",
+		],
+		changed: [
+			"**Levels 1 to 17 no longer halve the light of light objects whatever the place**: half pays only where many lights reach the same pixels, and costs a little elsewhere, so Automatic measures it.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.68",
 		date: "2026-11-25",
 		headline: "The Rendering panel's light groups say which light they mean.",

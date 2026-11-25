@@ -98,6 +98,12 @@ export const VIEWPORT_UPSCALES = [
 	{ value: "always", label: "Always" },
 ] as const;
 export type ViewportUpscale = (typeof VIEWPORT_UPSCALES)[number]["value"];
+export const VIEWPORT_LAMP_RESOLUTIONS = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "full", label: "Full" },
+	{ value: "half", label: "Half" },
+	{ value: "quarter", label: "Quarter" },
+] as const;
 
 /**
  * Antialiasing: the quality level's, or a mode (see antialias.ts). MSAA's
@@ -131,6 +137,8 @@ export interface PlaceEditorSettings {
 	upscale: ViewportUpscale;
 	/** Savings taken at any level while frames do not fit: see dynamicScale.ts's DynamicSavings. */
 	dynamicOptimization: boolean;
+	/** Light objects' resolution: see depthChoice.ts's lampMode. */
+	lampResolution: "auto" | "full" | "half" | "quarter";
 	/** Stored as `antialiasing`: 1.1.0-canary.6 saved `antialias` as "4" for everyone. */
 	antialiasing: ViewportAntialias;
 	outlineWidth: OutlineWidth;
@@ -204,6 +212,14 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				default: false,
 				on: "Takes savings while frames do not fit",
 				off: "Draws as the quality level says",
+			},
+			{
+				key: "lampResolution",
+				title: "Light objects resolution",
+				help: "How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. Automatic measures, as the view moves, whether half the pixels is faster in this place, and keeps it only if so: it pays where many lights reach the same pixels. Full, Half or Quarter set it. WebGPU.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_LAMP_RESOLUTIONS,
 			},
 			{
 				key: "antialiasing",

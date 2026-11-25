@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.41.2",
+	version: "0.42.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.42.0",
+			roswaal: "1.1.0-canary.69",
+			date: "2026-11-25",
+			text: "Light objects resolution (auto, full, half, quarter): LampChoice measures full against half after the depth path; lampMode resolves the setting, the switch and Dynamic optimization; quarter-size lamp targets; fullResLamps on at every level.",
+		},
 		{
 			version: "0.41.2",
 			roswaal: "1.1.0-canary.68",

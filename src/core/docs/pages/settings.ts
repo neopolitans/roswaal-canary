@@ -280,6 +280,10 @@ export function settingsPage(): DocPage {
 						"Where the render scale draws fewer pixels than the screen has, the view brings them up itself rather than the browser stretching them. **Off**, the default; **When still**: once the view stops moving, 16 frames drawn a fraction of a pixel apart are gathered into the screen's own pixels, about the detail Native draws, at the render scale's cost, and a moving view is stretched; or **Always**, which sharpens moving frames as well. WebGPU only; WebGL2 stretches as before.",
 					],
 					[
+						"Light objects resolution",
+						"How many pixels the light of PointLights, SpotLights and SurfaceLights is worked out at. **Automatic**, the default, measures as the view moves whether half the pixels is faster in this place, and keeps it only if so; it pays where many lights reach the same pixels. **Full**, **Half** or **Quarter** set it. WebGPU.",
+					],
+					[
 						"Dynamic optimization",
 						"Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first (today, the lights worked out at half the pixels), and gives them back once frames fit with room. With Render scale **Dynamic**, the savings go first. WebGPU. The Rendering panel offers it too, with Frame rate, Render scale, Upscaling and Renderer.",
 					],

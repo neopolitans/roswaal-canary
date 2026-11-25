@@ -37,6 +37,7 @@ describe("an extension's settings", () => {
 			renderScale: "auto",
 			upscale: "off",
 			dynamicOptimization: false,
+			lampResolution: "auto",
 			antialiasing: "auto",
 			outlineWidth: "medium",
 			outlineThrough: true,

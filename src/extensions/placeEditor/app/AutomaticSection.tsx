@@ -9,10 +9,14 @@ import { useEffect, useState } from "react";
 import { SectionHead, useFold } from "../../../app/PanelParts.jsx";
 import { type AutomaticLine, automaticLines } from "./viewport/automaticLines.js";
 import type { ViewportController } from "./viewport/controller.js";
+import { SAVING_LABELS } from "./viewport/dynamicScale.js";
 import { FEATURES } from "./viewport/renderFeatures.js";
 
-/** A switch's name by key, for the savings Dynamic optimization has taken. */
-const labelOf = (key: string) => FEATURES.find((f) => f.key === key)?.label ?? key;
+/** A saving's words, or a switch's name, for the savings Dynamic optimization has taken. */
+const labelOf = (key: string) =>
+	(SAVING_LABELS as Record<string, string>)[key] ??
+	FEATURES.find((f) => f.key === key)?.label ??
+	key;
 
 /** The rows, as text: for a report. */
 export function automaticText(controller: ViewportController): string {

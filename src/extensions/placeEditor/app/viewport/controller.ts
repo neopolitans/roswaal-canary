@@ -35,7 +35,13 @@ import { type AntialiasMode, antialiasInfo } from "./antialias.js";
 import { type AssetGaps, type AssetProgress, AssetTally, assetsPending } from "./assetProgress.js";
 import type { AutomaticChoices } from "./automaticLines.js";
 import { boxAround } from "./box.js";
-import { DepthChoice, LampChoice, type LampResolution, lampMode } from "./depthChoice.js";
+import {
+	DepthChoice,
+	LampChoice,
+	type LampMode,
+	type LampResolution,
+	lampMode,
+} from "./depthChoice.js";
 import {
 	type DragStart,
 	dragMove,
@@ -49,7 +55,7 @@ import {
 	still,
 	turnedBy,
 } from "./drag.js";
-import { DynamicSavings, DynamicScale } from "./dynamicScale.js";
+import { DynamicSavings, DynamicScale, savingsCome } from "./dynamicScale.js";
 import { FRAME_RUN, FrameHistory, frameInterval } from "./frameGraph.js";
 import { rayHit, rayPick } from "./geometry.js";
 import { gizmoCell, Lines, lightGizmoLines } from "./gizmos.js";
@@ -96,6 +102,7 @@ import {
 	FEATURES,
 	type FeatureKey,
 	featureOn,
+	isFeatureKey,
 	litFor,
 	offForGpu,
 	onThisDevice,
@@ -794,7 +801,7 @@ export class ViewportController {
 		if (was.renderScale !== options.renderScale) this.dynamic.reset();
 		if (was.dynamicOptimization !== options.dynamicOptimization) {
 			this.savings.reset();
-			this.view.setRender(this.withSavings(this.state.render));
+			this.applySavings();
 		}
 		if (was.lampResolution !== options.lampResolution) this.lamps.reset();
 		this.applyLampMode();
@@ -2191,17 +2198,24 @@ export class ViewportController {
 	 * half; Half finds it at half; Quarter blurs it at a quarter as well.
 	 */
 	private viewQualityFor(q: QualityLevel, ratio: number): ViewQuality {
-		const quality = viewQuality(q, ratio);
-		switch (this.options.bloomResolution) {
-			case "full":
-				return { ...quality, glowHalf: false, glowCoarse: false };
-			case "half":
-				return { ...quality, glowHalf: true, glowCoarse: false };
-			case "quarter":
-				return { ...quality, glowHalf: true, glowCoarse: true };
-			default:
-				return quality;
-		}
+		const level = viewQuality(q, ratio);
+		const set = (() => {
+			switch (this.options.bloomResolution) {
+				case "full":
+					return { ...level, glowHalf: false, glowCoarse: false };
+				case "half":
+					return { ...level, glowHalf: true, glowCoarse: false };
+				case "quarter":
+					return { ...level, glowHalf: true, glowCoarse: true };
+				default:
+					return level;
+			}
+		})();
+		// Dynamic optimization's bloom savings: fewer pixels than set, never more.
+		const saving = this.savingsNow().bloom;
+		if (saving === "quarter") return { ...set, glowHalf: true, glowCoarse: true };
+		if (saving === "half") return { ...set, glowHalf: true };
+		return set;
 	}
 
 	/** The sun's shadow maps' side: Settings', or the quality level's. */
@@ -3011,10 +3025,23 @@ export class ViewportController {
 
 	/** The view's light objects as the setting, the switch, Dynamic optimization and the measurement say. */
 	private applyLampMode(): void {
+		this.view?.setLampMode?.(this.lampModeNow());
+	}
+
+	/** How light objects are drawn now: Settings', the switch's, Automatic's, less Dynamic optimization's savings. */
+	private lampModeNow(): LampMode {
 		const features = this.withSavings(this.state.render).features;
-		this.view?.setLampMode?.(
-			lampMode(this.options.lampResolution ?? "auto", features.fullResLamps, this.lamps.chosen),
+		const mode = lampMode(
+			this.options.lampResolution ?? "auto",
+			features.fullResLamps,
+			this.lamps.chosen,
 		);
+		return this.savingsNow().lamps === "quarter" ? "quarter" : mode;
+	}
+
+	/** What Dynamic optimization's savings come to now; none while it is off. */
+	private savingsNow(): ReturnType<typeof savingsCome> {
+		return savingsCome(this.options.dynamicOptimization ? this.savings.off() : []);
 	}
 
 	/** Whether Automatic is still to measure light objects' resolution now. */
@@ -3035,8 +3062,15 @@ export class ViewportController {
 		this.dynamic.reset();
 		this.savings.reset();
 		if (!was) return;
-		this.view?.setRender(this.withSavings(this.state.render));
+		this.applySavings();
 		this.fit();
+	}
+
+	/** The savings as they stand, given to the view: its switches, light objects' and bloom's resolutions. */
+	private applySavings(): void {
+		this.view?.setRender(this.withSavings(this.state.render));
+		this.view?.setQuality(this.viewQualityFor(this.level(), this.pixelRatio()));
+		this.applyLampMode();
 	}
 
 	/**
@@ -3126,7 +3160,6 @@ export class ViewportController {
 	 */
 	automaticChoices(): AutomaticChoices {
 		const setting = this.options.lampResolution ?? "auto";
-		const features = this.withSavings(this.state.render).features;
 		return {
 			backend: this.view?.backend ?? null,
 			fellBackWhy: this.fellBackWhy,
@@ -3137,7 +3170,7 @@ export class ViewportController {
 			lamps: {
 				setting,
 				lights: this.place?.lights?.length ?? 0,
-				mode: lampMode(setting, features.fullResLamps, this.lamps.chosen),
+				mode: this.lampModeNow(),
 				chosen: this.lamps.chosen,
 				medians: this.lamps.medians(),
 			},
@@ -3158,7 +3191,7 @@ export class ViewportController {
 
 	/** The render settings as the view draws them: less the savings Dynamic optimization has taken. */
 	private withSavings(render: RenderSettings): RenderSettings {
-		const off = this.options.dynamicOptimization ? this.savings.off() : [];
+		const off = (this.options.dynamicOptimization ? this.savings.off() : []).filter(isFeatureKey);
 		if (off.length === 0) return render;
 		return {
 			...render,
@@ -3183,8 +3216,7 @@ export class ViewportController {
 					: refresh;
 		const optimizing = this.options.dynamicOptimization === true;
 		if (optimizing && this.savings.frame(now, ms, budget, timed, this.dynamic.step === 0)) {
-			this.view?.setRender(this.withSavings(this.state.render));
-			this.applyLampMode();
+			this.applySavings();
 			this.redraw();
 			return;
 		}

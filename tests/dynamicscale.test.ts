@@ -96,8 +96,14 @@ describe("Dynamic render scale", () => {
 });
 
 describe("Dynamic optimization", () => {
-	it("takes half-size lamp light while frames do not fit, and gives it back with room", async () => {
-		const { DynamicSavings } = await import(
+	/**
+	 * The ladder, least visible first: light objects at half, bloom at half,
+	 * bloom at a quarter, light objects at a quarter. One step for each window
+	 * of frames that does not fit; one back for each with room, three seconds
+	 * apart, and none while the render scale is still lowered.
+	 */
+	it("takes its savings in order while frames do not fit, and gives them back with room", async () => {
+		const { DynamicSavings, DYNAMIC_SAVINGS } = await import(
 			"../src/extensions/placeEditor/app/viewport/dynamicScale.js"
 		);
 		const savings = new DynamicSavings();
@@ -112,13 +118,31 @@ describe("Dynamic optimization", () => {
 		expect(savings.off()).toEqual([]);
 		run(20, 25);
 		expect(savings.off()).toEqual(["fullResLamps"]);
+		expect(savings.full()).toBe(false);
+		run(20, 200);
+		expect(savings.off()).toEqual([...DYNAMIC_SAVINGS]);
 		expect(savings.full()).toBe(true);
 		// Room, but the render scale is still lowered: kept.
 		run(8, 300, false);
-		expect(savings.taken).toBe(1);
-		// Room, and not before three seconds since it was taken.
-		run(8, 300);
+		expect(savings.taken).toBe(DYNAMIC_SAVINGS.length);
+		// Room: given back the last first, three seconds apart.
+		run(8, 200);
+		expect(savings.off()).toEqual(DYNAMIC_SAVINGS.slice(0, DYNAMIC_SAVINGS.length - 1));
+		run(8, 2000);
 		expect(savings.taken).toBe(0);
+	});
+
+	it("comes to light objects' and bloom's least resolutions", async () => {
+		const { savingsCome } = await import(
+			"../src/extensions/placeEditor/app/viewport/dynamicScale.js"
+		);
+		expect(savingsCome([])).toEqual({ lamps: null, bloom: null });
+		expect(savingsCome(["fullResLamps"])).toEqual({ lamps: "half", bloom: null });
+		expect(savingsCome(["fullResLamps", "bloomHalf"])).toEqual({ lamps: "half", bloom: "half" });
+		expect(savingsCome(["fullResLamps", "bloomHalf", "bloomQuarter", "lampsQuarter"])).toEqual({
+			lamps: "quarter",
+			bloom: "quarter",
+		});
 	});
 });
 

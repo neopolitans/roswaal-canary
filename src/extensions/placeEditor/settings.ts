@@ -249,7 +249,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Dynamic optimization",
 				help: "Takes savings while frames do not fit.",
 				detail:
-					"Whatever the quality level, the view takes savings while frames do not fit the display, the least visible first (today, the lights at half the pixels), and gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
+					"Whatever the quality level, the view takes savings while frames do not fit the display, the least visible first: light objects at half the pixels, bloom at half and then a quarter, light objects at a quarter. It gives them back once frames fit with room. With Render scale Dynamic, the savings go first. WebGPU.",
 				type: "boolean",
 				default: false,
 				on: "Takes savings while frames do not fit",

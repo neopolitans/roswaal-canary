@@ -11,6 +11,7 @@
 
 import type { BenchmarkKind } from "../../benchmarkEvent.js";
 import { type AssetGaps, notLoadedText } from "../viewport/assetProgress.js";
+import { SAVING_LABELS } from "../viewport/dynamicScale.js";
 import { type MemoryUse, memoryLine } from "../viewport/gpuMemory.js";
 import {
 	fpsText,
@@ -476,6 +477,11 @@ export function dynamicLine(d: { share: number; savings: string[] }): string {
 	const savings =
 		d.savings.length === 0
 			? "no savings"
-			: d.savings.map((s) => (s === "fullResLamps" ? "lights at half size" : s)).join(", ");
+			: d.savings
+					.map((s) => {
+						const words = (SAVING_LABELS as Record<string, string>)[s];
+						return words ? words.charAt(0).toLowerCase() + words.slice(1) : s;
+					})
+					.join(", ");
 	return `Dynamic: ${Math.round(d.share * 100)}% of Native, ${savings}`;
 }

@@ -422,7 +422,7 @@ describe("Dynamic in a benchmark's report", () => {
 	it("says where Dynamic settled for a station: its share of Native and the savings taken", async () => {
 		const { dynamicLine } = await import("../src/extensions/placeEditor/app/benchmark/result.js");
 		expect(dynamicLine({ share: 0.75, savings: ["fullResLamps"] })).toBe(
-			"Dynamic: 75% of Native, lights at half size",
+			"Dynamic: 75% of Native, light objects at half",
 		);
 		expect(dynamicLine({ share: 1, savings: [] })).toBe("Dynamic: 100% of Native, no savings");
 	});

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.81",
+		date: "2026-11-25",
+		headline: "Dynamic optimization takes bloom and light objects down a step at a time.",
+		changed: [
+			"**Dynamic optimization takes four savings in turn while frames do not fit**: light objects at half the pixels, bloom at half, bloom at a quarter, then light objects at a quarter. It gives them back, the last first, once frames fit with room, and never raises a resolution set lower in Settings.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.80",
 		date: "2026-11-25",
 		headline: "Bloom, shadow maps and textures each have a resolution of their own.",

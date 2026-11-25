@@ -297,7 +297,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Dynamic optimization",
-						"Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first (today, the lights worked out at half the pixels), and gives them back once frames fit with room. With Render scale **Dynamic**, the savings go first. WebGPU. The Rendering panel offers it too, with Frame rate, Render scale, Upscaling and Renderer.",
+						"Off by default. On, while frames do not fit the display, the view takes savings whatever the quality level, the least visible first: light objects at half the pixels, bloom at half and then a quarter, light objects at a quarter. It gives them back, the last first, once frames fit with room. With Render scale **Dynamic**, the savings go first. WebGPU. The Rendering panel offers it too, with Frame rate, Render scale, Upscaling and Renderer.",
 					],
 					[
 						"Antialiasing",

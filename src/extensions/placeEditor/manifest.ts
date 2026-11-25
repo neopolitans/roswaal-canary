@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.57.0",
+	version: "0.58.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.58.0",
+			roswaal: "1.1.0-canary.91",
+			date: "2026-11-25",
+			text: "vsGlow (glowSolid, glowSeen): a Neon part thin on the screen has its edges across it under 1.5 source pixels (u.lod.y; lod.zw the source size) grown sideways at their depth and its light scaled by the projected area ratio (GOut.k). glowSeen split from its entry point.",
+		},
 		{
 			version: "0.57.0",
 			roswaal: "1.1.0-canary.90",

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.91",
+		date: "2026-11-25",
+		headline: "Thin Neon's glow flickers less as the camera moves.",
+		fixed: [
+			"**Neon thinner than a pixel glows more steadily as the camera moves**: in the glow's pass it is drawn at least a pixel and a half wide across the screen and dimmed to match, so it is no longer caught on some frames and missed on others. Neon panels and the Textures over them are as before.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.90",
 		date: "2026-11-25",
 		headline: "Light objects and Sky light at Half or Quarter keep edges and corners sharp.",

@@ -330,6 +330,8 @@ struct U {
 	debug: vec4f,
 	// x: the textures' mip bias, below 0 while upscaling gathers still frames,
 	// so they are as sharp as the screen's pixels rather than the frame's.
+	// y: the pixels of the glow's source a thin Neon part is drawn no
+	// thinner than; zw, the source's size (see vsGlow).
 	lod: vec4f,
 	// The material table: two rows a material, as \`materialBlock\` writes it.
 	mats: array<vec4f, ${MATERIALS.length * 3}>,
@@ -1233,13 +1235,106 @@ fn glowSource(i: VOut) -> vec3f {
 }
 // Its alpha, 0, clears what images cover: a part in front of an image hides it.
 @fragment fn fsGlow(i: VOut) -> @location(0) vec4f { return vec4f(glowSource(i), 0.0); }
+// The glow's source as vsGlow draws it: a part's light scaled by \`k\`.
+struct GOut {
+	@builtin(position) clip: vec4f, @location(0) colour: vec3f, @location(1) @interpolate(flat) id: u32,
+	@location(2) world: vec3f, @location(3) normal: vec3f,
+	@location(4) alpha: f32, @location(5) @interpolate(flat) look: u32,
+	@location(6) local: vec3f, @location(7) lnormal: vec3f, @location(8) @interpolate(flat) k: f32,
+};
+fn glowIn(g: GOut) -> VOut {
+	var o: VOut;
+	o.clip = g.clip;
+	o.colour = g.colour;
+	o.id = g.id;
+	o.world = g.world;
+	o.normal = g.normal;
+	o.alpha = g.alpha;
+	o.look = g.look;
+	o.local = g.local;
+	o.lnormal = g.lnormal;
+	return o;
+}
+// A Neon part thin on the screen, in the glow's source: drawn one sample a
+// pixel, a strip thinner than a pixel was caught on some frames and missed
+// on others, and its glow flickered as the camera moved. Its edges that lie
+// across the screen and are thinner than a pixel and a half of the source
+// (u.lod.y) are widened to that, and it is dimmed by the area it gained on
+// the screen, so it gives off the light it did. Only a part thin on the
+// screen (its area over its longest edge there under that): a Neon panel is
+// left as it is, so the Textures over it still cover it; and no edge
+// pointing at the camera, so nothing is pushed out towards it. Every other
+// part is drawn as it is: it hides what glows behind it.
+fn screenPx(q: vec3f) -> vec3f {
+	let c = u.viewProj * vec4f(q, 1.0);
+	return vec3f(c.xy / max(c.w, 1e-6) * 0.5 * u.lod.zw, c.w);
+}
+fn crossArea(a: vec2f, b: vec2f) -> f32 { return abs(a.x * b.y - a.y * b.x); }
+@vertex fn vsGlow(v: VIn) -> GOut {
+	var w = v;
+	var k = 1.0;
+	let shadeKind = u.mats[(v.look & 255u) * 3u + 1u].y;
+	if (shadeKind > 0.5 && shadeKind < 1.5 && u.lod.y > 0.0) {
+		// Each edge as the screen shows it, in the source's pixels.
+		let o0 = screenPx(v.p);
+		let e0 = screenPx(v.p + v.c0);
+		let e1 = screenPx(v.p + v.c1);
+		let e2 = screenPx(v.p + v.c2);
+		if (o0.z > 0.1 && e0.z > 0.1 && e1.z > 0.1 && e2.z > 0.1) {
+			let a = array<vec2f, 3>(e0.xy - o0.xy, e1.xy - o0.xy, e2.xy - o0.xy);
+			let len = vec3f(length(a[0]), length(a[1]), length(a[2]));
+			let area = crossArea(a[0], a[1]) + crossArea(a[1], a[2]) + crossArea(a[2], a[0]);
+			let longest = max(len.x, max(len.y, len.z));
+			// How long each edge would be across the screen, were it square to the eye.
+			let away = normalize(u.camPos.xyz - v.p);
+			let s = vec3f(length(v.c0), length(v.c1), length(v.c2));
+			let along = vec3f(dot(v.c0, away) / max(s.x, 1e-6), dot(v.c1, away) / max(s.y, 1e-6), dot(v.c2, away) / max(s.z, 1e-6));
+			let across = sqrt(max(vec3f(1.0) - along * along, vec3f(0.0)));
+			if (longest > 0.0 && area / longest < u.lod.y) {
+				let grow = select(vec3f(1.0), clamp(vec3f(u.lod.y) / max(len, vec3f(1e-3)), vec3f(1.0), vec3f(8.0)), (len < vec3f(u.lod.y)) & (across > vec3f(0.5)));
+				// Each edge grown across the screen only, at its distance from
+				// the eye: a strip set into a surface spreads beside it, rather
+				// than coming out of it towards the eye and showing more.
+				let flat0 = v.c0 - away * dot(v.c0, away);
+				let flat1 = v.c1 - away * dot(v.c1, away);
+				let flat2 = v.c2 - away * dot(v.c2, away);
+				w.p = v.p + v.pos.x * (grow.x - 1.0) * flat0 + v.pos.y * (grow.y - 1.0) * flat1 + v.pos.z * (grow.z - 1.0) * flat2;
+				let b0 = a[0] * grow.x;
+				let b1 = a[1] * grow.y;
+				let b2 = a[2] * grow.z;
+				let wide = crossArea(b0, b1) + crossArea(b1, b2) + crossArea(b2, b0);
+				k = clamp(area / max(wide, 1e-6), 0.0, 1.0);
+			}
+		}
+	}
+	let o = shade(w);
+	var g: GOut;
+	g.clip = o.clip;
+	g.colour = o.colour;
+	g.id = o.id;
+	g.world = o.world;
+	g.normal = o.normal;
+	g.alpha = o.alpha;
+	g.look = o.look;
+	g.local = o.local;
+	g.lnormal = o.lnormal;
+	g.k = k;
+	return g;
+}
+@fragment fn fsGlowWide(g: GOut) -> @location(0) vec4f { return vec4f(glowSource(glowIn(g)) * g.k, 0.0); }
 // A see-through part over what glows behind it, as it lies over it in the
 // frame. A see-through Neon part's own glow already fades with it.
-@fragment fn fsGlowSeen(i: VOut) -> @location(0) vec4f {
+fn glowSeen(i: VOut) -> vec4f {
 	let shade = u.mats[(i.look & 255u) * 3u + 1u].y;
 	let neon = shade > 0.5 && shade < 1.5;
 	let a = select(i.alpha, neonAlpha(i.alpha), neon);
 	return vec4f(glowSource(i) * select(i.alpha, 1.0, neon), a);
+}
+@fragment fn fsGlowSeen(i: VOut) -> @location(0) vec4f { return glowSeen(i); }
+// As fsGlowSeen, drawn by vsGlow: a widened Neon part also covers less of what is behind it.
+@fragment fn fsGlowSeenWide(g: GOut) -> @location(0) vec4f {
+	let c = glowSeen(glowIn(g));
+	return vec4f(c.rgb * g.k, c.a * g.k);
 }
 // Neon past the display curve, each channel capped: in Studio's captures, red
 // Neon stays pure red, and dark blue comes out three times its colour.
@@ -1711,6 +1806,17 @@ export class WebGpuView implements ViewRenderer {
 	 */
 	private glowHalf(): boolean {
 		return this.quality.glowHalf || this.quality.glowCoarse === true;
+	}
+
+	/**
+	 * The pixels of the glow's source that a thin Neon part is drawn no
+	 * thinner than there, and the source's size across and down (see vsGlow).
+	 */
+	private glowLeast(): [number, number, number] {
+		const half = this.glowHalf();
+		const across = half ? Math.max(1, Math.round(this.width / 2)) : this.width;
+		const down = half ? Math.max(1, Math.round(this.height / 2)) : this.height;
+		return [1.5, across, down];
 	}
 
 	/** The half size glow source's own depth. */
@@ -2710,10 +2816,11 @@ export class WebGpuView implements ViewRenderer {
 		// (canary.81). Its own target and depth, at the view's size or half.
 		const glowTarget = { format: this.format };
 		const glowSamples = { count: 1 };
+		// Thin Neon widened to a pixel and a half and dimmed to match: see vsGlow.
 		this.pipeline((p) => (this.glowSolid = p), {
 			layout: pipelineLayout,
-			vertex: { module, entryPoint: "vs", buffers },
-			fragment: { module, entryPoint: "fsGlow", targets: [glowTarget] },
+			vertex: { module, entryPoint: "vsGlow", buffers },
+			fragment: { module, entryPoint: "fsGlowWide", targets: [glowTarget] },
 			primitive: { topology: "triangle-list", cullMode: "back" },
 			depthStencil: depth,
 			multisample: glowSamples,
@@ -2726,10 +2833,10 @@ export class WebGpuView implements ViewRenderer {
 		};
 		this.pipeline((p) => (this.glowSeen = p), {
 			layout: pipelineLayout,
-			vertex: { module, entryPoint: "vs", buffers },
+			vertex: { module, entryPoint: "vsGlow", buffers },
 			fragment: {
 				module,
-				entryPoint: "fsGlowSeen",
+				entryPoint: "fsGlowSeenWide",
 				// What images cover is left as it is: a see-through part is not an image.
 				targets: [
 					{
@@ -3694,7 +3801,7 @@ fn at(c: vec2i) -> u32 {
 		const debug = renderDebug(this.render);
 		debug[1] = this.lampBit(debug[1]);
 		u.set(debug, 84);
-		u.set([this.lodBias + this.lookStep, 0, 0, 0], 88);
+		u.set([this.lodBias + this.lookStep, ...this.glowLeast()], 88);
 		this.device.queue.writeBuffer(this.uniform, 0, u);
 	}
 

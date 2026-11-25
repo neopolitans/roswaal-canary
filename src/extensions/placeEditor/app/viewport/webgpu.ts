@@ -329,11 +329,24 @@ const HALF = {
  * light smaller than a sample's cube is spread over it, its total kept, so
  * it does not fall between samples; a larger one falls off where it does.
  */
-const GRID_FILL = /* wgsl */ `
+/**
+ * LightingStyle Soft's fall with distance, as a share of the light's Range,
+ * and its strength: fitted to Studio's screen captures of a PointLight's
+ * walls under Soft and Realistic at once (25 Nov 2026), turned back into
+ * light: near straight from half the Range, gone at it, at 0.72 of
+ * Realistic's.
+ */
+const SOFT_FALL = /* wgsl */ `
+fn softFall(x: f32) -> f32 {
+	return clamp(1.0 - 1.53 * (x - 0.5), 0.0, 1.0) * (1.0 - smoothstep(0.92, 1.0, x)) * 0.72;
+}
+`;
+
+const GRID_FILL = /* wgsl */ `${SOFT_FALL}
 @group(0) @binding(0) var<storage, read> lightData: array<vec4f>;
 @group(0) @binding(1) var<storage, read> lightTable: array<vec2u>;
 @group(0) @binding(2) var<storage, read> lightIndex: array<u32>;
-// origin: the cascade's corner and its cell in studs; info: its index and the switches.
+// origin: the cascade's corner and its cell in studs; info: its index, the switches, and Soft.
 struct GridP { origin: vec4f, info: vec4f };
 @group(0) @binding(3) var<uniform> gp: GridP;
 @group(0) @binding(4) var gridA: texture_storage_3d<rgba16float, write>;
@@ -380,7 +393,8 @@ fn lightCell(p: vec3f) -> u32 {
 			// it; a larger one falls off where it does.
 			let reach = max(dist - max(r - a.w, 0.0), 0.0);
 			if (reach >= a.w) { continue; }
-			var k2 = 1.0 - smoothstep(0.7, 1.0, reach / a.w);
+			// Soft (info.z): its own fall, as Studio's Soft lights.
+			var k2 = select(1.0 - smoothstep(0.7, 1.0, reach / a.w), softFall(reach / a.w), gp.info.z > 0.5);
 			if (col.w > 0.5 && dist > r) {
 				let l = to / dist;
 				let c = dot(-l, d.xyz);
@@ -444,7 +458,7 @@ const FX_UP = /* wgsl */ `${FX_FULL_TRIANGLE}
 @fragment fn fsUp(i: VO) -> @location(0) vec4f { return textureSampleLevel(layer, layerSampler, i.uv, 0.0); }
 `;
 
-const SHADER = /* wgsl */ `
+const SHADER = /* wgsl */ `${SOFT_FALL}
 struct U {
 	viewProj: mat4x4f, invViewProj: mat4x4f,
 	sun: vec4f, sunColour: vec4f, ambient: vec4f, zenith: vec4f, horizon: vec4f, ground: vec4f,
@@ -566,7 +580,11 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		if (dist >= a.w) { continue; }
 		let l = to / max(dist, 1e-4);
 		// Soft (gridU.info.y): flat, a face lit whichever way it turns.
-		var k2 = select(max(dot(n, l), 0.0), 1.0, gridU.info.y > 0.5) * (1.0 - smoothstep(0.7, 1.0, dist / a.w));
+		var k2 = select(
+			max(dot(n, l), 0.0) * (1.0 - smoothstep(0.7, 1.0, dist / a.w)),
+			softFall(dist / a.w),
+			gridU.info.y > 0.5,
+		);
 		if (col.w > 0.5) {
 			let c = dot(-l, d.xyz);
 			if (c <= 0.0) { continue; }
@@ -5654,6 +5672,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private gridCell: number | null = null;
 	/** The setting, Automatic resolved against the place's style: see autoLightGrid. */
 	private gridSetting: number | null | "auto" = null;
+	/** The style the grid was filled for: its light falls as Soft's or Realistic's. */
+	private gridSoft = false;
 	private gridA: GPUTexture | null = null;
 	private gridB: GPUTexture | null = null;
 	private gridBlank: GPUTexture | null = null;
@@ -5672,7 +5692,12 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
 	/** The grid the setting and the place's style come to, and whether its light is flat. */
 	private applyLightGrid(): void {
-		const cell = autoLightGrid(this.gridSetting, this.lighting?.soft === true);
+		const soft = this.lighting?.soft === true;
+		if (soft !== this.gridSoft) {
+			this.gridSoft = soft;
+			this.gridStale = true;
+		}
+		const cell = autoLightGrid(this.gridSetting, soft);
 		if (cell === this.gridCell || !this.device) {
 			this.writeGridUniform();
 			return;
@@ -5777,7 +5802,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			d.queue.writeBuffer(
 				this.gridParams[k],
 				0,
-				new Float32Array([...at, cell * 2 ** k, k, bits, 0, 0]),
+				new Float32Array([...at, cell * 2 ** k, k, bits, this.lighting?.soft ? 1 : 0, 0]),
 			);
 			pass.setBindGroup(
 				0,

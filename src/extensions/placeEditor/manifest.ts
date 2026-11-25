@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.63.0",
+	version: "0.64.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.64.0",
+			roswaal: "1.1.0-canary.97",
+			date: "2026-11-25",
+			text: "softFall (SOFT_FALL, both the grid fill and partLights): Soft's fall with distance, straight from half the Range (1 - 1.53 (x - 0.5)), eased out by it, at 0.72. GridP.info.z Soft; the grid refills when the style changes.",
+		},
 		{
 			version: "0.63.0",
 			roswaal: "1.1.0-canary.96",

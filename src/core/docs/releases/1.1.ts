@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.97",
+		date: "2026-11-25",
+		headline: "Soft light objects as bright as Studio's, and falling off as theirs do.",
+		fixed: [
+			"**Light objects in a Soft place are as bright as Studio's and fall off as theirs do**: they were brighter, and kept their strength out to most of their Range. Fitted to Studio's screen captures of a PointLight's walls under Soft.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.96",
 		date: "2026-11-25",
 		headline: "The view takes the place's Camera field of view.",

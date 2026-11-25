@@ -82,6 +82,7 @@ import {
 	glowSpread,
 	gradeBlock,
 	HANDLE_ALPHA,
+	halfPassStep,
 	IMAGE_VERTEX,
 	type ImageLayer,
 	type ImageQuad,
@@ -550,6 +551,55 @@ void main() {
 const FS_DEPTH = `#version 300 es
 precision highp float;
 void main() {}`;
+// The lights' light from the half-size pass (FEATURE_BIT.halfLamps), as
+// WebGpuView's lampsAt reads it: the four nearest samples, weighted as
+// bilinear filtering would, each only where it stands for this pixel, at its
+// distance from the eye and facing within about 25 degrees of it (lampAgrees);
+// where none does, as at an edge or a corner, worked out here. The passes
+// that draw the half-size pass and the reflection cube work it out alone.
+const LAMP_READ = `
+#if !defined(LAMP_PASS) && !defined(REFL_PASS)
+uniform highp sampler2D lampLight;
+uniform highp sampler2D lampShine;
+uniform highp sampler2D lampNormal;
+// The pass's size over the frame's, across and down.
+uniform vec2 lampScale;
+bool lampAgrees(ivec2 p, float dist, float near, vec3 n) {
+	if (abs(texelFetch(lampLight, p, 0).a - dist) >= near) return false;
+	return dot(texelFetch(lampNormal, p, 0).xyz * 2.0 - 1.0, n) > 0.9;
+}
+#endif
+vec3 lampsAt(vec3 world, vec3 n, vec3 v, float gloss, out vec3 shine) {
+#if !defined(LAMP_PASS) && !defined(REFL_PASS)
+	if (has(${FEATURE_BIT.halfLamps})) {
+		ivec2 size = textureSize(lampLight, 0);
+		vec2 at = gl_FragCoord.xy * lampScale - 0.5;
+		ivec2 base = ivec2(floor(at));
+		vec2 f = fract(at);
+		float dist = length(L[6].xyz - world);
+		float near = max(0.05, dist * 0.015);
+		vec3 diffuse = vec3(0.0);
+		vec3 spec = vec3(0.0);
+		float total = 0.0;
+		for (int k = 0; k < 4; k++) {
+			ivec2 o = ivec2(k & 1, k >> 1);
+			ivec2 p = clamp(base + o, ivec2(0), size - ivec2(1));
+			if (lampAgrees(p, dist, near, n)) {
+				float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+				diffuse += texelFetch(lampLight, p, 0).rgb * w;
+				spec += texelFetch(lampShine, p, 0).rgb * w;
+				total += w;
+			}
+		}
+		if (total > 0.01) {
+			shine = spec / total;
+			return diffuse / total;
+		}
+	}
+#endif
+	return partLights(world, n, v, gloss, shine);
+}
+`;
 const SURFACE = `
 uniform vec4 M[${MATERIALS.length * 3}];
 uniform mediump sampler2DArray looks;
@@ -652,7 +702,7 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		vec3 lamps = vec3(0.0);
 		if (has(${FEATURE_BIT.pointLights} | ${FEATURE_BIT.spotLights} | ${FEATURE_BIT.surfaceLights})) {
 			if (gridInfo.x > 0.5) lamps = gridLamps(world, n, v, a.y * 2.0, lampShine);
-			else lamps = partLights(world, n, v, a.y * 2.0, lampShine);
+			else lamps = lampsAt(world, n, v, a.y * 2.0, lampShine);
 		}
 		if (!has(${FEATURE_BIT.lightHighlights})) lampShine = vec3(0.0);
 		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps) + mix(vec3(1.0), albedo, a.z) * (spec * lit + lampShine * a.x * pat.y * 4.6);
@@ -990,9 +1040,35 @@ uniform float outline; uniform vec3 select; uniform float handle; uniform float 
 ${COMMON}
 ${SKY_VIS}
 ${GRID_READ}
+${LAMP_READ}
 ${SURFACE}
 ${LOG_DEPTH}
 ${VIEWS_GLSL}
+#ifdef LAMP_PASS
+// The half-size pass, as WebGpuView's fsLamps: each solid part's lights at
+// half or a quarter of the frame's pixels, its distance from the eye, and the
+// direction it faces, for lampsAt to read.
+layout(location=0) out vec4 oLight;
+layout(location=1) out vec4 oShine;
+layout(location=2) out vec4 oFacing;
+void main() {
+#ifdef LOG_DEPTH
+	gl_FragDepth = logDepth();
+#endif
+	vec3 n = normalize(vNormal);
+	vec3 faceN = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+	if (!has(${FEATURE_BIT.smooth})) n = dot(faceN, n) >= 0.0 ? faceN : -faceN;
+	vec4 a = M[int(vLook & 255u) * 3];
+	vec3 toEye = L[6].xyz - vWorld;
+	float d = length(toEye);
+	vec3 shine = vec3(0.0);
+	vec3 light = vec3(0.0);
+	if (has(${FEATURE_BIT.halfLamps})) light = partLights(vWorld, n, toEye / max(d, 1e-4), a.y * 2.0, shine);
+	oLight = vec4(light, d);
+	oShine = vec4(shine, 1.0);
+	oFacing = vec4(n * 0.5 + 0.5, 1.0);
+}
+#else
 out vec4 o;
 ${DENSITY_FS_GLSL}
 float heat(vec3 n) {
@@ -1035,7 +1111,8 @@ void main() {
 		// The Shadow maps view: tinted by the sun's map that shades it.
 		if (R.w > 2.5) o.rgb = sunMapTint(o.rgb, vWorld);
 	}
-}`;
+}
+#endif`;
 // Wireframe only: each part's edges, as WebGpuView's fsWire.
 const FS_WIRE = `#version 300 es
 precision highp float;
@@ -2405,6 +2482,14 @@ export class WebGl2View implements ViewRenderer {
 			VS,
 			FS.replace("#version 300 es\n", "#version 300 es\n#define REFL_PASS\n"),
 		);
+		// The half-size pass: the lights alone, at the pass's pixels.
+		this.lampProgram = this.link(
+			VS,
+			FS.replace("#version 300 es\n", "#version 300 es\n#define LAMP_PASS\n"),
+		);
+		this.lampAble =
+			gl.getExtension("EXT_color_buffer_float") !== null &&
+			(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number) >= 28;
 		this.makeReflections();
 		this.makeAntialias();
 		if (clip) this.pre = this.link(VS, FS_DEPTH);
@@ -2413,7 +2498,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniform4fv(gl.getUniformLocation(this.main.program, "M[0]"), materialBlock());
 		// The material textures, on unit 1 for good: the glow's passes use unit 0.
 		gl.uniform1i(gl.getUniformLocation(this.main.program, "looks"), 1);
-		for (const prog of [this.main, this.reflProgram]) {
+		for (const prog of [this.main, this.reflProgram, this.lampProgram]) {
 			gl.useProgram(prog.program);
 			gl.uniform4fv(gl.getUniformLocation(prog.program, "M[0]"), materialBlock());
 			gl.uniform1i(gl.getUniformLocation(prog.program, "looks"), 1);
@@ -3139,6 +3224,7 @@ export class WebGl2View implements ViewRenderer {
 		const gl = this.gl;
 		this.width = Math.max(1, width);
 		this.height = Math.max(1, height);
+		this.lampTargets = null;
 		this.makeAaTargets();
 		gl.bindRenderbuffer(gl.RENDERBUFFER, this.pickColour);
 		gl.renderbufferStorage(gl.RENDERBUFFER, gl.R32UI, this.width, this.height);
@@ -3834,7 +3920,9 @@ export class WebGl2View implements ViewRenderer {
 			);
 		const vp = jitterClip(projection(reversed), this.jitter, this.width, this.height);
 		gl.uniformMatrix4fv(prog.viewProj, false, vp);
-		gl.uniform4fv(gl.getUniformLocation(prog.program, "R"), renderDebug(this.render));
+		const debug = renderDebug(this.render);
+		debug[1] = this.lampBit(debug[1]);
+		gl.uniform4fv(gl.getUniformLocation(prog.program, "R"), debug);
 		gl.uniform1f(gl.getUniformLocation(prog.program, "logFar"), 1 / Math.log2(camera.far + 1));
 		// The sky's rays through the usual projection's far plane, the same in either depth.
 		if (prog.invViewProj)
@@ -3877,6 +3965,7 @@ export class WebGl2View implements ViewRenderer {
 			gl.uniform1i(grid.b, 23);
 			gl.uniform4fv(grid.c, this.gridBlock.subarray(0, 4 * LIGHT_GRID_CASCADES));
 		}
+		if (prog === this.main) this.lampUnits(prog);
 		const reflSky = gl.getUniformLocation(prog.program, "reflSkyOn");
 		if (reflSky)
 			gl.uniform1f(
@@ -3907,6 +3996,170 @@ export class WebGl2View implements ViewRenderer {
 	/** WebGL2's own swap already waits for the GPU, so there is nothing to wait on. */
 	settled(): Promise<void> {
 		return Promise.resolve();
+	}
+
+	/**
+	 * Once the GPU has done everything asked of it so far: a fence, looked at
+	 * every millisecond or so. For Automatic's light objects resolution to
+	 * time a frame by, as WebGPU's frames are timed by settled; settled itself
+	 * stays at once, as everything else here paces by it.
+	 */
+	gpuDone(): Promise<void> {
+		const gl = this.gl;
+		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+		if (!sync) return Promise.resolve();
+		gl.flush();
+		return new Promise((resolve) => {
+			const look = () => {
+				const state = gl.clientWaitSync(sync, 0, 0);
+				if (state === gl.TIMEOUT_EXPIRED) {
+					setTimeout(look, 1);
+					return;
+				}
+				gl.deleteSync(sync);
+				resolve();
+			};
+			look();
+		});
+	}
+
+	// -- the lamp light at half size: see lampsAt ---------------------------------------
+
+	private lampProgram!: Program;
+	/** Float colour targets and the units for them: else light objects stay full. */
+	private lampAble = false;
+	/** Light objects' resolution: full, the half-size pass not drawn; half or quarter its share. */
+	private lampModeNow: "full" | "half" | "quarter" = "full";
+	private lampTargets: {
+		fbo: WebGLFramebuffer;
+		light: WebGLTexture;
+		shine: WebGLTexture;
+		normal: WebGLTexture;
+		depth: WebGLRenderbuffer;
+		width: number;
+		height: number;
+	} | null = null;
+	/** A texel of nothing, for the lamp units while the pass is not drawn. */
+	private lampBlank: WebGLTexture | null = null;
+
+	setLampMode(mode: "full" | "half" | "quarter"): void {
+		if (mode === this.lampModeNow) return;
+		this.lampModeNow = mode;
+		this.lampTargets = null;
+		this.onRedraw?.();
+	}
+
+	/** The half-size pass's bit: as the lamp mode says, where the place has lights and the grid is off. */
+	private lampBit(bits: number): number {
+		const out = bits & ~FEATURE_BIT.halfLamps;
+		return this.lampAble && this.lampModeNow !== "full" && this.hasLights && this.gridCell === null
+			? out | FEATURE_BIT.halfLamps
+			: out;
+	}
+
+	/** The half-size pass's step across the render: see halfPassStep. */
+	private lampStep(): number {
+		return halfPassStep(
+			this.lampModeNow === "quarter" ? 4 : 2,
+			this.width,
+			this.canvas?.clientWidth ?? 0,
+		);
+	}
+
+	/** The pass's targets, made again when the frame or the mode changed. */
+	private makeLampTargets(): NonNullable<WebGl2View["lampTargets"]> {
+		const gl = this.gl;
+		const was = this.lampTargets;
+		const step = this.lampStep();
+		const width = Math.max(1, Math.ceil(this.width / step));
+		const height = Math.max(1, Math.ceil(this.height / step));
+		if (was && was.width === width && was.height === height) return was;
+		if (was) {
+			for (const t of [was.light, was.shine, was.normal]) gl.deleteTexture(t);
+			gl.deleteRenderbuffer(was.depth);
+			gl.deleteFramebuffer(was.fbo);
+		}
+		const texture = (format: number, type: number, base: number) => {
+			const t = gl.createTexture()!;
+			gl.bindTexture(gl.TEXTURE_2D, t);
+			gl.texImage2D(gl.TEXTURE_2D, 0, format, width, height, 0, base, type, null);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			return t;
+		};
+		const light = texture(gl.RGBA16F, gl.HALF_FLOAT, gl.RGBA);
+		const shine = texture(gl.RGBA16F, gl.HALF_FLOAT, gl.RGBA);
+		const normal = texture(gl.RGBA8, gl.UNSIGNED_BYTE, gl.RGBA);
+		const depth = gl.createRenderbuffer()!;
+		gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+		gl.renderbufferStorage(gl.RENDERBUFFER, this.depthFormat(), width, height);
+		const fbo = gl.createFramebuffer()!;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, light, 0);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, shine, 0);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, normal, 0);
+		gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+		gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+		this.lampTargets = { fbo, light, shine, normal, depth, width, height };
+		return this.lampTargets;
+	}
+
+	/** The solid parts' lamp light at half size, for the camera's pass to read. */
+	private drawLamps(camera: Camera): void {
+		const gl = this.gl;
+		const t = this.makeLampTargets();
+		gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+		gl.viewport(0, 0, t.width, t.height);
+		// Its own state: a clear of depth does nothing while depth writes are
+		// off, as a pass before may leave them, and the last frame's depth then
+		// refused every fragment at the same depth.
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthMask(true);
+		gl.depthFunc(this.nearer);
+		gl.colorMask(true, true, true, true);
+		gl.disable(gl.BLEND);
+		// No distance agrees with -1: nothing drawn there is worked out where it is read.
+		gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, -1]);
+		gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]);
+		gl.clearBufferfv(gl.COLOR, 2, [0, 0, 0, 0]);
+		gl.clearBufferfv(gl.DEPTH, 0, [this.farDepth]);
+		// Its own pixels are the frame's at the pass's size: the jitter is the frame's own.
+		this.use(this.lampProgram, camera, false);
+		// Its light textures' units by hand: use() sets them only with the sky
+		// maps, which this program reads none of, and left on unit 0 the three
+		// are of two types, which refuses every draw.
+		const at = (name: string) => gl.getUniformLocation(this.lampProgram.program, name);
+		gl.uniform1i(at("lightData"), 7);
+		gl.uniform1i(at("lightTable"), 8);
+		gl.uniform1i(at("lightIndex"), 9);
+		this.solids();
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.viewport(0, 0, this.width, this.height);
+	}
+
+	/** The pass's textures on units 25 to 27 for the main program, or a blank where it is not drawn. */
+	private lampUnits(prog: Program): void {
+		const gl = this.gl;
+		const t = this.lampTargets;
+		if (!this.lampBlank) {
+			this.lampBlank = gl.createTexture()!;
+			gl.bindTexture(gl.TEXTURE_2D, this.lampBlank);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+		}
+		const textures = t && this.lampBit(0) ? [t.light, t.shine, t.normal] : null;
+		["lampLight", "lampShine", "lampNormal"].forEach((name, k) => {
+			gl.activeTexture(gl.TEXTURE0 + 25 + k);
+			gl.bindTexture(gl.TEXTURE_2D, textures?.[k] ?? this.lampBlank);
+			gl.uniform1i(gl.getUniformLocation(prog.program, name), 25 + k);
+		});
+		gl.activeTexture(gl.TEXTURE0);
+		gl.uniform2f(
+			gl.getUniformLocation(prog.program, "lampScale"),
+			(t?.width ?? 1) / this.width,
+			(t?.height ?? 1) / this.height,
+		);
 	}
 
 	draw(camera: Camera, still = false): void {
@@ -3993,6 +4246,10 @@ export class WebGl2View implements ViewRenderer {
 		}
 		this.usualDepth(false);
 		gl.clearDepth(this.farDepth);
+		// The lights at half size, before the passes that read them, in the
+		// camera's own depth (reversed where it can be).
+		if (this.lampBit(0) && !heat && !wire && !tinted && mode !== "overdraw" && mode !== "density")
+			this.drawLamps(camera);
 		this.shape = glowShape(this.lighting?.post, postOn);
 		if (glowing) {
 			if (this.clear.length > 0) this.sortClear(camera.eye);

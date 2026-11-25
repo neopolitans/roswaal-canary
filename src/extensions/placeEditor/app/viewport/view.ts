@@ -112,6 +112,11 @@ export interface ViewRenderer {
 	draw(camera: Camera, still?: boolean): void;
 	/** Resolves once the GPU has finished the frames drawn so far. */
 	settled(): Promise<void>;
+	/**
+	 * Once the GPU has done what was asked so far, where settled resolves at
+	 * once (WebGL2): Automatic's light objects resolution times frames by it.
+	 */
+	gpuDone?(): Promise<void>;
 	/** The instance id under a pixel, or -1 for the sky. */
 	pick(camera: Camera, x: number, y: number): Promise<number>;
 	/** A material texture, as its mip levels, into its layer; drawn from then on. */

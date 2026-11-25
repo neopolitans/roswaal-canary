@@ -3354,8 +3354,10 @@ export class ViewportController {
 					? this.depth.next()
 					: null;
 			if (depthPath) this.view.setDepthPath?.(depthPath);
+			// WebGL2 is timed for this alone, by a fence (gpuDone).
+			const lampTimed = timed || this.view.gpuDone !== undefined;
 			const lampWay =
-				timed && moving && !depthPath && this.view.setLampMode && this.measuringLamps()
+				lampTimed && moving && !depthPath && this.view.setLampMode && this.measuringLamps()
 					? this.lamps.next()
 					: null;
 			if (lampWay) this.view.setLampMode?.(lampWay);
@@ -3379,6 +3381,13 @@ export class ViewportController {
 						this.lamps.record(lampWay, ms);
 						if (this.lamps.chosen) this.applyLampMode();
 					}
+				});
+			}
+			if (!timed && lampWay && this.view.gpuDone) {
+				void this.view.gpuDone().then(() => {
+					if (generic) return;
+					this.lamps.record(lampWay, performance.now() - started);
+					if (this.lamps.chosen) this.applyLampMode();
 				});
 			}
 			if (!timed && dynamic && moving) this.dynamicFrame(now, gap, false);

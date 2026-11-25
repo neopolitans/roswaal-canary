@@ -26,6 +26,69 @@ export const OCC_SIZE = 64;
 export const OCC_MARGIN = 16;
 /** The cells a path to a light is stepped through, at most: a light's Range reaches 60 studs. */
 export const OCC_STEPS = 16;
+/** A piece of the occupancy window to upload: where it goes in the texture, its size, and its cells. */
+export interface OccupancyWrite {
+	to: number[];
+	size: number[];
+	bytes: Uint8Array;
+}
+
+/**
+ * What to upload to move the occupancy window, OCC_SIZE cells a side round
+ * the finest light grid cascade, from its lowest cell `was` to `at`: whole
+ * on a first upload or a jump past it, otherwise a slab for each axis it
+ * moved along, as the light grid's (lightGridMove). Each cell is kept where
+ * its place in the world falls, wrapped round along all three axes, so a
+ * piece is split where an axis wraps and each is one block of the texture.
+ * Shared by both renderers.
+ */
+export function occupancyWrites(
+	occ: Occupancy,
+	was: readonly number[] | null,
+	at: readonly number[],
+): OccupancyWrite[] {
+	const n = OCC_SIZE;
+	const regions: { min: number[]; count: number[] }[] = [];
+	if (!was || [0, 1, 2].some((a) => Math.abs(at[a] - was[a]) >= n)) {
+		regions.push({ min: [...at], count: [n, n, n] });
+	} else {
+		for (const a of [0, 1, 2]) {
+			const step = at[a] - was[a];
+			if (step === 0) continue;
+			const min = [...at];
+			const count = [n, n, n];
+			min[a] = step > 0 ? was[a] + n : at[a];
+			count[a] = Math.abs(step);
+			regions.push({ min, count });
+		}
+	}
+	const wrap = (v: number) => ((v % n) + n) % n;
+	const out: OccupancyWrite[] = [];
+	for (const { min, count } of regions) {
+		const pieces = (a: number) => {
+			const start = wrap(min[a]);
+			const first = Math.min(count[a], n - start);
+			return first < count[a]
+				? [
+						{ from: 0, to: start, len: first },
+						{ from: first, to: 0, len: count[a] - first },
+					]
+				: [{ from: 0, to: start, len: count[a] }];
+		};
+		for (const px of pieces(0))
+			for (const py of pieces(1))
+				for (const pz of pieces(2)) {
+					const size = [px.len, py.len, pz.len];
+					out.push({
+						to: [px.to, py.to, pz.to],
+						size,
+						bytes: occ.region([min[0] + px.from, min[1] + py.from, min[2] + pz.from], size),
+					});
+				}
+	}
+	return out;
+}
+
 /** A bucket's side, in studs: a box is listed in each it reaches. */
 const OCC_BUCKET = 64;
 /** A box reaching more buckets than this a side is kept apart, looked at for every region. */

@@ -41,6 +41,14 @@ import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
 import { canvasBytes, GpuMemory, trackWebGl2 } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
+import {
+	OCC_CELL,
+	OCC_MARGIN,
+	OCC_SIZE,
+	OCC_STEPS,
+	Occupancy,
+	occupancyWrites,
+} from "./occupancy.js";
 import { lightGridFor } from "./prepare.js";
 import { type Probe, type StageSink, WaitingClock } from "./profile.js";
 import { FEATURE_BIT, featureBits, featureOn, passesOf } from "./renderFeatures.js";
@@ -48,6 +56,7 @@ import { DENSITY_FS_GLSL, DENSITY_GLSL, OVERDRAW_GLSL, VIEWS_GLSL } from "./rend
 import { SMAA_AREA, SMAA_SEARCH, smaaTables } from "./smaaTables.js";
 import { TEXTURE_LEVELS, TEXTURE_SIZE } from "./textures.js";
 import {
+	autoLightGrid,
 	BLOOM_STEEP,
 	BLOOM_STRENGTH,
 	backToFront,
@@ -78,7 +87,12 @@ import {
 	type ImageQuad,
 	imageOrder,
 	imageQuads,
+	LIGHT_CELL,
+	LIGHT_GRID_CASCADES,
+	LIGHT_GRID_CELLS,
 	LIGHTS_FULL,
+	type LightGridRegion,
+	lightGridMove,
 	METAL_DIFFUSE_CUT,
 	METAL_SEEN,
 	type MeshGeometry,
@@ -336,6 +350,17 @@ float skySeesIn(int k, vec3 p, vec4 info) {
 uniform highp sampler2D lightData;
 uniform highp usampler2D lightTable;
 uniform highp usampler2D lightIndex;
+// The light grid's switches, as WebGpuView's GridU.info: x, the grid is
+// read (see GRID_READ); y, Soft: light objects flat, partLights' too.
+uniform vec4 gridInfo;
+// Soft's fall over a light's Range, and a SpotLight's share under Soft, as
+// WebGpuView's SOFT_FALL.
+float softFall(float x) {
+	return clamp(1.0 - 1.53 * (x - 0.5), 0.0, 1.0) * (1.0 - smoothstep(0.92, 1.0, x)) * 0.72;
+}
+float softSpot(float angle) {
+	return (1.0 - cos(angle)) * 0.5;
+}
 uint lightCell(vec3 p) {
 	ivec3 c = ivec3(floor(p / 16.0));
 	uint h = (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(c.z) * 83492791u);
@@ -369,14 +394,18 @@ vec3 partLights(vec3 p, vec3 n, vec3 v, float gloss, out vec3 shine) {
 		float dist = length(to);
 		if (dist >= a.w) continue;
 		vec3 l = to / max(dist, 1e-4);
-		float k = max(dot(n, l), 0.0) * (1.0 - smoothstep(0.7, 1.0, dist / a.w));
-		if (col.w > 0.5) {
+		// Soft (gridInfo.y): flat, a face lit whichever way it turns, as WebGpuView's.
+		bool soft = gridInfo.y > 0.5;
+		float k = soft ? softFall(dist / a.w) : max(dot(n, l), 0.0) * (1.0 - smoothstep(0.7, 1.0, dist / a.w));
+		if (soft && col.w > 0.5 && col.w < 1.5) {
+			k *= softSpot(d.w);
+		} else if (col.w > 0.5) {
 			float c = dot(-l, d.xyz);
 			if (c <= 0.0) continue;
 			k *= 1.0 - smoothstep(0.0, 1.0, atan(length(cross(-l, d.xyz)), c) / max(d.w, 1e-3));
 		}
 		sum += col.rgb * k;
-		shine += col.rgb * k * pow(max(dot(n, normalize(l + v)), 0.0), gloss);
+		if (!soft) shine += col.rgb * k * pow(max(dot(n, normalize(l + v)), 0.0), gloss);
 	}
 	shine *= 1.25;
 	return sum * 1.25;
@@ -621,7 +650,10 @@ vec4 surface(vec3 colour, vec3 n, vec3 world, float alpha, uint look, vec3 local
 		vec3 fill = (vec3(L[8].w, L[9].w, L[10].w) + L[2].rgb * max(vis, ${SKY_SEEN_LEAST})) * (0.9 + 0.1 * n.y);
 		vec3 lampShine = vec3(0.0);
 		vec3 lamps = vec3(0.0);
-		if (has(${FEATURE_BIT.pointLights} | ${FEATURE_BIT.spotLights} | ${FEATURE_BIT.surfaceLights})) lamps = partLights(world, n, v, a.y * 2.0, lampShine);
+		if (has(${FEATURE_BIT.pointLights} | ${FEATURE_BIT.spotLights} | ${FEATURE_BIT.surfaceLights})) {
+			if (gridInfo.x > 0.5) lamps = gridLamps(world, n, v, a.y * 2.0, lampShine);
+			else lamps = partLights(world, n, v, a.y * 2.0, lampShine);
+		}
 		if (!has(${FEATURE_BIT.lightHighlights})) lampShine = vec3(0.0);
 		c = albedo * (1.0 - a.z * ${METAL_DIFFUSE_CUT}) * (fill + lit + lamps) + mix(vec3(1.0), albedo, a.z) * (spec * lit + lampShine * a.x * pat.y * 4.6);
 		if (has(${FEATURE_BIT.reflections})) {
@@ -753,6 +785,180 @@ void main() {
 	}
 	o = vec4(far, 0.0, 0.0, 1.0);
 }`;
+// The light grid (Light object grid), as WebGpuView's: three cascades round
+// the camera, LIGHT_GRID_CELLS a side, x along s, z along t, y along r
+// within the cascade's third, each cell where its place in the world falls.
+// gridA holds the light arriving at a cell, alpha its luminance; gridB the
+// luminance-weighted middle of where it comes from, from the cell's middle
+// in cells, times that luminance. gridC: each cascade's lowest corner and
+// its cell, in studs. Units 22 and 23: see WebGl2View.gridUnits.
+const GRID_READ = `
+uniform highp sampler3D gridA;
+uniform highp sampler3D gridB;
+uniform vec4 gridC[${LIGHT_GRID_CASCADES}];
+int gridWrap(int v) { return v - ${LIGHT_GRID_CELLS} * int(floor(float(v) / ${LIGHT_GRID_CELLS}.0)); }
+// A cascade's light at p, as WebGpuView's gridLight: across, wrapped by the
+// sampler; up and down, the two layers either side read at their middles
+// and blended here, which a sampler cannot do within a third.
+vec3 gridLight(int k, vec3 p, vec3 n, vec3 v, float gloss, out vec3 shine) {
+	vec4 g = gridC[k];
+	vec2 uv = p.xz / (g.w * ${LIGHT_GRID_CELLS}.0);
+	float f = p.y / g.w - 0.5;
+	float low = floor(f);
+	float third = float(k) * ${LIGHT_GRID_CELLS}.0;
+	float depth = ${LIGHT_GRID_CELLS}.0 * ${LIGHT_GRID_CASCADES}.0;
+	float lo = (float(gridWrap(int(low))) + third + 0.5) / depth;
+	float hi = (float(gridWrap(int(low) + 1)) + third + 0.5) / depth;
+	float t = f - low;
+	vec4 a = mix(textureLod(gridA, vec3(uv, lo), 0.0), textureLod(gridA, vec3(uv, hi), 0.0), t);
+	shine = vec3(0.0);
+	if (a.a <= 1e-5) return vec3(0.0);
+	vec4 b = mix(textureLod(gridB, vec3(uv, lo), 0.0), textureLod(gridB, vec3(uv, hi), 0.0), t);
+	vec3 to = g.w * b.xyz / a.a;
+	vec3 l = to / max(length(to), 1e-3);
+	// Soft (gridInfo.y): flat, as Studio's, and no highlight.
+	bool even = gridInfo.y > 0.5;
+	vec3 lit = a.rgb * (even ? 1.0 : max(dot(n, l), 0.0));
+	if (!even) shine = lit * pow(max(dot(n, normalize(l + v)), 0.0), gloss) * 1.25;
+	return lit * 1.25;
+}
+// The finest cascade p is a cell inside, eased into the next over two cells
+// before its edge; past the coarsest, every light worked out here. Read half
+// a cell out from the face, on its air side, as WebGpuView's gridLamps.
+vec3 gridLamps(vec3 surface, vec3 n, vec3 v, float gloss, out vec3 shine) {
+	vec3 p = surface + n * (gridC[0].w * 0.5);
+	for (int k = 0; k < ${LIGHT_GRID_CASCADES}; k++) {
+		vec4 g = gridC[k];
+		float side = g.w * ${LIGHT_GRID_CELLS}.0 * 0.5;
+		vec3 off = abs(p - (g.xyz + vec3(side)));
+		float edge = side - max(off.x, max(off.y, off.z));
+		if (edge <= g.w) continue;
+		vec3 hereShine;
+		vec3 here = gridLight(k, p, n, v, gloss, hereShine);
+		float ease = clamp(1.0 - (edge - g.w) / (2.0 * g.w), 0.0, 1.0);
+		if (ease <= 0.0 || k + 1 >= ${LIGHT_GRID_CASCADES}) {
+			shine = hereShine;
+			return here;
+		}
+		vec3 nextShine;
+		vec3 next = gridLight(k + 1, p, n, v, gloss, nextShine);
+		shine = mix(hereShine, nextShine, ease);
+		return mix(here, next, ease);
+	}
+	return partLights(p, n, v, gloss, shine);
+}
+`;
+// The light grid's cells, a layer of a region at a time, as WebGpuView's
+// GRID_FILL: drawn n by n over the layer, x across and z up, each fragment
+// the cell of the region that falls on its texel (the rest discarded).
+// gSize: the cell in studs, the cascade, Soft, and the layer's cell up;
+// gLo and gCount: the region's lowest cell and its cells along x, y and z;
+// gOcc: the occupancy window's lowest cell, and w whether to read it (the
+// finest cascade alone): see occupancy.ts.
+const FS_GRID = `#version 300 es
+precision highp float;
+precision highp int;
+${COMMON}
+${SKY_VIS}
+uniform vec4 gSize;
+uniform vec4 gLo;
+uniform vec4 gCount;
+uniform vec4 gOcc;
+uniform highp sampler3D occ;
+layout(location = 0) out vec4 oA;
+layout(location = 1) out vec4 oB;
+int wrapBy(int v, int n) { return v - n * int(floor(float(v) / float(n))); }
+// What parts fill of the cell at p, 0 to 1: wrapped round as the grid is,
+// and nothing outside the window the GPU holds.
+float filled(vec3 p) {
+	ivec3 c = ivec3(floor(p / ${OCC_CELL}.0));
+	ivec3 rel = c - ivec3(gOcc.xyz);
+	if (any(lessThan(rel, ivec3(0))) || any(greaterThanEqual(rel, ivec3(${OCC_SIZE})))) return 0.0;
+	return texelFetch(occ, ivec3(wrapBy(c.x, ${OCC_SIZE}), wrapBy(c.y, ${OCC_SIZE}), wrapBy(c.z, ${OCC_SIZE})), 0).r;
+}
+void main() {
+	ivec3 lo = ivec3(gLo.xyz);
+	int cx = lo.x + wrapBy(int(gl_FragCoord.x) - lo.x, ${LIGHT_GRID_CELLS});
+	int cz = lo.z + wrapBy(int(gl_FragCoord.y) - lo.z, ${LIGHT_GRID_CELLS});
+	if (cx - lo.x >= int(gCount.x) || cz - lo.z >= int(gCount.z)) discard;
+	float size = gSize.x;
+	vec3 corner = vec3(float(cx), gSize.w, float(cz)) * size;
+	float st = min(size, ${LIGHT_CELL}.0);
+	int m = int(round(size / st));
+	float r = st * 0.5;
+	bool soft = gSize.z > 0.5;
+	vec3 light = vec3(0.0);
+	vec3 weighted = vec3(0.0);
+	float weight = 0.0;
+	for (int s = 0; s < m * m * m; s++) {
+		vec3 p = corner + (vec3(float(s % m), float((s / m) % m), float(s / (m * m))) + 0.5) * st;
+		uint h = lightCell(p);
+		uvec2 b = texelFetch(lightTable, ivec2(int(h & 255u), int(h >> 8u)), 0).xy;
+		uint count = min(b.y, 64u);
+		for (uint j = 0u; j < count; j++) {
+			uint idx = b.x + j;
+			int i = int(texelFetch(lightIndex, ivec2(int(idx & 1023u), int(idx >> 10u)), 0).r);
+			vec4 a = texelFetch(lightData, ivec2(0, i), 0);
+			vec4 col = texelFetch(lightData, ivec2(1, i), 0);
+			vec4 d = texelFetch(lightData, ivec2(2, i), 0);
+			int kind = col.w > 1.5 ? ${FEATURE_BIT.surfaceLights} : col.w > 0.5 ? ${FEATURE_BIT.spotLights} : ${FEATURE_BIT.pointLights};
+			if (!has(kind)) continue;
+			vec3 at = a.xyz;
+			if (col.w > 1.5) {
+				// Wholly behind its face: none of its light.
+				if (dot(p - a.xyz, d.xyz) < -r) continue;
+				vec3 u = texelFetch(lightData, ivec2(3, i), 0).xyz;
+				vec3 v = texelFetch(lightData, ivec2(4, i), 0).xyz;
+				vec3 off = p - a.xyz;
+				at = a.xyz + u * clamp(dot(off, u) / max(dot(u, u), 1e-6), -1.0, 1.0) + v * clamp(dot(off, v) / max(dot(v, v), 1e-6), -1.0, 1.0);
+			}
+			vec3 to = at - p;
+			float dist = length(to);
+			// A light smaller than the cube reaches its middle from anywhere in
+			// it; a larger one falls off where it does.
+			float reach = max(dist - max(r - a.w, 0.0), 0.0);
+			if (reach >= a.w) continue;
+			float k2 = soft ? softFall(reach / a.w) : 1.0 - smoothstep(0.7, 1.0, reach / a.w);
+			if (soft && col.w > 0.5 && col.w < 1.5) {
+				k2 *= softSpot(d.w);
+			} else if (col.w > 0.5 && dist > r) {
+				vec3 l = to / dist;
+				float c = dot(-l, d.xyz);
+				if (c <= 0.0) continue;
+				k2 *= 1.0 - smoothstep(0.0, 1.0, atan(length(cross(-l, d.xyz)), c) / max(d.w, 1e-3));
+			}
+			// A light smaller than the sample's cube: spread over it, its total kept.
+			k2 *= min(1.0, 0.52 * pow(a.w / r, 3.0));
+			// On the way to it, each cell lets through what parts leave of it.
+			if (gOcc.w > 0.5 && k2 > 0.0) {
+				vec3 dir = to / max(dist, 1e-4);
+				int steps = min(int(dist / ${OCC_CELL}.0), ${OCC_STEPS});
+				float through = 1.0;
+				for (int q = 1; q < steps; q++) {
+					through *= 1.0 - filled(p + dir * float(q) * ${OCC_CELL}.0);
+					if (through < 0.02) break;
+				}
+				k2 *= through;
+			}
+			vec3 lit = col.rgb * k2;
+			float lum = dot(lit, vec3(0.2126, 0.7152, 0.0722));
+			light += lit;
+			weighted += at * lum;
+			weight += lum;
+		}
+	}
+	float samples = float(m * m * m);
+	// A cell partly inside a part keeps the light of only the air round it.
+	float airK = 1.0;
+	if (gOcc.w > 0.5) airK = 1.0 - filled(corner + vec3(size * 0.5));
+	light = light / samples * airK;
+	float w = weight / samples * airK;
+	vec3 middle = corner + vec3(size * 0.5);
+	vec3 source = vec3(0.0);
+	if (weight > 0.0) source = (weighted / weight - middle) / size * w;
+	oA = vec4(light, w);
+	oB = vec4(source, 0.0);
+}`;
 /** A slice of the lighting cells, as WebGpuView's vsCell. */
 const VS_CELL = `#version 300 es
 void main() {
@@ -783,6 +989,7 @@ in vec3 vColour; in vec3 vWorld; in vec3 vNormal; flat in uint vId; in float vAl
 uniform float outline; uniform vec3 select; uniform float handle; uniform float alpha;
 ${COMMON}
 ${SKY_VIS}
+${GRID_READ}
 ${SURFACE}
 ${LOG_DEPTH}
 ${VIEWS_GLSL}
@@ -1309,6 +1516,7 @@ export class WebGl2View implements ViewRenderer {
 		if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
 		this.reflAt = [...camera.eye];
 		const faces = probeFaces(camera.eye, true);
+		this.redrawn.probeFaces += faces.length;
 		// The solid parts' Decals and Textures go on each face too: the image
 		// program's lighting set for this camera, its view swapped per face.
 		const images =
@@ -1455,7 +1663,10 @@ export class WebGl2View implements ViewRenderer {
 		const held = (r: RenderSettings) =>
 			`${passesOf(r.features).thinParts} ${featureBits(r.features) & (FEATURE_BIT.skyShadows | FEATURE_BIT.nearSky)}`;
 		if (held(render) !== held(this.render)) this.nearCentre = null;
-		if (render.features !== this.render.features) this.reflAt = null;
+		if (render.features !== this.render.features) {
+			this.reflAt = null;
+			this.gridStale = true;
+		}
 		this.render = render;
 	}
 
@@ -2282,9 +2493,310 @@ export class WebGl2View implements ViewRenderer {
 		progress?.(1);
 	}
 
+	// -- the light grid, as WebGpuView's: see GRID_READ and FS_GRID ---------------------
+
+	/** The setting, Automatic resolved against the place's style: see autoLightGrid. */
+	private gridSetting: number | null | "auto" = null;
+	/** The finest cell, in studs; null, off. */
+	private gridCell: number | null = null;
+	/** The style the grid was filled for: its light falls as Soft's or Realistic's. */
+	private gridSoft = false;
+	/**
+	 * Whether this device can draw the grid: its cells are half floats, which
+	 * WebGL2 draws into only with EXT_color_buffer_float, and it needs texture
+	 * units 22 to 24. Where it cannot, the grid stays off and every light is
+	 * worked out at each pixel.
+	 */
+	private gridAble: boolean | null = null;
+	private gridTex: [WebGLTexture, WebGLTexture] | null = null;
+	private gridBlank: WebGLTexture | null = null;
+	private gridFbo: WebGLFramebuffer | null = null;
+	private gridVao: WebGLVertexArrayObject | null = null;
+	private gridProg: Program | null = null;
+	private gridFill: Record<
+		"size" | "lo" | "count" | "occ" | "occTex",
+		WebGLUniformLocation | null
+	> | null = null;
+	/** Where each cascade stands, its lowest cell in whole cells; null, not yet filled. */
+	private gridOrigins: (number[] | null)[] = [];
+	/** The lights or their switches changed: every cascade filled again. */
+	private gridStale = true;
+	/** gridC's cascades, then gridInfo: see writeGridUniform. */
+	private gridBlock = new Float32Array(4 * (LIGHT_GRID_CASCADES + 1));
+	private gridLocations = new Map<
+		WebGLProgram,
+		Record<"a" | "b" | "c" | "info", WebGLUniformLocation | null>
+	>();
+	/** Whether the place has any PointLight, SpotLight or SurfaceLight: see setLights. */
+	private hasLights = false;
+	/** What the place's parts fill, built when the grid first needs it: see occupancy.ts. */
+	private occ: Occupancy | null = null;
+	/** The cells round the finest cascade, on unit 24, wrapped round. */
+	private occTex: WebGLTexture | null = null;
+	/** The occupancy window's lowest cell; null, to be uploaded whole. */
+	private occAt: number[] | null = null;
+	private occBuilding = false;
+	private redrawn = { probeFaces: 0, nearMaps: 0, sunMaps: 0, lightGrid: 0 };
+
+	redraws(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid: number } {
+		return { ...this.redrawn };
+	}
+
+	setLightGrid(setting: number | null | "auto"): void {
+		this.gridSetting = setting;
+		this.applyLightGrid();
+	}
+
+	/** The grid the setting and the place's style come to, and whether its light is flat. */
+	private applyLightGrid(): void {
+		const soft = this.lighting?.soft === true;
+		if (soft !== this.gridSoft) {
+			this.gridSoft = soft;
+			this.gridStale = true;
+		}
+		const gl = this.gl;
+		let cell = autoLightGrid(this.gridSetting, soft);
+		if (gl && cell !== null) {
+			this.gridAble ??=
+				gl.getExtension("EXT_color_buffer_float") !== null &&
+				gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) >= 25;
+			if (!this.gridAble) cell = null;
+		}
+		if (cell === this.gridCell || !gl) {
+			this.writeGridUniform();
+			return;
+		}
+		this.gridCell = cell;
+		this.gridOrigins = [];
+		this.gridStale = true;
+		if (cell !== null && !this.gridTex) {
+			const make = (unit: number) => {
+				const t = gl.createTexture()!;
+				gl.activeTexture(gl.TEXTURE0 + unit);
+				gl.bindTexture(gl.TEXTURE_3D, t);
+				gl.texStorage3D(
+					gl.TEXTURE_3D,
+					1,
+					gl.RGBA16F,
+					LIGHT_GRID_CELLS,
+					LIGHT_GRID_CELLS,
+					LIGHT_GRID_CELLS * LIGHT_GRID_CASCADES,
+				);
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+				// Repeats across, so the grid wraps round; up and down, gridLight blends itself.
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+				return t;
+			};
+			this.gridTex = [make(22), make(23)];
+			gl.activeTexture(gl.TEXTURE0);
+		}
+		this.writeGridUniform();
+		this.onRedraw?.();
+	}
+
+	/** Units 22 and 23 hold the grid, or a blank while there is none, so the place's shader always reads a texture. */
+	private gridUnits(): void {
+		if (this.gridTex || this.gridBlank) return;
+		const gl = this.gl;
+		this.gridBlank = gl.createTexture()!;
+		for (const unit of [22, 23]) {
+			gl.activeTexture(gl.TEXTURE0 + unit);
+			gl.bindTexture(gl.TEXTURE_3D, this.gridBlank);
+		}
+		gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, 1, 1, 1, 0, gl.RGBA, gl.HALF_FLOAT, null);
+		gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.activeTexture(gl.TEXTURE0);
+	}
+
+	private gridAt(program: WebGLProgram) {
+		let at = this.gridLocations.get(program);
+		if (!at) {
+			const gl = this.gl;
+			at = {
+				a: gl.getUniformLocation(program, "gridA"),
+				b: gl.getUniformLocation(program, "gridB"),
+				c: gl.getUniformLocation(program, "gridC"),
+				info: gl.getUniformLocation(program, "gridInfo"),
+			};
+			this.gridLocations.set(program, at);
+		}
+		return at;
+	}
+
+	/** Where the cascades stand, and whether the grid is read: only once each is filled. */
+	private writeGridUniform(): void {
+		const block = this.gridBlock;
+		block.fill(0);
+		const cell = this.gridCell;
+		let filled = cell !== null && this.hasLights && this.gridTex !== null;
+		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			const at = this.gridOrigins[k];
+			if (!at || cell === null) {
+				filled = false;
+				continue;
+			}
+			const size = cell * 2 ** k;
+			block.set([...at.map((c) => c * size), size], k * 4);
+		}
+		block[LIGHT_GRID_CASCADES * 4] = filled ? 1 : 0;
+		block[LIGHT_GRID_CASCADES * 4 + 1] = this.lighting?.soft ? 1 : 0;
+	}
+
+	/**
+	 * The occupancy window round the finest cascade, its lowest cell at `at`:
+	 * whole, or only the slabs it newly takes in (occupancyWrites).
+	 */
+	private syncOccupancy(at: number[]): void {
+		const gl = this.gl;
+		const n = OCC_SIZE;
+		if (!this.occTex) {
+			this.occTex = gl.createTexture()!;
+			gl.activeTexture(gl.TEXTURE24);
+			gl.bindTexture(gl.TEXTURE_3D, this.occTex);
+			gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, n, n, n);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.activeTexture(gl.TEXTURE0);
+		}
+		// Built in a task of its own, never inside a frame: a large place's
+		// parts take a while. The finest cascade is filled again with it.
+		if (!this.occ) {
+			const scene = this.scene;
+			if (scene && !this.occBuilding) {
+				this.occBuilding = true;
+				setTimeout(() => {
+					this.occBuilding = false;
+					if (this.scene !== scene) return;
+					this.occ = Occupancy.fromScene(scene);
+					this.occAt = null;
+					this.gridOrigins[0] = null;
+					this.onRedraw?.();
+				}, 0);
+			}
+			return;
+		}
+		gl.activeTexture(gl.TEXTURE24);
+		gl.bindTexture(gl.TEXTURE_3D, this.occTex);
+		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+		for (const piece of occupancyWrites(this.occ, this.occAt, at))
+			gl.texSubImage3D(
+				gl.TEXTURE_3D,
+				0,
+				piece.to[0],
+				piece.to[1],
+				piece.to[2],
+				piece.size[0],
+				piece.size[1],
+				piece.size[2],
+				gl.RED,
+				gl.UNSIGNED_BYTE,
+				piece.bytes,
+			);
+		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+		gl.activeTexture(gl.TEXTURE0);
+		this.occAt = [...at];
+	}
+
+	/**
+	 * The light grid's cells that are due, as WebGpuView's fillLightGrid:
+	 * every cascade when the lights or their switches changed; otherwise only
+	 * the cells a cascade newly takes in as the eye moves (lightGridMove), and
+	 * a whole cascade when the eye jumps past it, one a frame and only where
+	 * `wholeAllowed`, the rest after. Whether any were filled.
+	 */
+	private fillLightGrid(camera: Camera, wholeAllowed: boolean): boolean {
+		const cell = this.gridCell;
+		if (cell === null || !this.gridTex || !this.hasLights) return false;
+		const gl = this.gl;
+		const stale = this.gridStale;
+		this.gridStale = false;
+		const jobs: { k: number; region: LightGridRegion }[] = [];
+		let whole = 0;
+		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			const was = stale ? null : (this.gridOrigins[k] ?? null);
+			const move = lightGridMove(camera.eye, cell * 2 ** k, was);
+			if (move.fill.length === 0) continue;
+			const all = move.fill[0].count.every((c) => c === LIGHT_GRID_CELLS);
+			if (all && was && (whole > 0 || !wholeAllowed)) {
+				this.onRedraw?.();
+				continue;
+			}
+			if (all) whole++;
+			this.gridOrigins[k] = move.origin;
+			for (const region of move.fill) jobs.push({ k, region });
+		}
+		if (jobs.length === 0) return false;
+		// What parts fill round the finest cascade, before its cells are filled.
+		const finest = this.gridOrigins[0];
+		const occAt = finest
+			? [finest[0] - OCC_MARGIN, finest[1] - OCC_MARGIN, finest[2] - OCC_MARGIN]
+			: null;
+		if (occAt) this.syncOccupancy(occAt);
+		if (!this.gridProg) {
+			this.gridProg = this.link(VS_CELL, FS_GRID);
+			this.gridFbo = gl.createFramebuffer();
+			this.gridVao = gl.createVertexArray();
+			const at = (name: string) => gl.getUniformLocation(this.gridProg!.program, name);
+			this.gridFill = {
+				size: at("gSize"),
+				lo: at("gLo"),
+				count: at("gCount"),
+				occ: at("gOcc"),
+				occTex: at("occ"),
+			};
+		}
+		const u = this.gridFill!;
+		this.use(this.gridProg, camera, false);
+		// The lights' units: use sets them only beside the sky's maps, which this does not read.
+		const sky = this.skyAt(this.gridProg.program);
+		gl.uniform1i(sky.lightData, 7);
+		gl.uniform1i(sky.lightTable, 8);
+		gl.uniform1i(sky.lightIndex, 9);
+		gl.uniform1i(u.occTex, 24);
+		gl.activeTexture(gl.TEXTURE24);
+		gl.bindTexture(gl.TEXTURE_3D, this.occTex);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.gridFbo);
+		gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+		gl.viewport(0, 0, LIGHT_GRID_CELLS, LIGHT_GRID_CELLS);
+		gl.disable(gl.DEPTH_TEST);
+		gl.disable(gl.BLEND);
+		gl.bindVertexArray(this.gridVao);
+		const soft = this.lighting?.soft ? 1 : 0;
+		const n = LIGHT_GRID_CELLS;
+		for (const { k, region } of jobs) {
+			const size = cell * 2 ** k;
+			gl.uniform4f(u.lo, region.min[0], region.min[1], region.min[2], 0);
+			gl.uniform4f(u.count, region.count[0], region.count[1], region.count[2], 0);
+			// Blocking and what each cell keeps: the finest cascade alone.
+			const blocking = k === 0 && occAt && this.occ ? 1 : 0;
+			gl.uniform4f(u.occ, occAt?.[0] ?? 0, occAt?.[1] ?? 0, occAt?.[2] ?? 0, blocking);
+			for (let y = 0; y < region.count[1]; y++) {
+				const up = region.min[1] + y;
+				const layer = (((up % n) + n) % n) + k * n;
+				gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.gridTex[0], 0, layer);
+				gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, this.gridTex[1], 0, layer);
+				gl.uniform4f(u.size, size, k, soft, up);
+				gl.drawArrays(gl.TRIANGLES, 0, 3);
+			}
+			this.redrawn.lightGrid += region.count[0] * region.count[1] * region.count[2];
+		}
+		gl.bindVertexArray(null);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.viewport(0, 0, this.width, this.height);
+		gl.enable(gl.DEPTH_TEST);
+		this.writeGridUniform();
+		return true;
+	}
+
 	setLighting(lighting: LightingParams): void {
 		this.lighting = lighting;
 		this.reflAt = null;
+		this.applyLightGrid();
 		const sun = lighting.sun.join(",");
 		if (sun !== this.sunKey) {
 			this.sunKey = sun;
@@ -2307,6 +2819,10 @@ export class WebGl2View implements ViewRenderer {
 			this.skyKey = key;
 			this.skyDirty = true;
 			this.box = sceneBox(scene);
+			// What parts fill, again, and the finest cascade with it: not while a drag moves them.
+			this.occ = null;
+			this.occAt = null;
+			this.gridOrigins[0] = null;
 		}
 		this.setLights(scene.lights);
 		this.setImages(scene);
@@ -2969,6 +3485,9 @@ export class WebGl2View implements ViewRenderer {
 		const key = fingerprint(lights);
 		if (key === this.lightKey && this.lightKey !== -1) return;
 		this.lightKey = key;
+		this.hasLights = !!lights && lights.length > 0;
+		this.gridStale = true;
+		this.writeGridUniform();
 		for (const t of this.lightTextures) gl.deleteTexture(t);
 		const grid = lightGridFor(lights);
 		const count = Math.max(1, (lights?.length ?? 0) / LIGHT_STRIDE);
@@ -3129,6 +3648,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.clearDepth(1);
 		SUN_CASCADES.forEach((_, k) => {
 			if (!due[k]) return;
+			this.redrawn.sunMaps++;
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this.sunMaps, 0, k);
 			gl.clear(gl.DEPTH_BUFFER_BIT);
 			gl.uniformMatrix4fv(
@@ -3154,6 +3674,7 @@ export class WebGl2View implements ViewRenderer {
 		this.skyDirty = false;
 		this.sunDirty = false;
 		this.nearCentre = centre;
+		if (which.near) this.redrawn.nearMaps++;
 		const box = this.scene ? sceneBox(this.scene) : null;
 		this.skyData = skyBlock(box, this.lighting?.sun ?? [0, 1, 0], false);
 		if (box) nearSkyInto(this.skyData, box, centre, false);
@@ -3348,6 +3869,14 @@ export class WebGl2View implements ViewRenderer {
 		);
 		gl.uniform3f(prog.select, SELECT[0], SELECT[1], SELECT[2]);
 		gl.uniform1f(prog.handle, 0);
+		const grid = this.gridAt(prog.program);
+		if (grid.info) gl.uniform4fv(grid.info, this.gridBlock.subarray(4 * LIGHT_GRID_CASCADES));
+		if (grid.a) {
+			this.gridUnits();
+			gl.uniform1i(grid.a, 22);
+			gl.uniform1i(grid.b, 23);
+			gl.uniform4fv(grid.c, this.gridBlock.subarray(0, 4 * LIGHT_GRID_CASCADES));
+		}
 		const reflSky = gl.getUniformLocation(prog.program, "reflSkyOn");
 		if (reflSky)
 			gl.uniform1f(
@@ -3449,6 +3978,8 @@ export class WebGl2View implements ViewRenderer {
 			this.fillCells(camera);
 			clock?.mark("skyCells");
 		}
+		// Not a whole cascade in a frame that drew the near maps: the next.
+		if (this.fillLightGrid(camera, !nearDrawn)) clock?.mark("lightGrid");
 		// The parts moved or the light changed: the cube shows them again.
 		if (partsMoved || nearDrawn) this.reflAt = null;
 		this.drawReflections(camera);

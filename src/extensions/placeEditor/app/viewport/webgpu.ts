@@ -48,7 +48,14 @@ import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geom
 import { canvasBytes, GpuMemory, trackWebGpu } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
-import { OCC_CELL, OCC_MARGIN, OCC_SIZE, OCC_STEPS, Occupancy } from "./occupancy.js";
+import {
+	OCC_CELL,
+	OCC_MARGIN,
+	OCC_SIZE,
+	OCC_STEPS,
+	Occupancy,
+	occupancyWrites,
+} from "./occupancy.js";
 import { lightGridFor } from "./prepare.js";
 import {
 	type Probe,
@@ -5806,50 +5813,14 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			}
 			return;
 		}
-		const occ = this.occ;
-		const was = this.occAt;
-		const regions: { min: number[]; count: number[] }[] = [];
-		if (!was || [0, 1, 2].some((a) => Math.abs(at[a] - was[a]) >= n)) {
-			regions.push({ min: [...at], count: [n, n, n] });
-		} else {
-			// A slab for each axis it moved along, as the light grid's.
-			for (const a of [0, 1, 2]) {
-				const step = at[a] - was[a];
-				if (step === 0) continue;
-				const min = [...at];
-				const count = [n, n, n];
-				min[a] = step > 0 ? was[a] + n : at[a];
-				count[a] = Math.abs(step);
-				regions.push({ min, count });
-			}
-		}
+		for (const piece of occupancyWrites(this.occ, this.occAt, at))
+			d.queue.writeTexture(
+				{ texture: this.occTex, origin: piece.to },
+				piece.bytes,
+				{ bytesPerRow: piece.size[0], rowsPerImage: piece.size[1] },
+				piece.size,
+			);
 		this.occAt = [...at];
-		const wrap = (v: number) => ((v % n) + n) % n;
-		for (const { min, count } of regions) {
-			// Split where an axis wraps round, so each piece is one block of the texture.
-			const pieces = (a: number) => {
-				const start = wrap(min[a]);
-				const first = Math.min(count[a], n - start);
-				return first < count[a]
-					? [
-							{ from: 0, to: start, len: first },
-							{ from: first, to: 0, len: count[a] - first },
-						]
-					: [{ from: 0, to: start, len: count[a] }];
-			};
-			for (const px of pieces(0))
-				for (const py of pieces(1))
-					for (const pz of pieces(2)) {
-						const size = [px.len, py.len, pz.len];
-						const bytes = occ.region([min[0] + px.from, min[1] + py.from, min[2] + pz.from], size);
-						d.queue.writeTexture(
-							{ texture: this.occTex, origin: [px.to, py.to, pz.to] },
-							bytes,
-							{ bytesPerRow: size[0], rowsPerImage: size[1] },
-							size,
-						);
-					}
-		}
 	}
 
 	/** The style the grid was filled for: its light falls as Soft's or Realistic's. */
@@ -6725,6 +6696,9 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		};
 		if (old) for (const b of [old.data, old.table, old.index]) b.destroy();
 		this.gridStale = true;
+		// Read or not as the lights now say: with none left, nothing fills the
+		// grid again, and the uniform went on reading the light that was there.
+		this.writeGridUniform();
 	}
 
 	private makeSkyMaps(buffers: GPUVertexBufferLayout[]): void {

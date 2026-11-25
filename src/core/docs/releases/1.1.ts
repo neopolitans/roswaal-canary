@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.108",
+		date: "2026-11-25",
+		headline: "The light object grid on WebGL2, with Soft.",
+		added: [
+			"**Light object grid on WebGL2**, as on WebGPU: cascades of cells round the camera, parts blocking light in the finest, and Soft's light where the place is Soft. Where the device cannot draw to float textures, light objects are worked out per pixel as before.",
+		],
+		fixed: [
+			"**A place whose light objects are all removed no longer keeps their light** on the light grid (WebGPU).",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.107",
 		date: "2026-11-25",
 		headline: "Hand-written Luau is edited in its tab, and a hand-edited generated file can come back into its graph.",

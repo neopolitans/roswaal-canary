@@ -5,7 +5,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { OCC_CELL, Occupancy } from "../src/extensions/placeEditor/app/viewport/occupancy.js";
+import {
+	OCC_CELL,
+	OCC_SIZE,
+	Occupancy,
+	occupancyWrites,
+} from "../src/extensions/placeEditor/app/viewport/occupancy.js";
 
 describe("what parts fill", () => {
 	it("is the share of each cell a box takes up", () => {
@@ -62,5 +67,48 @@ describe("what turned parts and shapes fill", () => {
 		const occ = new Occupancy();
 		occ.add({ min: [0, 0, 0], max: [4, 4, 4], fill: 0.5 });
 		expect(occ.at(0, 0, 0)).toBeCloseTo(0.5, 2);
+	});
+});
+
+describe("the occupancy window's uploads", () => {
+	const n = OCC_SIZE;
+	const cells = (w: { size: number[] }[]) =>
+		w.reduce((s, p) => s + p.size[0] * p.size[1] * p.size[2], 0);
+
+	it("are the whole window first, in one piece where it starts on a multiple of its size", () => {
+		const writes = occupancyWrites(new Occupancy(), null, [0, 0, 0]);
+		expect(writes.map((w) => [w.to, w.size])).toEqual([
+			[
+				[0, 0, 0],
+				[n, n, n],
+			],
+		]);
+	});
+
+	it("are a slab a side going up or down, as across, each cell where its place falls", () => {
+		const up = occupancyWrites(new Occupancy(), [0, 0, 0], [0, 3, 0]);
+		expect(up.map((w) => [w.to, w.size])).toEqual([
+			[
+				[0, 0, 0],
+				[n, 3, n],
+			],
+		]);
+		const down = occupancyWrites(new Occupancy(), [0, 0, 0], [0, -2, 0]);
+		expect(down.map((w) => [w.to, w.size])).toEqual([
+			[
+				[0, n - 2, 0],
+				[n, 2, n],
+			],
+		]);
+	});
+
+	it("split where an axis wraps, each piece one block of the texture", () => {
+		const writes = occupancyWrites(new Occupancy(), null, [-5, 0, 0]);
+		expect(writes.map((w) => [w.to[0], w.size[0]])).toEqual([
+			[n - 5, 5],
+			[0, n - 5],
+		]);
+		expect(cells(writes)).toBe(n * n * n);
+		for (const w of writes) expect(w.bytes.length).toBe(w.size[0] * w.size[1] * w.size[2]);
 	});
 });

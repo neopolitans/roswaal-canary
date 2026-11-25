@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.70.0",
+	version: "0.71.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.71.0",
+			roswaal: "1.1.0-canary.108",
+			date: "2026-11-25",
+			text: "WebGL2 fills the light grid by a fragment pass into the same wrapped RGBA16F textures, with Soft and occupancy (occupancyWrites shared); WebGPU rewrites the grid uniform when the lights change.",
+		},
 		{
 			version: "0.70.0",
 			roswaal: "1.1.0-canary.106",

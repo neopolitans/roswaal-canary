@@ -101,7 +101,7 @@ export function NodeMenu({
 	// What the open graph declares, for the members of a dragged wire's type.
 	const script = useEditor().script;
 	const projectTypes = useProjectTypes();
-	const [query, setQuery] = useState("");
+	const [query, setQuery] = useState(anchor.query ?? "");
 	const [active, setActive] = useState(0);
 	const from = anchor.from;
 

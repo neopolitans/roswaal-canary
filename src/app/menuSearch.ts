@@ -85,6 +85,8 @@ export interface MenuAnchor {
 	 * anyone who already knows node graphs will expect.
 	 */
 	from?: WireFrom;
+	/** What the search starts as: "Cast to", from a pin's Cast To. */
+	query?: string;
 }
 
 /** A named instance of a node type: "Get health", "Set health", "Get greet". */

@@ -40,6 +40,8 @@ export interface PinMenuProps {
 	onSplit: (mode: string) => void;
 	/** Put the named parent pin back together. */
 	onRecombine: (parent: string) => void;
+	/** The palette's casts, with this output's wire: what is picked arrives wired. */
+	onCastTo?: () => void;
 	onClose: () => void;
 }
 
@@ -51,6 +53,7 @@ export function PinMenu({
 	onBreakLinks,
 	onSplit,
 	onRecombine,
+	onCastTo,
 	onClose,
 }: PinMenuProps) {
 	const links = pinLinkCount(script, target.nodeId, target.pin.id, target.side);
@@ -84,6 +87,11 @@ export function PinMenu({
 
 	if (node && parent !== undefined) {
 		shape.push({ label: "Recombine Struct Pin", run: () => onRecombine(parent) });
+	}
+
+	// A value's output can be cast: the palette's casts, the wire carried.
+	if (node && onCastTo && target.side === "out" && target.pin.kind === "data") {
+		shape.push({ label: "Cast To…", run: onCastTo });
 	}
 
 	if (links > 0) {

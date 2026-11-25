@@ -214,9 +214,33 @@ function refreshAliases(): void {
  * twice in development, and the second run would find nothing to read.
  */
 /** Script analysis with its own chevron down: a window of it is only its bar. */
+/** How far right of its node a cast picked from a pin's Cast To lands, in studs of the canvas. */
+const CAST_TO_STEP = 280;
+
 const STATUS_FOLDED: ReadonlySet<PanelId> = new Set<PanelId>(["analysis"]);
 
 const OPENED_FOR_PICKER = typeof window !== "undefined" && window.location.hash === "#picker";
+
+/**
+ * An open Luau tab's text read again from its file, where it changed: one a
+ * graph writes is rewritten by each compile. A file gone or unreadable
+ * leaves the tab as it was.
+ */
+async function refreshLuauTab(path: string): Promise<void> {
+	const key = `luau:${path}`;
+	if (!store.getTabs().some((t) => t.key === key)) return;
+	let text: string;
+	try {
+		({ text } = await api.readSource(path));
+	} catch {
+		return;
+	}
+	store.updateSide(key, (side) =>
+		side.kind === "luau" && side.doc.text !== text
+			? { kind: "luau", doc: { ...side.doc, text } }
+			: side,
+	);
+}
 
 export function App() {
 	const editor = useEditor();
@@ -257,6 +281,8 @@ export function App() {
 	const [editedSince, setEditedSince] = useState<ReadonlySet<string>>(new Set());
 	/** A compile's outcomes, for the Project scope: all of them, or one graph's. */
 	const noteOutcomes = useCallback((results: CompileOutcome[], whole: boolean) => {
+		// An open tab of a file the compile wrote shows what was written.
+		for (const r of results) if (r.written) void refreshLuauTab(r.outputPath);
 		if (whole) {
 			setChecked({ outcomes: results, at: Date.now() });
 			setEditedSince(new Set());
@@ -301,6 +327,13 @@ export function App() {
 	 */
 	const aliasDoc = editor.side?.kind === "luaurc" ? editor.side.doc : null;
 	const source = editor.side?.kind === "luau" ? editor.side.doc : null;
+	// A Luau tab brought to the front shows the file as it is now: one a
+	// graph writes changes with each compile, and was shown as it was when
+	// its tab was opened until it was opened again from the explorer.
+	const sourcePath = source?.path ?? null;
+	useEffect(() => {
+		if (sourcePath) void refreshLuauTab(sourcePath);
+	}, [sourcePath]);
 	const mapDoc = editor.side?.kind === "map" ? editor.side.doc : null;
 	const placeDoc = editor.side?.kind === "place" ? editor.side.doc : null;
 	// Ctrl+Z undoes the place while its tab is in front, or Explorer or Properties was last clicked.
@@ -3216,6 +3249,24 @@ export function App() {
 				}
 				onSplit={(mode) => pinMenu && void splitOrRecombine(pinMenu, undefined, mode)}
 				onRecombine={(parent) => pinMenu && void splitOrRecombine(pinMenu, parent, undefined)}
+				onCastTo={() => {
+					if (!pinMenu) return;
+					// The palette, searching casts, carrying this output's wire: the
+					// cast picked lands to the right of the node, wired.
+					const node = editor.script?.nodes.find((n) => n.id === pinMenu.nodeId);
+					if (!node) return;
+					setMenu({
+						screen: pinMenu.screen,
+						world: { x: node.x + CAST_TO_STEP, y: node.y },
+						from: {
+							ref: { node: pinMenu.nodeId, pin: pinMenu.pin.id },
+							side: "out",
+							pin: pinMenu.pin,
+						},
+						query: "Cast to",
+					});
+					setPinMenu(null);
+				}}
 				onPinMenuClose={() => setPinMenu(null)}
 				nodeMenu={nodeMenu}
 				onNodeMenuAddNode={() =>

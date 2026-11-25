@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.69.0",
+	version: "0.69.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -41,6 +41,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.69.1",
+			roswaal: "1.1.0-canary.103",
+			date: "2026-11-25",
+			text: "A CylinderMesh is round across X and Z, the narrower of the two (scene.ts), as Studio draws it.",
+		},
 		{
 			version: "0.69.0",
 			roswaal: "1.1.0-canary.102",

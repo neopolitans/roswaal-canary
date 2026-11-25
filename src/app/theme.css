@@ -2327,6 +2327,29 @@ button.tb.primary:hover:not(:disabled) {
 	cursor: pointer;
 }
 
+/* Where a dragged wire would grow a pin on the node if let go: the node and
+   GROW_REACH round it, dashed, with what it would add. */
+.canvas .grow-drop {
+	position: absolute;
+	border: 1.5px dashed var(--select);
+	border-radius: var(--radius);
+	background: color-mix(in srgb, var(--select) 8%, transparent);
+	pointer-events: none;
+}
+
+.canvas .grow-drop > span {
+	position: absolute;
+	top: -0.75em;
+	left: 10px;
+	padding: 0 6px;
+	border-radius: var(--radius-sm);
+	background: var(--select);
+	color: var(--bg);
+	font-size: var(--text-xs);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
 .canvas .marquee {
 	position: absolute;
 	border: 1px solid var(--select);

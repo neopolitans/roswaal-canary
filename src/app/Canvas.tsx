@@ -98,6 +98,8 @@ import { showToast } from "./Toast.jsx";
  * top-left drag stops where a bottom-right drag would have stopped.
  */
 const COMMENT_MIN = { w: 160, h: 96 } as const;
+/** Screen pixels past a growable node's edges a dragged wire can be let go to grow it a pin. */
+const GROW_REACH = 24;
 
 /** What can be dropped on the canvas: what the panels and the tree drag out. */
 export const DROPPABLE = [
@@ -312,6 +314,16 @@ export function Canvas({
 	// deliberately larger than its dot — and falls through to the node, which
 	// grows a pin for it.
 	const wireHandled = useRef(false);
+	// The node a dragged wire would grow a pin on if let go now, and where it
+	// is on the canvas, outlined so the place to drop shows before the drop.
+	const [growDrop, setGrowDrop] = useState<{
+		id: string;
+		label: string;
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	} | null>(null);
 	const [editingComment, setEditingComment] = useState<string | null>(null);
 	// Where a held finger is, relative to the canvas, so it can be ringed.
 	const [holdAt, setHoldAt] = useState<Vec | null>(null);
@@ -529,6 +541,48 @@ export function Canvas({
 
 	// -- gesture plumbing --------------------------------------------------
 
+	/**
+	 * The node a wire dragged from an output would grow a pin on, let go at
+	 * (x, y): one under the pointer, or one within GROW_REACH screen pixels of
+	 * its edges, so the place to drop is easy to hit on a small node or with
+	 * a finger. Only where the pin it would grow could take the wire.
+	 */
+	const growTargetAt = useCallback(
+		(x: number, y: number, g: Gesture): string | null => {
+			if (g.kind !== "wire" || g.side !== "out" || g.pin.kind !== "data") return null;
+			const fits = (id: string | undefined): id is string => {
+				if (!id || id === g.from.node || !growth.get(id)?.canAdd) return false;
+				const grown = growNode(script, registry, id, 1, {
+					name: g.pin.name || undefined,
+					type: g.pin.type,
+				});
+				return (
+					!!grown.pin && canConnect(grown.script, registry, g.from, { node: id, pin: grown.pin }).ok
+				);
+			};
+			const under = document.elementFromPoint(x, y)?.closest<HTMLElement>(".node")?.dataset.nodeId;
+			if (under) return fits(under) ? under : null;
+			for (const [id, state] of growth) {
+				if (!state.canAdd) continue;
+				const el = surface.current?.querySelector<HTMLElement>(
+					`.node[data-node-id="${CSS.escape(id)}"]`,
+				);
+				const r = el?.getBoundingClientRect();
+				if (
+					r &&
+					x >= r.left - GROW_REACH &&
+					x <= r.right + GROW_REACH &&
+					y >= r.top - GROW_REACH &&
+					y <= r.bottom + GROW_REACH &&
+					fits(id)
+				)
+					return id;
+			}
+			return null;
+		},
+		[growth, script, registry],
+	);
+
 	const endGesture = useCallback(() => {
 		const g = gesture.current;
 		if (g.kind === "move" || g.kind === "resize") store.end();
@@ -539,6 +593,7 @@ export function Canvas({
 		// way it was picked up. Left set, a wire lifted off a wired input after
 		// any earlier pin drop vanished on release instead of opening the palette.
 		wireHandled.current = false;
+		setGrowDrop(null);
 		setMarquee(null);
 		setWireDrag(null);
 		setHoldAt(null);
@@ -586,6 +641,27 @@ export function Canvas({
 			}
 			const world = toWorld(e.clientX, e.clientY);
 			setPointer(world);
+			if (g.kind === "wire") {
+				const id = growTargetAt(e.clientX, e.clientY, g);
+				setGrowDrop((was) => {
+					if ((was?.id ?? null) === id) return was;
+					if (!id) return null;
+					const el = surface.current?.querySelector<HTMLElement>(
+						`.node[data-node-id="${CSS.escape(id)}"]`,
+					);
+					const box = surface.current?.getBoundingClientRect();
+					const r = el?.getBoundingClientRect();
+					if (!r || !box) return null;
+					return {
+						id,
+						label: growth.get(id)?.rule.one ?? "input",
+						left: r.left - box.left - GROW_REACH,
+						top: r.top - box.top - GROW_REACH,
+						width: r.width + 2 * GROW_REACH,
+						height: r.height + 2 * GROW_REACH,
+					};
+				});
+			}
 
 			switch (g.kind) {
 				case "pan": {
@@ -701,9 +777,10 @@ export function Canvas({
 				// execution output and a function grows a parameter, which is an
 				// output too, so dropping a data wire on either would add a pin
 				// nothing could connect to and leave it there.
-				if (onNode && g.side === "out" && g.pin.kind === "data") {
-					const nodeId = onNode.dataset.nodeId;
-					if (nodeId && nodeId !== g.from.node && growth.get(nodeId)?.canAdd) {
+				const growId = growTargetAt(e.clientX, e.clientY, g);
+				if (growId) {
+					const nodeId = growId;
+					{
 						store.edit((s) => {
 							const grown = growNode(s, registry, nodeId, 1, {
 								name: g.pin.name || undefined,
@@ -1643,6 +1720,21 @@ export function Canvas({
 					className="canvas-hold"
 					style={{ zIndex: LAYER.marquee, left: holdAt.x, top: holdAt.y }}
 				/>
+			)}
+
+			{growDrop && (
+				<div
+					className="grow-drop"
+					style={{
+						zIndex: LAYER.marquee,
+						left: growDrop.left,
+						top: growDrop.top,
+						width: growDrop.width,
+						height: growDrop.height,
+					}}
+				>
+					<span>+ Add {growDrop.label}</span>
+				</div>
 			)}
 
 			{marquee && (

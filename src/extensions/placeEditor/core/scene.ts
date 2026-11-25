@@ -556,10 +556,15 @@ export function buildPlaceScene(
 		}
 		// A cylinder part runs the length of X and is round across, as wide as
 		// the narrower of Y and Z: Studio never draws it oval. A CylinderMesh
-		// stretches to its part, so it keeps both.
+		// stands along Y and is round across X and Z the same way, as wide as
+		// the narrower (Studio, 25 Nov 2026: a 4 by 8 by 12 part's is 4 across).
 		if (kind === "cylinder" && !modifier) {
 			const d = Math.min(size[1], size[2]);
 			size = [size[0], d, d];
+		}
+		if (modifier?.className === "CylinderMesh") {
+			const d = Math.min(size[0], size[2]);
+			size = [d, size[1], d];
 		}
 
 		const r = cf.rotation;

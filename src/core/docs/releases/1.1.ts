@@ -9,6 +9,23 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.103",
+		date: "2026-11-25",
+		headline: "Cast To on an output pin, a wider drop to grow a pin, and fixes.",
+		added: [
+			"**Cast To on an output pin's menu**: the palette opens on its casts, and the one picked arrives wired to the pin.",
+			"**A wire can be let go just outside a node to grow it a pin**, and while it is dragged, the node it would join is outlined with what it would add.",
+		],
+		changed: [
+			"**Random BrickColor and Now are values**, as Random is: each wire they feed reads its own. A graph with execution wires through them has those wires joined when it opens.",
+		],
+		fixed: [
+			"**A Luau file's tab shows the file as it is now** when you go back to it, and when a compile rewrites it: it showed the file as it was when its tab was opened.",
+			"**A CylinderMesh is round**, as wide as the narrower of its part's X and Z, as Studio draws it: it was drawn oval.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.102",
 		date: "2026-11-25",
 		headline: "Reaching a new area spreads its catching up over frames.",

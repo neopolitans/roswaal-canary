@@ -2832,15 +2832,14 @@ export const LIBRARY_NODES: NodeDef[] = [
 			"BrickColor",
 			"By position in the Studio palette.",
 		),
-		call(
+		pure(
 			"brickcolor.random",
 			"Random BrickColor",
 			ENGINE_TYPES,
 			"BrickColor.random()",
 			[],
-			"Colour",
 			"BrickColor",
-			{ summary: "Impure: it differs every call, so it is an execution step rather than a value." },
+			"A value, as Random is: each wire it feeds reads its own.",
 		),
 
 		p(
@@ -3049,10 +3048,18 @@ export const LIBRARY_NODES: NodeDef[] = [
 	]),
 
 	// -- DateTime ----------------------------------------------------------
-	call("datetime.now", "Now", "Time", "DateTime.now()", [], "Now", "any", {
+	{
+		...pure(
+			"datetime.now",
+			"Now",
+			"Time",
+			"DateTime.now()",
+			[],
+			"any",
+			"The current moment, as a value: each wire it feeds reads its own.",
+		),
 		targets: ["roblox"],
-		summary: "The current moment. Impure: it differs every call.",
-	}),
+	},
 	pure(
 		"datetime.fromUnix",
 		"From Unix Timestamp",

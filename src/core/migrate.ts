@@ -89,6 +89,9 @@ const KEYED: Record<string, string> = ownTable({
 const BECAME_PURE: Record<string, string> = ownTable({
 	"roblox.getService": "Get Service",
 	"roblox.findFirstChild": "Find First Child",
+	// Values like math.random's, since 1.1.0: each wire reads its own.
+	"brickcolor.random": "Random BrickColor",
+	"datetime.now": "Now",
 });
 
 /**

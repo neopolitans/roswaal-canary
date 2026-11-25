@@ -78,6 +78,7 @@ export interface OverlaysProps {
 	onBreakLinks: () => void;
 	onSplit: (mode: string) => void;
 	onRecombine: (parent: string) => void;
+	onCastTo?: () => void;
 	onPinMenuClose: () => void;
 
 	nodeMenu: NodeMenuTarget | null;
@@ -174,6 +175,7 @@ export function Overlays(props: OverlaysProps) {
 					onBreakLinks={props.onBreakLinks}
 					onSplit={props.onSplit}
 					onRecombine={props.onRecombine}
+					onCastTo={props.onCastTo}
 					onClose={props.onPinMenuClose}
 				/>
 			)}

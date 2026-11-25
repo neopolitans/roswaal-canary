@@ -146,6 +146,16 @@ describe("A place's scene", () => {
 		expect(cylinder.transform.slice(3, 6).map(Math.abs)).toEqual([2, 0, 0]);
 	});
 
+	/** Studio draws a 4 by 8 by 12 part's CylinderMesh round, 4 across: never oval. */
+	it("keeps a CylinderMesh round, as wide as the narrower of X and Z", () => {
+		const scene = sceneOf(part("Part", [4, 8, 12], {}, [inst("CylinderMesh", {})]));
+		const t = rows(scene.kinds.cylinder.data)[0].transform;
+		const across = (o: number) => Math.hypot(t[o], t[o + 1], t[o + 2]);
+		expect(across(0)).toBe(8);
+		expect(across(3)).toBe(4);
+		expect(across(6)).toBe(4);
+	});
+
 	it("leaves out fully transparent parts and counts them", () => {
 		const scene = sceneOf(
 			part("Part", [1, 1, 1], { Transparency: ["Float32", 1] }),

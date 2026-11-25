@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.90",
+		date: "2026-11-25",
+		headline: "Light objects and Sky light at Half or Quarter keep edges and corners sharp.",
+		fixed: [
+			"**Light objects and Sky light at Half or Quarter no longer step along edges and corners**: where two faces met, a pixel took light worked out for the other face. Each pixel now takes only light worked out for a face turned its way, and works out its own along the line where faces meet.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.89",
 		date: "2026-11-25",
 		headline: "Particle animation rate, and Surface reflection accuracy.",

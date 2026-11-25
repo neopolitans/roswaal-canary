@@ -451,9 +451,20 @@ fn partLights(p: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 // the diffuse and the highlight, a the pass's distance from the eye.
 @group(0) @binding(18) var lampLight: texture_2d<f32>;
 @group(0) @binding(19) var lampShine: texture_2d<f32>;
+// The half-size pass's surface direction, as n * 0.5 + 0.5: a sample is read
+// only where it faces as the pixel does (lampAgrees).
+@group(0) @binding(20) var lampNormal: texture_2d<f32>;
+// Whether the half-size pass's sample at p stands for this pixel: at its
+// distance from the eye, and facing within about 25 degrees of it. On
+// distance alone, where two faces met a pixel took the light worked out for
+// the other face, and the light stepped along the pass's pixels.
+fn lampAgrees(p: vec2i, dist: f32, near: f32, n: vec3f) -> bool {
+	if (abs(textureLoad(lampLight, p, 0).a - dist) >= near) { return false; }
+	return dot(textureLoad(lampNormal, p, 0).xyz * 2.0 - 1.0, n) > 0.9;
+}
 // A pixel's lamp light: the four nearest of the half-size pass, weighted as
-// bilinear filtering would, each only where its distance from the eye agrees
-// with this pixel's; where none does, as at an edge, worked out here.
+// bilinear filtering would, each only where it stands for this pixel
+// (lampAgrees); where none does, as at an edge or a corner, worked out here.
 fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	if (has(${FEATURE_BIT.halfLamps}u)) {
 		let size = vec2i(textureDimensions(lampLight));
@@ -463,16 +474,17 @@ fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		let f = fract(at);
 		let dist = length(u.camPos.xyz - i.world);
 		let near = max(0.05, dist * 0.015);
+		// The surface's own direction, as the pass stored it, not a pattern's bumps.
+		let facing = normalize(i.normal);
 		var diffuse = vec3f(0.0);
 		var shine = vec3f(0.0);
 		var total = 0.0;
 		for (var k = 0; k < 4; k++) {
 			let o = vec2i(k & 1, k >> 1u);
 			let p = clamp(base + o, vec2i(0), size - vec2i(1));
-			let l = textureLoad(lampLight, p, 0);
-			if (abs(l.a - dist) < near) {
+			if (lampAgrees(p, dist, near, facing)) {
 				let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
-				diffuse = diffuse + l.rgb * w;
+				diffuse = diffuse + textureLoad(lampLight, p, 0).rgb * w;
 				shine = shine + textureLoad(lampShine, p, 0).rgb * w;
 				total = total + w;
 			}
@@ -482,9 +494,9 @@ fn lampsAt(i: VOut, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 	return partLights(i.world, n, v, gloss);
 }
 // A pixel's share of the sky from the half-size pass (FEATURE_BIT.halfSky),
-// read as lampsAt reads the lights: the four nearest whose distance from the
-// eye agrees with this pixel's, weighted as bilinear filtering would; where
-// none does, as at an edge, worked out here.
+// read as lampsAt reads the lights: the four nearest that stand for this
+// pixel (lampAgrees), weighted as bilinear filtering would; where none does,
+// as at an edge or a corner, worked out here.
 fn skyAt(i: VOut, n: vec3f) -> f32 {
 	if (has(${FEATURE_BIT.halfSky}u)) {
 		let size = vec2i(textureDimensions(lampLight));
@@ -493,12 +505,13 @@ fn skyAt(i: VOut, n: vec3f) -> f32 {
 		let f = fract(at);
 		let dist = length(u.camPos.xyz - i.world);
 		let near = max(0.05, dist * 0.015);
+		let facing = normalize(i.normal);
 		var sky = 0.0;
 		var total = 0.0;
 		for (var k = 0; k < 4; k++) {
 			let o = vec2i(k & 1, k >> 1u);
 			let p = clamp(base + o, vec2i(0), size - vec2i(1));
-			if (abs(textureLoad(lampLight, p, 0).a - dist) < near) {
+			if (lampAgrees(p, dist, near, facing)) {
 				let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1);
 				sky = sky + textureLoad(lampShine, p, 0).a * w;
 				total = total + w;
@@ -793,7 +806,7 @@ struct ReflU { viewProj: mat4x4f };
 // The half-size pass: each solid part's lights at half the frame's pixels,
 // as surface() works them out, its distance from the eye, and where the sky's
 // share is read from here too, that in the highlight's alpha.
-struct LampOut { @location(0) light: vec4f, @location(1) shine: vec4f };
+struct LampOut { @location(0) light: vec4f, @location(1) shine: vec4f, @location(2) facing: vec4f };
 @fragment fn fsLamps(i: VOut) -> LampOut {
 	let a = u.mats[(i.look & 255u) * 3u];
 	let faceN = normalize(cross(dpdx(i.world), dpdy(i.world)));
@@ -808,6 +821,7 @@ struct LampOut { @location(0) light: vec4f, @location(1) shine: vec4f };
 	var o: LampOut;
 	o.light = vec4f(l.diffuse, d);
 	o.shine = vec4f(l.spec, sky);
+	o.facing = vec4f(normalize(i.normal) * 0.5 + 0.5, 1.0);
 	return o;
 }
 // Highlight instances' mask: each pixel the Highlight of the part there, 1 to
@@ -2282,6 +2296,7 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 17, visibility: STAGE.FRAGMENT, sampler: {} },
 				{ binding: 18, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
 				{ binding: 19, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+				{ binding: 20, visibility: STAGE.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
 			],
 		});
 		this.layout = layout;
@@ -2346,7 +2361,7 @@ export class WebGpuView implements ViewRenderer {
 				fragment: {
 					module,
 					entryPoint: "fsLamps",
-					targets: [{ format: "rgba16float" }, { format: "rgba16float" }],
+					targets: [{ format: "rgba16float" }, { format: "rgba16float" }, { format: "rgba8unorm" }],
 				},
 				primitive: { topology: "triangle-list", cullMode: "back" },
 				depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "greater" },
@@ -5152,6 +5167,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	): GPUBindGroup {
 		const light = lamps ? this.lampLight : this.lampBlank;
 		const shine = lamps ? this.lampShine : this.lampBlank;
+		const facing = lamps ? this.lampNormal : this.lampBlank;
 		return this.device.createBindGroup({
 			layout: this.layout,
 			entries: [
@@ -5175,6 +5191,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				{ binding: 17, resource: this.reflSampler },
 				{ binding: 18, resource: light.createView() },
 				{ binding: 19, resource: shine.createView() },
+				{ binding: 20, resource: facing.createView() },
 			],
 		});
 	}
@@ -5183,6 +5200,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
 	private lampLight!: GPUTexture;
 	private lampShine!: GPUTexture;
+	/** Each sample's surface direction: see lampAgrees. */
+	private lampNormal!: GPUTexture;
 	private lampDepth!: GPUTexture;
 	private lampBlank!: GPUTexture;
 	/** Group 0 for the lamp pass, with blank lamp textures: it draws the real ones. */
@@ -5243,7 +5262,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** The lamp pass's targets, half or a quarter of the frame across and down. */
 	private makeLampTargets(): void {
 		const d = this.device;
-		for (const t of [this.lampLight, this.lampShine, this.lampDepth]) t?.destroy();
+		for (const t of [this.lampLight, this.lampShine, this.lampNormal, this.lampDepth]) t?.destroy();
 		this.lampBlank ??= d.createTexture({
 			size: [1, 1],
 			format: "rgba16float",
@@ -5262,6 +5281,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			});
 		this.lampLight = target("rgba16float", true);
 		this.lampShine = target("rgba16float", true);
+		this.lampNormal = target("rgba8unorm", true);
 		this.lampDepth = target("depth32float", false);
 	}
 
@@ -5278,6 +5298,12 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				},
 				{
 					view: this.lampShine.createView(),
+					clearValue: { r: 0, g: 0, b: 0, a: 0 },
+					loadOp: "clear",
+					storeOp: "store",
+				},
+				{
+					view: this.lampNormal.createView(),
 					clearValue: { r: 0, g: 0, b: 0, a: 0 },
 					loadOp: "clear",
 					storeOp: "store",

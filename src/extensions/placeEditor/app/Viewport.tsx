@@ -463,12 +463,14 @@ export function ViewportBar({ controller }: { controller: ViewportController }) 
 	const state = useViewport(controller);
 	const gizmo = useRef<HTMLDivElement>(null);
 	const rotation = useRef<HTMLSpanElement>(null);
+	const position = useRef<HTMLSpanElement>(null);
 	const rate = useRef<HTMLSpanElement>(null);
 	useEffect(() => {
 		if (!gizmo.current || !rotation.current || !rate.current) return;
 		return controller.mountCorner({
 			gizmo: gizmo.current,
 			rotation: rotation.current,
+			position: position.current ?? undefined,
 			rate: rate.current,
 		});
 	}, [controller]);
@@ -511,6 +513,11 @@ export function ViewportBar({ controller }: { controller: ViewportController }) 
 							className="vp-rot"
 							ref={rotation}
 							title="The camera's rotation, as Roblox's Orientation reads it: X, Y, Z, in degrees"
+						/>
+						<span
+							className="vp-rot vp-pos"
+							ref={position}
+							title="Where the camera is in the world, as Roblox's Position reads it: X, Y, Z, in studs"
 						/>
 						<span
 							className="vp-fps"
@@ -2454,6 +2461,7 @@ function CopyReport({ controller }: { controller: ViewportController }) {
 		const text = [
 			`Roswaal ${VERSION}`,
 			typeof navigator === "undefined" ? "" : navigator.userAgent,
+			controller.cameraText(),
 			"",
 			"Automatic's choices",
 			automaticText(controller),
@@ -2475,7 +2483,8 @@ function CopyReport({ controller }: { controller: ViewportController }) {
 				{said || "Copy report"}
 			</button>
 			<span className="render-setting-line">
-				The version, the browser, Automatic's choices and the start log, to paste into an issue.
+				The version, the browser, the camera, Automatic's choices and the start log, to paste into
+				an issue.
 			</span>
 		</div>
 	);

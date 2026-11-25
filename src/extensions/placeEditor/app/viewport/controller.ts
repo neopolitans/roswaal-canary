@@ -451,6 +451,8 @@ export interface ViewportElements {
 export interface CornerElements {
 	gizmo: HTMLElement;
 	rotation: HTMLElement;
+	/** Where the camera is, under its rotation. */
+	position?: HTMLElement;
 	rate: HTMLElement;
 }
 
@@ -3829,7 +3831,27 @@ export class ViewportController {
 		// No "-0.0": a turn that rounds to nothing is nothing.
 		const deg = (v: number) => (Math.abs(v) < 0.05 ? 0 : v).toFixed(1);
 		this.corner.rotation.textContent = `X ${deg(x)}°  Y ${deg(y)}°  Z 0.0°`;
+		if (this.corner.position) this.corner.position.textContent = this.cameraPosition();
 		this.drawGizmo();
+	}
+
+	/** Where the camera is in the world, in studs, as Roblox writes a Position: "12.3, 4.5, -67.8". */
+	private cameraPosition(): string {
+		const n = (v: number) => (Math.abs(v) < 0.05 ? 0 : v).toFixed(1);
+		const [x, y, z] = this.eye();
+		return `${n(x)}, ${n(y)}, ${n(z)}`;
+	}
+
+	/**
+	 * The camera, as a report gives it: where it is and which way it looks, so
+	 * the view can be put back exactly.
+	 */
+	cameraText(): string {
+		const x = (-this.cam.pitch * 180) / Math.PI;
+		let y = ((this.cam.yaw * 180) / Math.PI) % 360;
+		if (y > 180) y -= 360;
+		if (y <= -180) y += 360;
+		return `Camera: position ${this.cameraPosition()}; rotation X ${x.toFixed(1)}°, Y ${y.toFixed(1)}°; ${this.cam.dist.toFixed(1)} studs from what it orbits`;
 	}
 
 	/**

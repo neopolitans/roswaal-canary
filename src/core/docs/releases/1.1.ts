@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.82",
+		date: "2026-11-25",
+		headline: "Neon glows the same with MSAA, and the corner says where the camera is.",
+		fixed: [
+			"**With MSAA, Neon's glow is as tight as with every other antialiasing mode, and costs less**: its source is drawn one sample a pixel, and at half size where the quality level or Bloom resolution asks. WebGPU.",
+		],
+		added: [
+			"**Where the camera is, under its rotation in the view's corner**, as Roblox writes a Position, and in Inspect's Copy report: a view in a report can be put back exactly.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.81",
 		date: "2026-11-25",
 		headline: "Dynamic optimization takes bloom and light objects down a step at a time.",

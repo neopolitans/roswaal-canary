@@ -1655,10 +1655,11 @@ export class WebGpuView implements ViewRenderer {
 
 	/**
 	 * Whether the glow's source is drawn at half the view's size: see
-	 * ViewQuality.glowHalf and glowCoarse. One sample a pixel only.
+	 * ViewQuality.glowHalf and glowCoarse. Under MSAA too: the source is one
+	 * sample a pixel, in targets of its own.
 	 */
 	private glowHalf(): boolean {
-		return (this.quality.glowHalf || this.quality.glowCoarse === true) && this.samples === 1;
+		return this.quality.glowHalf || this.quality.glowCoarse === true;
 	}
 
 	/** The half size glow source's own depth. */
@@ -1679,7 +1680,9 @@ export class WebGpuView implements ViewRenderer {
 			format: this.format,
 			usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.TEXTURE_BINDING,
 		});
-		if (half)
+		// Its own depth where it cannot share the frame's: at half size, or one
+		// sample a pixel under MSAA.
+		if (half || this.samples > 1)
 			this.glowDepth = d.createTexture({
 				size,
 				format: "depth32float",
@@ -2649,10 +2652,12 @@ export class WebGpuView implements ViewRenderer {
 		});
 		// The glow's passes: the place drawn small in what it gives off, then blurred and added.
 		// Half floats, so six passes of blur do not round the glow's fall into steps.
-		// Drawn at the view's size, antialiased as the frame is, so a sliver of
-		// Neon through a seam glows by as much of a pixel as it covers.
+		// One sample a pixel, whatever the frame's antialiasing: the glow is
+		// blurred, so more samples only cost, and drawing it through the frame's
+		// multisampled targets made MSAA's glow wider than every other mode's
+		// (canary.81). Its own target and depth, at the view's size or half.
 		const glowTarget = { format: this.format };
-		const glowSamples = { count: this.samples };
+		const glowSamples = { count: 1 };
 		this.pipeline((p) => (this.glowSolid = p), {
 			layout: pipelineLayout,
 			vertex: { module, entryPoint: "vs", buffers },
@@ -3497,9 +3502,11 @@ fn at(c: vec2i) -> u32 {
 		if (!glow || !this.glowFull) return;
 		const pass = encoder.beginRenderPass({
 			timestampWrites: this.stamp("post"),
+			// Straight into its own target: one sample a pixel, never the frame's multisampled one.
 			colorAttachments: [
 				{
-					...this.into(this.glowFull.createView()),
+					view: this.glowFull.createView(),
+					storeOp: "store",
 					clearValue: { r: 0, g: 0, b: 0, a: 0 },
 					loadOp: "clear",
 				},

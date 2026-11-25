@@ -23566,6 +23566,13 @@ textarea.tb:where(:disabled) {
 	white-space: pre;
 }
 
+/* Where the camera is, under its rotation: selectable, to copy into a report. */
+.vp-corner .vp-pos {
+	pointer-events: auto;
+	-webkit-user-select: text;
+	user-select: text;
+}
+
 /* Blender's axes, above the readout. */
 .vp-gizmo {
 	width: 104px;

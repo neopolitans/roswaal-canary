@@ -203,7 +203,8 @@ export interface ViewRenderer {
 	redraws?(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid?: number };
 	/**
 	 * Resolves once the GPU has finished everything drawn so far: a frame's
-	 * whole cost, for a profile. WebGL2 waits there and then.
+	 * whole cost, for a profile. Each renderer gives the page its turns while
+	 * it waits, so the frames are shown.
 	 */
 	finished(): Promise<void>;
 	/**

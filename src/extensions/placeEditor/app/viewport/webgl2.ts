@@ -4880,9 +4880,37 @@ export class WebGl2View implements ViewRenderer {
 		this.clock = sink ? new WaitingClock(() => this.gpuWait(), sink) : null;
 	}
 
+	/**
+	 * Once the GPU has done everything drawn so far: a fence, looked at
+	 * between the page's tasks. Waiting there and then (gpuWait, a pixel read
+	 * back) never gave the page a turn, so a busy benchmark's frames were
+	 * never shown (the view leapt from one to one near the end of each
+	 * motion), and it drained the GPU each frame, so no two were ever in
+	 * flight (an iPad's WebGL2, 25 Nov 2026). Looked at by message rather
+	 * than timer: Safari stretches a run of short timers to 4 ms, which
+	 * would round every frame's time. Where a fence cannot be made, as before.
+	 */
 	finished(): Promise<void> {
-		this.gpuWait();
-		return Promise.resolve();
+		const gl = this.gl;
+		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+		if (!sync) {
+			this.gpuWait();
+			return Promise.resolve();
+		}
+		gl.flush();
+		const channel = new MessageChannel();
+		return new Promise((resolve) => {
+			channel.port1.onmessage = () => {
+				if (!gl.isContextLost() && gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
+					channel.port2.postMessage(0);
+					return;
+				}
+				if (!gl.isContextLost()) gl.deleteSync(sync);
+				channel.port1.close();
+				resolve();
+			};
+			channel.port2.postMessage(0);
+		});
 	}
 
 	/** The off-screen frame's samples: as asked, as far as the GPU goes; 0 is none. */

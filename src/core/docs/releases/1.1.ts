@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.117",
+		date: "2026-11-25",
+		headline: "A WebGL2 benchmark shows its frames as it times them.",
+		fixed: [
+			"**A benchmark on WebGL2 shows each frame it draws**, rather than one in the middle of each motion and one near its end, and keeps two frames in flight as WebGPU's does: it waited for the GPU by reading a pixel back, which gave the page no turn to show anything and emptied the GPU each frame.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.116",
 		date: "2026-11-25",
 		headline: "WebGL2 benchmarks no longer stall on every moving frame.",

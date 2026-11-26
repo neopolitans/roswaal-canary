@@ -338,6 +338,8 @@ const SAMPLES = 4;
  * switch, which read Soft from the grid's uniform instead.
  */
 const LIT_GRID = 1 << 28;
+/** The most GPU errors a view keeps: see WebGpuView.gpuErrors. */
+const GPU_ERRORS = 8;
 const LIT_SOFT = 1 << 29;
 const LIT_ASK = 1 << 30;
 
@@ -2756,6 +2758,9 @@ export class WebGpuView implements ViewRenderer {
 		if (this.halfOn) features.push("shader-f16");
 		this.device = await adapter.requestDevice(
 			features.length > 0 ? { requiredFeatures: features } : undefined,
+		);
+		this.device.addEventListener("uncapturederror", (event) =>
+			this.noteGpuError((event as GPUUncapturedErrorEvent).error.message),
 		);
 		// Before anything is made, so all of it is counted.
 		trackWebGpu(this.device, this.memory);
@@ -6283,6 +6288,24 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 
 	/** Ambient lighting's Grid (Settings): see FEATURE_BIT.skyGrid. */
 	private ambientGrid = false;
+
+	/**
+	 * The device's uncaptured errors, each message once, at most GPU_ERRORS:
+	 * a pass the browser refuses draws nothing and says so only here, which a
+	 * tablet's user never sees (Highlights on an iPad, 26 Nov 2026). A
+	 * benchmark's results carry them.
+	 */
+	private seenErrors: string[] = [];
+
+	gpuErrors(): readonly string[] {
+		return this.seenErrors;
+	}
+
+	private noteGpuError(message: string): void {
+		const text = message.trim().replace(/\s+/g, " ").slice(0, 400);
+		if (this.seenErrors.length >= GPU_ERRORS || this.seenErrors.includes(text)) return;
+		this.seenErrors.push(text);
+	}
 
 	setAmbientGrid(on: boolean): void {
 		if (on === this.ambientGrid) return;

@@ -182,6 +182,12 @@ export interface BenchmarkResult {
 	 */
 	measure?: "busy" | "shown";
 	release: string;
+	/**
+	 * The GPU's errors during the run, each once, with the station being
+	 * drawn when they were first seen: a pass the browser refused draws
+	 * nothing. WebGPU; absent where there were none.
+	 */
+	gpuErrors?: { at: string; message: string }[];
 	date: string;
 	renderer: string;
 	/** Why WebGPU did not start, where the run fell back to WebGL2. */
@@ -354,6 +360,10 @@ export function benchmarkReport(result: BenchmarkResult): string {
 	lines.push(
 		`Seed ${result.seed} · ${result.date}${(result.passes ?? 1) > 1 ? " · with a warm pass" : ""}${result.cancelled ? " · stopped before the end" : ""}`,
 	);
+	if (result.gpuErrors?.length) {
+		lines.push(`GPU errors, each where it was first seen (what it stopped drew nothing):`);
+		for (const e of result.gpuErrors) lines.push(`  ${e.at}: ${e.message}`);
+	}
 	if (result.measure === "shown") {
 		const fps = shownScore(result);
 		const refresh = result.levels[0]?.stations[0]?.still.shown?.refresh;

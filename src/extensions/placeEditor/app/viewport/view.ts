@@ -142,6 +142,8 @@ export interface ViewRenderer {
 	setLightGrid?(cell: number | null | "auto"): void;
 	/** Beams and particles at half size, where the frame has a glow pass: see Particle resolution. */
 	setParticleHalf?(on: boolean): void;
+	/** The GPU's errors seen so far, each once, oldest first: see WebGpuView.gpuErrors. */
+	gpuErrors?(): readonly string[];
 	/** Ambient lighting's Grid: see FEATURE_BIT.skyGrid. */
 	setAmbientGrid?(on: boolean): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */

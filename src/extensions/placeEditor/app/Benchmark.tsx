@@ -185,6 +185,13 @@ export function Benchmark({
 							<small>by the waited frame</small>
 						</span>
 					)}
+					{result.gpuErrors?.length ? (
+						<span className="benchmark-error">
+							{result.gpuErrors.length} GPU error{result.gpuErrors.length === 1 ? "" : "s"}, first
+							at {result.gpuErrors[0].at}: some of a scene may not have been drawn. The report and
+							results file say each.
+						</span>
+					) : null}
 					{result.fellBack && (
 						<span>
 							Drawn by WebGL2: WebGPU did not start ({result.fellBack}). These times do not compare

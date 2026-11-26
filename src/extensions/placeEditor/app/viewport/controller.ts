@@ -2689,7 +2689,18 @@ export class ViewportController {
 		};
 		let done = 0;
 		let lastFrame = Number.NaN;
+		// The GPU's errors, put to what was being drawn before they were seen.
+		let errorsSeen = this.view.gpuErrors?.().length ?? 0;
+		let drawing = "Starting";
+		const noteErrors = () => {
+			const all = this.view?.gpuErrors?.() ?? [];
+			for (const message of all.slice(errorsSeen))
+				(result.gpuErrors ??= []).push({ at: drawing, message });
+			errorsSeen = all.length;
+		};
 		const report = (level: string, station: Station | null, variant: string, phase: string) => {
+			noteErrors();
+			drawing = `${level}${station ? ` · ${station.n} ${station.name}${variant ? ` · ${variant}` : ""}` : ""} · ${phase}`;
 			this.set({ profiling: { phase, done, of: levels.length * variants } });
 			run.onProgress({
 				level,
@@ -2857,6 +2868,7 @@ export class ViewportController {
 			if (levels[0].want !== null && this.state.quality.level !== startLevel)
 				await this.toLevel(startLevel, false);
 		}
+		noteErrors();
 		if (run.cancelled()) result.cancelled = true;
 		return result;
 	}

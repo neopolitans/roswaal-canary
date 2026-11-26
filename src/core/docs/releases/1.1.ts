@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.133",
+		date: "2026-11-26",
+		headline: "A benchmark says the GPU errors it met.",
+		added: [
+			"**GPU errors in a benchmark's results**: with WebGPU, anything the browser refused to draw is listed in the report, the results file and on the end screen, with the station it was first seen at.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.132",
 		date: "2026-11-26",
 		headline: "File buttons that look like buttons.",

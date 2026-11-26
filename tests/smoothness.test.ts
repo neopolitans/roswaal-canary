@@ -126,6 +126,17 @@ describe("a Smoothness run's report", () => {
 		expect(shownScore(run("shown"))).toBeCloseTo(60, 5);
 	});
 
+	it("names each GPU error with where it was first seen (1.1.0-canary.133)", () => {
+		const errored = {
+			...run("busy"),
+			gpuErrors: [{ at: "Level 21 · 12 Highlights · Still", message: "Invalid RenderPipeline" }],
+		};
+		expect(benchmarkReport(errored)).toContain(
+			"\n  Level 21 · 12 Highlights · Still: Invalid RenderPipeline",
+		);
+		expect(benchmarkReport(run("busy"))).not.toContain("GPU errors");
+	});
+
 	it("is not compared with a run that measured the GPU, but is with another", () => {
 		expect(compareRuns(run("busy"), run("shown")).warnings[0]).toMatch(/Smoothness run/);
 		expect(compareRuns(run("busy"), run("shown")).levels).toEqual([]);

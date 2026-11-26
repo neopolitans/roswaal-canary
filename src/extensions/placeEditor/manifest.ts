@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.83.1",
+	version: "0.84.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.84.0",
+			roswaal: "1.1.0-canary.133",
+			date: "2026-11-26",
+			text: "WebGPU keeps the device's uncaptured errors, each once, at most eight (gpuErrors); a benchmark's results carry them as gpuErrors, each with the level, station and phase drawn before it was seen, and the report and end screen say them.",
+		},
 		{
 			version: "0.83.1",
 			roswaal: "1.1.0-canary.132",

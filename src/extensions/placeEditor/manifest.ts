@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.87.0",
+	version: "0.87.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.87.1",
+			roswaal: "1.1.0-canary.140",
+			date: "2026-11-26",
+			text: "WebGL2 says its errors as WebGPU does (gpuErrors): a program that did not build (Highlights' shaders, then not tried again; the main program for a set of switches), Highlights' targets not complete, and getError when a benchmark or profile asks.",
+		},
 		{
 			version: "0.87.0",
 			roswaal: "1.1.0-canary.139",

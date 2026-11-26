@@ -172,6 +172,27 @@ const LIT_GRID = 1 << 28;
 const COARSE_UNIT = 28;
 /** The cells-worth-filling mask's unit, while a fill reads it: see cellSpans. */
 const MASK_UNIT = 29;
+/** The most errors a view keeps: see WebGl2View.gpuErrors. */
+const GPU_ERRORS = 8;
+
+/** A WebGL enum's name, for an error said: one of those it gives, or its number. */
+function glName(gl: WebGL2RenderingContext, value: number): string {
+	for (const name of [
+		"INVALID_ENUM",
+		"INVALID_VALUE",
+		"INVALID_OPERATION",
+		"INVALID_FRAMEBUFFER_OPERATION",
+		"OUT_OF_MEMORY",
+		"CONTEXT_LOST_WEBGL",
+		"FRAMEBUFFER_INCOMPLETE_ATTACHMENT",
+		"FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT",
+		"FRAMEBUFFER_INCOMPLETE_DIMENSIONS",
+		"FRAMEBUFFER_UNSUPPORTED",
+		"FRAMEBUFFER_INCOMPLETE_MULTISAMPLE",
+	] as const)
+		if ((gl as unknown as Record<string, number>)[name] === value) return name;
+	return `0x${value.toString(16)}`;
+}
 
 const COMMON = `
 uniform vec4 L[11];
@@ -4122,6 +4143,16 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindFramebuffer(gl.FRAMEBUFFER, rowsFbo);
 		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rows, 0);
 		this.hlTargets = { width, height, mask, depth, fbo, rows, rowsFbo };
+		for (const [name, f] of [
+			["mask", fbo],
+			["rows", rowsFbo],
+		] as const) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+			const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+			if (status !== gl.FRAMEBUFFER_COMPLETE)
+				this.noteGpuError(`Highlights' ${name} target is not complete (${glName(gl, status)})`);
+		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		return this.hlTargets;
 	}
 
@@ -4138,11 +4169,19 @@ export class WebGl2View implements ViewRenderer {
 		if (!hl) return;
 		const gl = this.gl;
 		const t = this.highlightTargets();
-		this.hlPrograms ??= {
-			mask: this.link(VS, FS_HL_MASK),
-			rows: this.link(VS_FULL_CELLS, FS_HL_ROWS).program,
-			over: this.link(VS_FULL_CELLS, FS_HL_OVER).program,
-		};
+		// Not built here: said once, and Highlights left undrawn, not the frame.
+		if (this.hlFailed) return;
+		try {
+			this.hlPrograms ??= {
+				mask: this.link(VS, FS_HL_MASK),
+				rows: this.link(VS_FULL_CELLS, FS_HL_ROWS).program,
+				over: this.link(VS_FULL_CELLS, FS_HL_OVER).program,
+			};
+		} catch (err) {
+			this.hlFailed = true;
+			this.noteGpuError(`Highlights' shaders did not build: ${String(err)}`);
+			return;
+		}
 		const prog = this.hlPrograms.mask;
 		const { width: w, height: h } = this;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
@@ -5428,6 +5467,29 @@ export class WebGl2View implements ViewRenderer {
 	/** Ambient lighting's Grid (Settings): see FEATURE_BIT.skyGrid. */
 	private ambientGrid = false;
 
+	/**
+	 * What WebGL refused, each once, at most GPU_ERRORS, as WebGpuView's:
+	 * a program that did not build, a target not complete, and the error
+	 * WebGL last kept, read when asked (a benchmark asks a few times a
+	 * station), not every frame, which would wait on the GPU.
+	 */
+	private seenErrors: string[] = [];
+	/** Highlights' shaders did not build: they are not tried again. */
+	private hlFailed = false;
+
+	gpuErrors(): readonly string[] {
+		const gl = this.gl;
+		const e = gl.isContextLost() ? gl.NO_ERROR : gl.getError();
+		if (e !== gl.NO_ERROR) this.noteGpuError(`WebGL error ${glName(gl, e)}`);
+		return this.seenErrors;
+	}
+
+	private noteGpuError(message: string): void {
+		const text = message.trim().replace(/\s+/g, " ").slice(0, 400);
+		if (this.seenErrors.length >= GPU_ERRORS || this.seenErrors.includes(text)) return;
+		this.seenErrors.push(text);
+	}
+
 	setAmbientGrid(on: boolean): void {
 		if (on === this.ambientGrid) return;
 		this.ambientGrid = on;
@@ -5819,6 +5881,7 @@ export class WebGl2View implements ViewRenderer {
 		} catch (err) {
 			// Not built: the program for every switch goes on drawing these.
 			console.warn("Place Editor: the main program for these switches did not build.", err);
+			this.noteGpuError(`The program for switches ${bits} did not build: ${String(err)}`);
 		}
 		this.mains.set(bits, prog);
 		return prog;

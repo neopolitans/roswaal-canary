@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.140",
+		date: "2026-11-26",
+		headline: "WebGL2 errors in a benchmark's results.",
+		added: [
+			"**A benchmark or profile on WebGL2 says what it could not draw**, as on WebGPU: a shader that did not build, a target not complete, an error WebGL kept, with the station it was first seen at.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.139",
 		date: "2026-11-26",
 		headline: "Ambient lighting's coarse cells over four frames, and a Smoothness run names its slowest frames.",

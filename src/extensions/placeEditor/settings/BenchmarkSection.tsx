@@ -12,6 +12,7 @@ import { Group, Row } from "../../../app/settingsParts.jsx";
 import { RELEASES } from "../../../core/docs/releases.js";
 import { CompareView, readResultFiles } from "../app/benchmark/CompareView.jsx";
 import type { BenchmarkResult } from "../app/benchmark/result.js";
+import { FileButton } from "../app/FileButton.jsx";
 import { saveFile } from "../app/saveFile.js";
 import { FEATURES } from "../app/viewport/renderFeatures.js";
 import { setTwiceWanted, startBenchmark, twiceWanted } from "../benchmarkEvent.js";
@@ -103,27 +104,24 @@ export function BenchmarkSection() {
 					help="Two downloaded results files, side by side, station by station."
 					detail="The earlier file is taken as before. The change across all stations, as a warmer or cooler device makes it, is taken out of each, and what is within the noise is said. A Smoothness run compares only with another."
 				>
-					<label className="tb benchmark-file">
-						Choose two files…
-						<input
-							type="file"
-							multiple
-							accept=".json,application/json"
-							onChange={async (e) => {
-								const read = await readResultFiles(e.currentTarget.files);
-								if (read.error) {
-									setError(read.error);
-									return;
-								}
-								if (read.runs.length !== 2) {
-									setError("Choose two results files.");
-									return;
-								}
-								setError(null);
-								setPair([read.runs[0], read.runs[1]]);
-							}}
-						/>
-					</label>
+					<FileButton
+						label="Choose two files…"
+						accept=".json,application/json"
+						multiple
+						onFiles={async (files) => {
+							const read = await readResultFiles(files);
+							if (read.error) {
+								setError(read.error);
+								return;
+							}
+							if (read.runs.length !== 2) {
+								setError("Choose two results files.");
+								return;
+							}
+							setError(null);
+							setPair([read.runs[0], read.runs[1]]);
+						}}
+					/>
 				</Row>
 				{error && <p className="settings-note">{error}</p>}
 				{pair && <CompareView before={pair[0]} after={pair[1]} />}
@@ -134,30 +132,23 @@ export function BenchmarkSection() {
 					help="Graphics set from a profile file, as a test asks."
 					detail="A profile file, such as one sent for a test, sets the Graphics settings it names; the rest stay as they are. A setting this version does not have, or a value it does not offer, is left out and said."
 				>
-					<label className="tb benchmark-file">
-						Choose a file…
-						<input
-							type="file"
-							accept=".json,application/json"
-							onChange={async (e) => {
-								const input = e.currentTarget;
-								const file = input.files?.[0];
-								input.value = "";
-								if (!file) return;
-								const read = applyProfile(PLACE_EDITOR, ext, await file.text());
-								if (!read.ok) {
-									setProfileSaid(read.error);
-									return;
-								}
-								writeExtension(PLACE_EDITOR, read.state);
-								const named = read.name ? `“${read.name}”` : "the profile";
-								const count = `${read.applied.length} setting${read.applied.length === 1 ? "" : "s"}`;
-								setProfileSaid(
-									`Imported ${named}: ${count}.${read.left.length > 0 ? ` Left out, as this version does not offer them: ${read.left.join(", ")}.` : ""}`,
-								);
-							}}
-						/>
-					</label>
+					<FileButton
+						label="Choose a file…"
+						accept=".json,application/json"
+						onFiles={async ([file]) => {
+							const read = applyProfile(PLACE_EDITOR, ext, await file.text());
+							if (!read.ok) {
+								setProfileSaid(read.error);
+								return;
+							}
+							writeExtension(PLACE_EDITOR, read.state);
+							const named = read.name ? `“${read.name}”` : "the profile";
+							const count = `${read.applied.length} setting${read.applied.length === 1 ? "" : "s"}`;
+							setProfileSaid(
+								`Imported ${named}: ${count}.${read.left.length > 0 ? ` Left out, as this version does not offer them: ${read.left.join(", ")}.` : ""}`,
+							);
+						}}
+					/>
 				</Row>
 				<Row label="Export a profile" help="These Graphics settings, as a file to keep or send.">
 					<button

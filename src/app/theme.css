@@ -14358,6 +14358,12 @@ a.docs-minor-row .aside {
 	border-top: 0;
 }
 
+/* A note a page writes into a box, under its rows: as far in as the rows. */
+.settings-box > .settings-note {
+	margin: 0;
+	padding: 0 16px 14px;
+}
+
 /* Searching: every page's matches in turn, and a page or a group with none
    left out. A page found by its name shows whole. */
 .settings-results .settings-section + .settings-section {
@@ -25093,18 +25099,6 @@ textarea.tb:where(:disabled) {
 }
 
 /* A file input inside a button-styled label: the label is the control. */
-.benchmark-file {
-	position: relative;
-	cursor: pointer;
-}
-
-.benchmark-file input {
-	position: absolute;
-	inset: 0;
-	opacity: 0;
-	cursor: pointer;
-}
-
 .benchmark-compare {
 	display: flex;
 	flex-direction: column;

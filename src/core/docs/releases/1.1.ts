@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.132",
+		date: "2026-11-26",
+		headline: "File buttons that look like buttons.",
+		fixed: [
+			"**The Benchmark page's file buttons** (Choose two files, Choose a file, Compare with a file) look and size as every other button, a touch screen's too.",
+			"**A note written into a Settings box**, such as what a profile import set, lines up with the rows above it.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.131",
 		date: "2026-11-26",
 		headline: "Graphics settings as a file, to send or import.",

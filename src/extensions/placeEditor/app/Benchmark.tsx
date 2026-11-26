@@ -27,6 +27,7 @@ import {
 	BENCHMARK_VERSION,
 	STATIONS,
 } from "./benchmark/stations.js";
+import { FileButton } from "./FileButton.jsx";
 import { saveFile } from "./saveFile.js";
 import {
 	type BenchmarkProgress,
@@ -204,18 +205,15 @@ export function Benchmark({
 								Compare with last run
 							</button>
 						)}
-						<label className="tb benchmark-file">
-							Compare with a file…
-							<input
-								type="file"
-								accept=".json,application/json"
-								onChange={async (e) => {
-									const read = await readResultFiles(e.currentTarget.files);
-									setFileError(read.error ?? null);
-									if (read.runs[0]) setAgainst(read.runs[0]);
-								}}
-							/>
-						</label>
+						<FileButton
+							label="Compare with a file…"
+							accept=".json,application/json"
+							onFiles={async (files) => {
+								const read = await readResultFiles(files);
+								setFileError(read.error ?? null);
+								if (read.runs[0]) setAgainst(read.runs[0]);
+							}}
+						/>
 					</div>
 					{fileError && <span className="benchmark-error">{fileError}</span>}
 					{against && <CompareView before={against} after={result} />}

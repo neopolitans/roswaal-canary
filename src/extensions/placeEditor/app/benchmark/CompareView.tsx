@@ -11,7 +11,7 @@ import type { BenchmarkResult } from "./result.js";
 
 /** Results files read: each run, or why one could not be. */
 export async function readResultFiles(
-	files: FileList | null,
+	files: FileList | readonly File[] | null,
 ): Promise<{ runs: BenchmarkResult[]; error?: string }> {
 	const runs: BenchmarkResult[] = [];
 	for (const file of Array.from(files ?? [])) {

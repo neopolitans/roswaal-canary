@@ -2701,6 +2701,7 @@ export class ViewportController {
 				...(this.view.setDepthPath
 					? { "Depth path, measured": this.depth.chosen ?? "full (not yet measured)" }
 					: {}),
+				...(this.view.depthKind ? { Depth: this.view.depthKind() } : {}),
 			},
 			...(run.ab
 				? {
@@ -3874,7 +3875,11 @@ export class ViewportController {
 					samples: facts.samples,
 					frameRate: String(options.frameRate),
 					renderScale,
-					depthPath: view.leanDepth ? (view.leanDepth() ? "lean" : "full") : "",
+					depthPath: view.leanDepth
+						? view.leanDepth()
+							? "lean"
+							: "full"
+						: (view.depthKind?.() ?? ""),
 					quality: startedAt,
 					assets: this.assetGaps(),
 					...(stats.memory ? { memory: stats.memory } : {}),

@@ -176,6 +176,12 @@ export interface ViewRenderer {
 	 */
 	setDepthPath?(path: "auto" | "full" | "lean"): void;
 	leanDepth?(): boolean;
+	/**
+	 * WebGL2's depth, as a benchmark and a profile say it: reversed where the
+	 * browser has EXT_clip_control, else by the logarithm of distance,
+	 * written by every pixel's shader (see webgl2.ts's LOG_DEPTH).
+	 */
+	depthKind?(): string;
 	/** How the place is drawn, from the Rendering panel: the renderer's alone, never the place's. */
 	setRender(render: RenderSettings): void;
 	/** What the last frame cost, for the Rendering panel. */

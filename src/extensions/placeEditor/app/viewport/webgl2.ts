@@ -4423,6 +4423,12 @@ export class WebGl2View implements ViewRenderer {
 	];
 	private linked = new Map<string, { program: WebGLProgram; shaders: WebGLShader[] }>();
 
+	depthKind(): string {
+		return this.clipControl
+			? "reversed (EXT_clip_control)"
+			: "logarithmic, written by each pixel (no EXT_clip_control)";
+	}
+
 	/** A shader's source with LOG_DEPTH defined where depth is not reversed. */
 	private source(src: string): string {
 		return this.clipControl

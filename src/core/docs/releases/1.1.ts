@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.142",
+		date: "2026-11-26",
+		headline: "A WebGL2 benchmark says how it keeps depth.",
+		added: [
+			"**A WebGL2 benchmark or profile says how depth is kept**: reversed, as on WebGPU, or written by each pixel where the browser cannot reverse it.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.141",
 		date: "2026-11-26",
 		headline: "A benchmark says where Highlights stop.",

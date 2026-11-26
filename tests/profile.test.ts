@@ -332,6 +332,19 @@ describe("what the profile says", () => {
 		expect(text).toMatch(/Parts' depth only\s+not here/);
 		expect(text).toContain("Quality: Automatic, Level 12");
 		expect(text).not.toContain("Not loaded");
+		expect(text).not.toContain("Did not settle");
+		// 1.1.0-canary.135: what did not settle in time, and the GPU's errors.
+		const stalled = profileReport({
+			...RESULT,
+			stalls: [
+				"Antialiasing FXAA: the view's shaders were not ready after 45 s; measured as drawn",
+			],
+			gpuErrors: ["Invalid RenderPipeline"],
+		});
+		expect(stalled).toContain(
+			"Did not settle: Antialiasing FXAA: the view's shaders were not ready after 45 s",
+		);
+		expect(stalled).toContain("GPU error: Invalid RenderPipeline");
 		const gaps = profileReport({
 			...RESULT,
 			facts: {

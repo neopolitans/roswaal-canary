@@ -425,6 +425,10 @@ export interface ProfileResult {
 	quality: LevelRow[];
 	/** The smallest step the page's clock takes, measured: Safari's is coarse. */
 	clock: number;
+	/** What did not settle in time, each with the phase it was in: see viewSettledWithin. */
+	stalls?: string[];
+	/** The GPU's errors while the profile ran, each once: see WebGpuView.gpuErrors. */
+	gpuErrors?: string[];
 }
 
 /** The camera moved as a drag, a pinch or a stick moves it: its frames, and what was drawn again. */
@@ -565,6 +569,8 @@ export function profileReport(result: ProfileResult): string {
 	if (facts.quality) lines.push(`Quality: ${facts.quality}`);
 	if (facts.camera) lines.push(`Camera: ${facts.camera}`);
 	lines.push(`Clock step: ${msText(result.clock)}`);
+	for (const stall of result.stalls ?? []) lines.push(`Did not settle: ${stall}`);
+	for (const error of result.gpuErrors ?? []) lines.push(`GPU error: ${error}`);
 	lines.push(`Browser: ${facts.userAgent}`);
 	lines.push("");
 	lines.push(

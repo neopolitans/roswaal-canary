@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.135",
+		date: "2026-11-26",
+		headline: "A profile goes on where shaders never finish.",
+		fixed: [
+			"**A profile or benchmark no longer stops for good** where the browser never finishes the view's shaders, as an iPad's profile did at Antialiasing FXAA: after 45 seconds it measures what is drawn, and a profile says so, with any GPU errors.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.134",
 		date: "2026-11-26",
 		headline: "Ambient lighting's Grid shaders leave Realtime out.",

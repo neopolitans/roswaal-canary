@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.84.1",
+	version: "0.84.2",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.84.2",
+			roswaal: "1.1.0-canary.135",
+			date: "2026-11-26",
+			text: "pipelinesWithin: a profile's and a benchmark's waits for the view's pipelines end after 45 s (SETTLE_LIMIT_MS), what is measured then drawn with the pipeline for every switch; a profile says each in stalls (Did not settle), and the GPU's errors while it ran.",
+		},
 		{
 			version: "0.84.1",
 			roswaal: "1.1.0-canary.134",

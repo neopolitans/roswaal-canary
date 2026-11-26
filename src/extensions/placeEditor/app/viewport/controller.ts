@@ -504,6 +504,9 @@ export function stagesOnly(view: Pick<ViewRenderer, "deviceFacts">): StageSink |
 	return view.deviceFacts().timers ? () => {} : null;
 }
 
+/** How long a profile waits for a view's shaders before it goes on: see viewSettledWithin. */
+const SETTLE_LIMIT_MS = 45_000;
+
 export class ViewportController {
 	private state: ViewportState = {
 		tool: "select",
@@ -2187,14 +2190,36 @@ export class ViewportController {
 	 * Once a view built again has the place's assets on the GPU, as far as they
 	 * come in ten seconds, and the pipelines for its switches.
 	 */
-	private async viewSettled(): Promise<void> {
+	/** The view's assets in, then its pipelines: false where they were not ready in time (see pipelinesWithin). */
+	private async viewSettled(): Promise<boolean> {
 		const from = performance.now();
 		while (performance.now() - from < 10000) {
 			const a = this.state.assets;
 			if (this.view && (a === null || assetsPending(a) <= 0)) break;
 			await new Promise((r) => setTimeout(r, 200));
 		}
-		await this.view?.pipelinesReady();
+		return this.pipelinesWithin();
+	}
+
+	/**
+	 * The view's pipelines for its switches, waited for no longer than
+	 * SETTLE_LIMIT_MS: false where they were not ready by then, and what is
+	 * measured is drawn with the one for every switch. A profile or a
+	 * benchmark goes on rather than waiting on a shader a browser never
+	 * finishes (an iPad's profile stopped at Antialiasing FXAA, 26 Nov 2026).
+	 */
+	private async pipelinesWithin(): Promise<boolean> {
+		const view = this.view;
+		if (!view) return true;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<false>((r) => {
+			timer = setTimeout(() => r(false), SETTLE_LIMIT_MS);
+		});
+		try {
+			return await Promise.race([view.pipelinesReady().then(() => true as const), late]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	/** A share of the canvas's pixels, below 1 only while a profile measures resolution. */
@@ -2394,7 +2419,7 @@ export class ViewportController {
 	 * GPU's own time for one (its timers, where it has them) and the page's.
 	 */
 	private async timeBusy(label: string, n: number): Promise<Timed> {
-		await this.view?.pipelinesReady();
+		await this.pipelinesWithin();
 		await this.warmBusy(500);
 		const view = this.view;
 		const gpu: number[] = [];
@@ -3507,7 +3532,7 @@ export class ViewportController {
 	/** What one frame costs at whatever is set now: a few to settle, then up to `n` timed. */
 	private async timeWaited(label: string, n: number): Promise<Timed> {
 		// The pipelines for these switches, not the ones drawing while they compile.
-		await this.view?.pipelinesReady();
+		await this.pipelinesWithin();
 		await this.waitedFrames(3, 400);
 		// The GPU's own time beside the waited one, where it has timers; the CPU's for each frame.
 		const view = this.view;
@@ -3655,8 +3680,20 @@ export class ViewportController {
 		const level = this.state.quality.level;
 		const auto = this.auto;
 		let done = 0;
-		const phase = (name: string) =>
+		let phaseNow = "";
+		const phase = (name: string) => {
+			phaseNow = name;
 			this.set({ profiling: { phase: name, done: done++, of: total } });
+		};
+		// What did not settle in time, and the GPU's errors from here on.
+		const stalls: string[] = [];
+		const errorsFrom = this.view?.gpuErrors?.().length ?? 0;
+		const settle = async () => {
+			if (!(await this.viewSettled()))
+				stalls.push(
+					`${phaseNow}: the view's shaders were not ready after ${SETTLE_LIMIT_MS / 1000} s; measured as drawn`,
+				);
+		};
 		let result: ProfileResult | null = null;
 		try {
 			phase("On screen");
@@ -3765,7 +3802,7 @@ export class ViewportController {
 				phase(`Antialiasing ${label}`);
 				this.options = { ...options, antialias: mode };
 				await this.restartView();
-				await this.viewSettled();
+				await settle();
 				antialias.push(await this.timeWaited(label, 30));
 				// Multisampled, with the parts shaded and depth-tested in one draw too:
 				// the depth pre-pass stores every sample's depth between its passes.
@@ -3780,7 +3817,7 @@ export class ViewportController {
 			this.options = options;
 			if (this.view?.antialias !== this.antialiasMode()) {
 				await this.restartView();
-				await this.viewSettled();
+				await settle();
 			}
 			// Precision: WebGPU's shader in half, then full, where the device has half.
 			const precision: Timed[] = [];
@@ -3792,12 +3829,12 @@ export class ViewportController {
 					phase(label);
 					this.options = { ...options, half };
 					await this.restartView();
-					await this.viewSettled();
+					await settle();
 					precision.push(await this.timeWaited(label, 30));
 				}
 				this.options = options;
 				await this.restartView();
-				await this.viewSettled();
+				await settle();
 			}
 			// The camera moving, as the view is set.
 			const moving = await this.timeMoving(phase);
@@ -3811,14 +3848,14 @@ export class ViewportController {
 				phase(`Quality ${n}`);
 				const made = this.view;
 				await this.toLevel(n, true);
-				if (this.view !== made) await this.viewSettled();
+				if (this.view !== made) await settle();
 				quality.push(await this.timeLevel(n));
 			}
 			this.options = options;
 			this.auto = auto;
 			this.setRender(render);
 			await this.toLevel(level, false);
-			await this.viewSettled();
+			await settle();
 			result = {
 				facts: {
 					renderer: view.backend,
@@ -3862,6 +3899,10 @@ export class ViewportController {
 				antialias,
 				quality,
 				clock: clockStep(),
+				...(stalls.length > 0 ? { stalls } : {}),
+				...((this.view?.gpuErrors?.().length ?? 0) > errorsFrom
+					? { gpuErrors: [...(this.view?.gpuErrors?.() ?? [])].slice(errorsFrom) }
+					: {}),
 			};
 		} finally {
 			// The view as it is now: the antialiasing sweep builds it again.
@@ -3933,7 +3974,7 @@ export class ViewportController {
 
 	/** A still frame as it reaches the screen: SHOWN_MS of frames paced by the display, after a short warm. */
 	private async timeShown(label: string): Promise<Timed> {
-		await this.view?.pipelinesReady();
+		await this.pipelinesWithin();
 		this.view?.setProfiling(null);
 		await this.shownFrameGaps(300);
 		const gaps = await this.shownFrameGaps(SHOWN_MS);

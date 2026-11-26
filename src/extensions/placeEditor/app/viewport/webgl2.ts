@@ -11,7 +11,14 @@
 
 import { type LightingParams, lightingBlock } from "../../core/lighting.js";
 import { MATERIALS, materialBlock } from "../../core/materials.js";
-import { LIGHT_STRIDE, type PlaceScene, SCENE_KINDS, SCENE_STRIDE } from "../../core/scene.js";
+import {
+	HIGHLIGHT_LIMIT,
+	LIGHT_STRIDE,
+	type PlaceScene,
+	SCENE_KINDS,
+	SCENE_STRIDE,
+	type SceneHighlight,
+} from "../../core/scene.js";
 import {
 	AA_GLSL,
 	AA_VS,
@@ -1549,6 +1556,96 @@ void main() {
 #endif
 	o = vId + 1u;
 }`;
+// Highlight instances' mask, as WebGpuView's fsMask: each pixel the Highlight
+// of the part there, 1 to 31; 0, none. hlRows, by part row (4096 a line): its
+// Highlight, 256 for a part with a Transparency, 512 for DepthMode
+// AlwaysOnTop. hlPass.x: this pass draws AlwaysOnTop's; .y: parts with a
+// Transparency drawn too (Roswaal's switch); .z: the rows' count. Written log
+// depth is pulled a little nearer, as the place's own was written by another
+// program. See WebGl2View.drawHighlightMask.
+const FS_HL_MASK = `#version 300 es
+precision highp float; precision highp int; flat in uint vId;
+uniform highp usampler2D hlRows;
+uniform vec4 hlPass;
+${LOG_DEPTH}
+out uint o;
+void main() {
+#ifdef LOG_DEPTH
+	gl_FragDepth = logDepth() - 1e-6;
+#endif
+	if (float(vId) >= hlPass.z) discard;
+	uint r = texelFetch(hlRows, ivec2(int(vId & 4095u), int(vId >> 12u)), 0).r;
+	uint slot = r & 255u;
+	if (slot == 0u || ((r & 256u) != 0u && hlPass.y < 0.5) || ((r & 512u) != 0u) != (hlPass.x > 0.5)) discard;
+	o = slot;
+}`;
+/** Along each row the nearest highlighted pixel within the outline's width, as WebGpuView's fsRows. */
+const FS_HL_ROWS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp usampler2D mask;
+uniform float wide;
+out uvec4 o;
+uint at(ivec2 c) {
+	ivec2 size = textureSize(mask, 0);
+	if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) return 0u;
+	return texelFetch(mask, c, 0).r;
+}
+void main() {
+	ivec2 c = ivec2(gl_FragCoord.xy);
+	int n = int(ceil(wide));
+	uint best = 0u;
+	int far = 1000;
+	for (int dx = -4; dx <= 4; dx++) {
+		if (abs(dx) > n) continue;
+		uint t = at(c + ivec2(dx, 0));
+		if (t != 0u && abs(dx) < far) { best = t; far = abs(dx); }
+	}
+	o = uvec4(best, best != 0u ? uint(far) + 1u : 0u, 0u, 0u);
+}`;
+/**
+ * Over the finished picture, as WebGpuView's: a Highlight's fill where its
+ * parts are, its outline `wide` pixels round them, the nearest Highlight's,
+ * from the rows' nearest up and down.
+ */
+const FS_HL_OVER = `#version 300 es
+precision highp float; precision highp int;
+uniform highp usampler2D mask;
+uniform highp usampler2D rows;
+uniform vec4 fill[32];
+uniform vec4 outline[32];
+uniform float wide;
+out vec4 o;
+void main() {
+	ivec2 c = ivec2(gl_FragCoord.xy);
+	uint s = texelFetch(mask, c, 0).r;
+	if (s != 0u) {
+		vec4 f = fill[int(s)];
+		if (f.a <= 0.0) discard;
+		o = f;
+		return;
+	}
+	float r = wide;
+	int n = int(ceil(r));
+	ivec2 size = textureSize(rows, 0);
+	uint best = 0u;
+	float near = 1e9;
+	for (int dy = -4; dy <= 4; dy++) {
+		if (abs(dy) > n) continue;
+		ivec2 q = c + ivec2(0, dy);
+		if (q.y < 0 || q.y >= size.y) continue;
+		uvec4 row = texelFetch(rows, q, 0);
+		if (row.g == 0u) continue;
+		float dx = float(row.g - 1u);
+		float d = dx * dx + float(dy * dy);
+		if (d > r * r + 0.5 || d >= near) continue;
+		best = row.r;
+		near = d;
+	}
+	if (best == 0u) discard;
+	vec4 l = outline[int(best)];
+	if (l.a <= 0.0) discard;
+	o = l;
+}`;
 
 interface Program {
 	program: WebGLProgram;
@@ -1564,6 +1661,26 @@ interface Program {
 }
 
 /** One instanced draw of a mesh. */
+/** The highlights' rows a line: see FS_HL_MASK. */
+const HL_ROW_WIDTH = 4096;
+
+/** Whether any of `count` rows in `data` is a part in `ids`, as WebGpuView's. */
+function rowsIn(data: Float32Array, count: number, ids: ReadonlySet<number>): boolean {
+	if (ids.size === 0 || count === 0) return false;
+	const words = new Uint32Array(data.buffer, data.byteOffset, count * SCENE_STRIDE);
+	// A row's id: its 14th word (see scene.ts).
+	for (let i = 0; i < count; i++) if (ids.has(words[i * SCENE_STRIDE + 13])) return true;
+	return false;
+}
+
+/** The bound texture read texel by texel, as an integer one must be. */
+function integerSampling(gl: WebGL2RenderingContext): void {
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
 type Draw = {
 	vao: WebGLVertexArrayObject;
 	indexCount: number;
@@ -1987,6 +2104,33 @@ export class WebGl2View implements ViewRenderer {
 		wire: WireSource;
 	}[] = [];
 	private glassHides = true;
+	/**
+	 * Fully transparent parts a Highlight covers, drawn only into the
+	 * highlights' mask, with "Transparent parts show Highlight" on.
+	 */
+	private ghosts: Draw[] = [];
+	/** The draws with a part a Highlight covers: drawn into the highlights' mask. */
+	private hlDraws: Draw[] = [];
+	/** The highlights' rows (see FS_HL_MASK) and colours; null, none in the place. */
+	private hl: {
+		rows: WebGLTexture;
+		count: number;
+		fill: Float32Array;
+		outline: Float32Array;
+		onTop: boolean;
+		occluded: boolean;
+	} | null = null;
+	/** The mask, its depth and the rows' nearest, made when first drawn: see drawHighlightMask. */
+	private hlTargets: {
+		width: number;
+		height: number;
+		mask: WebGLTexture;
+		depth: WebGLRenderbuffer;
+		fbo: WebGLFramebuffer;
+		rows: WebGLTexture;
+		rowsFbo: WebGLFramebuffer;
+	} | null = null;
+	private hlPrograms: { mask: Program; rows: WebGLProgram; over: WebGLProgram } | null = null;
 	private scene?: PlaceScene;
 	// The glow: what gives light drawn small, blurred, and added over the
 	// finished frame, which is drawn off screen first for it.
@@ -3443,7 +3587,7 @@ export class WebGl2View implements ViewRenderer {
 
 	setScene(scene: PlaceScene, moving = false): void {
 		const gl = this.gl;
-		for (const d of [...this.draws, ...this.clear, ...this.glass]) {
+		for (const d of [...this.draws, ...this.clear, ...this.glass, ...this.ghosts]) {
 			gl.deleteVertexArray(d.vao);
 			if (d.wire.edges) gl.deleteVertexArray(d.wire.edges.vao);
 		}
@@ -3470,7 +3614,11 @@ export class WebGl2View implements ViewRenderer {
 		this.clearEye = null;
 		this.glowing = sceneGlows(scene);
 		this.sceneBuffers = [];
+		this.hlDraws = [];
 		const sets = seeThroughSets(scene, this.glassHides);
+		const lit = new Set<number>();
+		for (const h of scene.highlights ?? [])
+			for (const id of [...h.parts, ...h.seeThrough]) lit.add(id);
 		type Rows = { data: Float32Array; count: number };
 		const none: Rows = { data: new Float32Array(0), count: 0 };
 		const groups: {
@@ -3525,17 +3673,265 @@ export class WebGl2View implements ViewRenderer {
 					wire: { mesh, vertices: vb, instances: ib },
 					chunks: chunked?.chunks,
 				};
-				if (seeThrough)
-					this.clear.push({
-						...draw,
-						instances: ib,
-						source: data,
-						sorted: new Float32Array(data.length),
-					});
-				else if (set === "glass") this.glass.push(draw);
-				else this.draws.push(draw);
+				const made = seeThrough
+					? { ...draw, instances: ib, source: data, sorted: new Float32Array(data.length) }
+					: draw;
+				if (seeThrough) this.clear.push(made as (typeof this.clear)[number]);
+				else if (set === "glass") this.glass.push(made);
+				else this.draws.push(made);
+				if (rowsIn(chunked ? chunked.data : data, count, lit)) this.hlDraws.push(made);
 			}
 		}
+		this.ghosts = [];
+		const ghost = (
+			mesh: { vertices: Float32Array; indices: Uint16Array | Uint32Array },
+			rows: Rows,
+		) => {
+			if (rows.count === 0) return;
+			const vb = this.buffer(gl.ARRAY_BUFFER, mesh.vertices);
+			const eb = this.buffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indices);
+			const ib = this.buffer(gl.ARRAY_BUFFER, rows.data);
+			this.sceneBuffers.push(vb, eb, ib);
+			this.ghosts.push({
+				vao: this.vao(vb, ib, eb),
+				indexCount: mesh.indices.length,
+				type: mesh.indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
+				count: rows.count,
+				wire: { mesh, vertices: vb, instances: ib },
+			});
+		};
+		const ghosts = scene.ghosts;
+		if (ghosts)
+			for (const kind of SCENE_KINDS) {
+				if (kind !== "mesh") {
+					ghost(meshFor(kind), ghosts[kind]);
+					continue;
+				}
+				const split = splitByMesh(ghosts.mesh, (slot) => this.meshes.has(slot));
+				ghost(meshFor("mesh"), split.rest);
+				for (const [slot, mesh] of this.meshes) {
+					const rows = split.meshes.get(slot);
+					if (rows) ghost(mesh, rows);
+				}
+			}
+		this.setHighlights(scene.highlights);
+	}
+
+	// -- Highlight instances: a mask of the parts each covers, then its fill and outline --
+
+	private setHighlights(list: readonly SceneHighlight[] | undefined): void {
+		const gl = this.gl;
+		if (this.hl) gl.deleteTexture(this.hl.rows);
+		this.hl = null;
+		if (!list || list.length === 0) return;
+		const shown = list.slice(0, HIGHLIGHT_LIMIT);
+		let top = 0;
+		for (const h of shown) for (const id of [...h.parts, ...h.seeThrough]) top = Math.max(top, id);
+		const lines = Math.ceil((top + 1) / HL_ROW_WIDTH);
+		const rows = new Uint16Array(lines * HL_ROW_WIDTH);
+		// Slot 0 unused; then each slot's fill and outline.
+		const fill = new Float32Array(32 * 4);
+		const outline = new Float32Array(32 * 4);
+		shown.forEach((h, i) => {
+			const slot = i + 1;
+			const onTop = h.onTop ? 512 : 0;
+			for (const id of h.parts) rows[id] = slot | onTop;
+			for (const id of h.seeThrough) rows[id] = slot | onTop | 256;
+			fill.set([...h.fill, 1 - h.fillTransparency], slot * 4);
+			outline.set([...h.outline, 1 - h.outlineTransparency], slot * 4);
+		});
+		const tex = gl.createTexture()!;
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.R16UI,
+			HL_ROW_WIDTH,
+			lines,
+			0,
+			gl.RED_INTEGER,
+			gl.UNSIGNED_SHORT,
+			rows,
+		);
+		integerSampling(gl);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		this.hl = {
+			rows: tex,
+			count: top + 1,
+			fill,
+			outline,
+			onTop: shown.some((h) => h.onTop),
+			occluded: shown.some((h) => !h.onTop),
+		};
+	}
+
+	/** The mask and the rows' nearest at the view's size. */
+	private highlightTargets(): NonNullable<WebGl2View["hlTargets"]> {
+		const gl = this.gl;
+		const was = this.hlTargets;
+		if (was && was.width === this.width && was.height === this.height) return was;
+		if (was) {
+			gl.deleteTexture(was.mask);
+			gl.deleteTexture(was.rows);
+			gl.deleteRenderbuffer(was.depth);
+			gl.deleteFramebuffer(was.fbo);
+			gl.deleteFramebuffer(was.rowsFbo);
+		}
+		const { width, height } = this;
+		const texture = (format: number) => {
+			const tex = gl.createTexture()!;
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, tex);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, format, width, height);
+			integerSampling(gl);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			return tex;
+		};
+		const mask = texture(gl.R8UI);
+		const rows = texture(gl.RG8UI);
+		// The place's depth format, for its depth to be copied in.
+		const depth = gl.createRenderbuffer()!;
+		gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+		gl.renderbufferStorage(gl.RENDERBUFFER, this.depthFormat(), width, height);
+		gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+		const fbo = gl.createFramebuffer()!;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mask, 0);
+		gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+		const rowsFbo = gl.createFramebuffer()!;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, rowsFbo);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rows, 0);
+		this.hlTargets = { width, height, mask, depth, fbo, rows, rowsFbo };
+		return this.hlTargets;
+	}
+
+	/**
+	 * The parts each Highlight covers into the mask, tested against the
+	 * place's depth where it is Occluded: that depth copied from `from`, the
+	 * target the place was drawn into, or drawn again where that is the
+	 * canvas, whose depth cannot be copied. As WebGpuView's drawHighlights;
+	 * the fill and outline are drawn over the finished frame by
+	 * drawHighlightOver. Leaves no target bound.
+	 */
+	private drawHighlightMask(camera: Camera, from: WebGLFramebuffer | null): void {
+		const hl = this.hl;
+		if (!hl) return;
+		const gl = this.gl;
+		const t = this.highlightTargets();
+		this.hlPrograms ??= {
+			mask: this.link(VS, FS_HL_MASK),
+			rows: this.link(VS_FULL_CELLS, FS_HL_ROWS).program,
+			over: this.link(VS_FULL_CELLS, FS_HL_OVER).program,
+		};
+		const prog = this.hlPrograms.mask;
+		const { width: w, height: h } = this;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+		gl.viewport(0, 0, w, h);
+		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
+		if (hl.occluded) {
+			if (from) {
+				gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
+				gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, t.fbo);
+				gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+				gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+			} else {
+				gl.clearDepth(this.farDepth);
+				gl.depthMask(true);
+				gl.clear(gl.DEPTH_BUFFER_BIT);
+				gl.enable(gl.DEPTH_TEST);
+				gl.depthFunc(this.nearer);
+				// The place's program writes colour, which the mask's whole numbers cannot take.
+				gl.drawBuffers([gl.NONE]);
+				this.depthOnly(camera, [...this.draws, ...this.glass]);
+				gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+			}
+		}
+		const seeThrough = featureOn(this.render.features, "seeThroughHighlights");
+		this.use(prog, camera, false);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, hl.rows);
+		gl.uniform1i(this.loc(prog.program, "hlRows"), 0);
+		gl.depthMask(false);
+		gl.disable(gl.BLEND);
+		gl.enable(gl.CULL_FACE);
+		const lists = [...this.hlDraws, ...(seeThrough ? this.ghosts : [])];
+		for (const onTop of [false, true]) {
+			if (!(onTop ? hl.onTop : hl.occluded)) continue;
+			gl.uniform4f(
+				this.loc(prog.program, "hlPass"),
+				onTop ? 1 : 0,
+				seeThrough ? 1 : 0,
+				hl.count,
+				0,
+			);
+			// Occluded: where the part is the nearest thing drawn, as the place's own depth says.
+			if (onTop) gl.disable(gl.DEPTH_TEST);
+			else {
+				gl.enable(gl.DEPTH_TEST);
+				gl.depthFunc(this.nearerOrEqual);
+			}
+			// Every part, as WebGpuView's: one behind another is still AlwaysOnTop's.
+			for (const d of lists) {
+				gl.bindVertexArray(d.vao);
+				gl.drawElementsInstanced(gl.TRIANGLES, d.indexCount, d.type, 0, d.count);
+				this.tally.draws++;
+			}
+			gl.bindVertexArray(null);
+		}
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(this.nearer);
+		gl.depthMask(true);
+		// Its depth is not read again.
+		gl.invalidateFramebuffer(gl.FRAMEBUFFER, [gl.DEPTH_ATTACHMENT]);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	}
+
+	/**
+	 * The Highlights' fill and outline blended over the finished frame on the
+	 * canvas, from the mask drawHighlightMask drew: the outline 2 of the
+	 * page's pixels wide, as Studio's at 100%.
+	 */
+	private drawHighlightOver(): void {
+		const hl = this.hl;
+		const t = this.hlTargets;
+		const progs = this.hlPrograms;
+		if (!hl || !t || !progs) return;
+		const gl = this.gl;
+		const css = this.canvas?.clientWidth || this.width;
+		const wide = Math.max(1, Math.min(4, (2 * this.width) / Math.max(1, css)));
+		gl.disable(gl.DEPTH_TEST);
+		gl.disable(gl.CULL_FACE);
+		gl.disable(gl.BLEND);
+		gl.depthMask(false);
+		gl.viewport(0, 0, this.width, this.height);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, t.mask);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, t.rowsFbo);
+		gl.useProgram(progs.rows);
+		gl.uniform1i(this.loc(progs.rows, "mask"), 0);
+		gl.uniform1f(this.loc(progs.rows, "wide"), wide);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.useProgram(progs.over);
+		gl.activeTexture(gl.TEXTURE12);
+		gl.bindTexture(gl.TEXTURE_2D, t.rows);
+		gl.uniform1i(this.loc(progs.over, "mask"), 0);
+		gl.uniform1i(this.loc(progs.over, "rows"), 12);
+		gl.uniform4fv(this.loc(progs.over, "fill"), hl.fill);
+		gl.uniform4fv(this.loc(progs.over, "outline"), hl.outline);
+		gl.uniform1f(this.loc(progs.over, "wide"), wide);
+		gl.enable(gl.BLEND);
+		gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		gl.disable(gl.BLEND);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		gl.depthMask(true);
+		gl.enable(gl.CULL_FACE);
+		gl.enable(gl.DEPTH_TEST);
 	}
 
 	/** The see-through parts sorted again when the camera has moved. */
@@ -4836,6 +5232,9 @@ export class WebGl2View implements ViewRenderer {
 		// The heatmaps and the wireframe are the place's shapes alone; the sun
 		// maps' tints are left as they are drawn.
 		const tinted = mode === "sunMaps";
+		// Highlight instances, over the picture as Studio draws them: not on a heatmap or the wireframe.
+		const hlOn =
+			this.hl !== null && !heat && !wire && featureOn(this.render.features, "highlightObjects");
 		const postOn = this.postOn && show.post && !heat && !wire && !tinted;
 		// A BloomEffect blooms the whole picture, Neon or not: see FS_BRIGHT.
 		const bloom = postOn && !!this.lighting?.post.bloom && show.glow && !heat && !wire && !tinted;
@@ -4953,6 +5352,14 @@ export class WebGl2View implements ViewRenderer {
 			this.drawHalfEffects(camera, this.sceneFbo);
 		else this.drawEffects(camera);
 		clock?.mark("effects");
+		// Highlight instances' mask, against the place's depth before it is let go.
+		if (hlOn) {
+			this.drawHighlightMask(camera, composite ? this.sceneFbo : this.outFbo);
+			if (!composite) {
+				gl.bindFramebuffer(gl.FRAMEBUFFER, this.outFbo);
+				gl.viewport(0, 0, this.width, this.height);
+			}
+		}
 		// The glow is part of the place, added once the place is drawn: what
 		// marks the place is drawn over it.
 		if (composite) {
@@ -4961,6 +5368,8 @@ export class WebGl2View implements ViewRenderer {
 		}
 		this.drawMarks(camera);
 		if (this.outFbo) this.antialiasPasses();
+		// Over the finished frame, as Studio draws them.
+		if (hlOn) this.drawHighlightOver();
 		clock?.mark("marks");
 		clock?.end();
 		this.lastTally = this.tally;

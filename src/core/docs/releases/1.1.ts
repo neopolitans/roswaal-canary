@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.124",
+		date: "2026-11-26",
+		headline: "Highlights on WebGL2.",
+		fixed: [
+			"**Highlights draw with WebGL2**, as with WebGPU: fill, outline, AlwaysOnTop and Occluded.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.123",
 		date: "2026-11-26",
 		headline: "Benchmark settings in a line each, and room on an iPad Mini.",

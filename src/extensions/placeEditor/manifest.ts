@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.80.2",
+	version: "0.80.3",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.80.3",
+			roswaal: "1.1.0-canary.124",
+			date: "2026-11-26",
+			text: "WebGL2 draws Highlights as WebGPU does: the parts each covers into a mask (AlwaysOnTop past depth, Occluded against the place depth, copied or redrawn where the place went straight to the canvas), then fill and outline over the finished picture; fully transparent covered parts with Transparent parts show Highlight.",
+		},
 		{
 			version: "0.80.2",
 			roswaal: "1.1.0-canary.123",

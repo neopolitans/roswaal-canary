@@ -204,7 +204,7 @@ export interface ViewRenderer {
 	 * reflection cube's faces, the near sky maps and the sun's maps. For the
 	 * profile's moving camera; where the renderer counts them.
 	 */
-	redraws?(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid?: number };
+	redraws?(): Redrawn;
 	/**
 	 * Resolves once the GPU has finished everything drawn so far: a frame's
 	 * whole cost, for a profile. Each renderer gives the page its turns while
@@ -430,6 +430,12 @@ export const SKY_LEAK = 1;
 export const SKY_COARSE_CELL = 16;
 export const SKY_COARSE_CELLS = [96, 32, 96] as const;
 export const SKY_COARSE_SNAP = 128;
+/**
+ * The coarse cells' slices filled a frame: a refill spread over four frames,
+ * the cells read where they were until it is done, rather than all 32 slices
+ * in the frame the camera crossed a step.
+ */
+export const SKY_COARSE_SLICES = 8;
 
 /** The coarse cells' first corner for an eye: their middle on the SKY_COARSE_SNAP grid nearest it. */
 export function coarseOrigin(eye: readonly number[]): [number, number, number] {
@@ -974,6 +980,27 @@ export function ambientGrid(setting: string | undefined, touch = false): boolean
 	if (setting === "grid") return true;
 	if (setting === "realtime") return false;
 	return touch;
+}
+
+/** What a view has drawn again since it began: see WebGpuView's redrawn. */
+export interface Redrawn {
+	probeFaces: number;
+	nearMaps: number;
+	farMaps?: number;
+	sunMaps: number;
+	lightGrid?: number;
+	skyCells?: number;
+	coarseCells?: number;
+}
+
+/** What changed between two counts, the counts that moved alone. */
+export function redrawnSince(was: Redrawn, now: Redrawn): Record<string, number> {
+	const out: Record<string, number> = {};
+	for (const [k, v] of Object.entries(now)) {
+		const d = (v ?? 0) - ((was as unknown as Record<string, number | undefined>)[k] ?? 0);
+		if (d > 0) out[k] = d;
+	}
+	return out;
 }
 
 /** Soft's cells: as Studio's own Soft lights in, 4 studs a side (25 Nov 2026 captures). */

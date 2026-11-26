@@ -322,6 +322,45 @@ export interface ShownFrames {
 	worst: number;
 	missed: number;
 	refresh: number;
+	/**
+	 * The slowest frame's own: the page's time drawing it and the one before,
+	 * and what they drew again (see Redrawn), a frame in flight landing a
+	 * frame late. Absent where the run did not say.
+	 */
+	slowest?: { page: number; redrawn: Record<string, number> };
+}
+
+/** A shown frame's own, as shownFrameGaps notes it: the page's time, and what it drew again. */
+export interface ShownWork {
+	page: number;
+	redrawn: Record<string, number>;
+}
+
+/** shownFrames, with the slowest frame's work where the run noted it. */
+export function shownWithSlowest(
+	run: { gaps: readonly number[]; work: readonly ShownWork[] },
+	measured?: number,
+): ShownFrames | undefined {
+	const shown = shownFrames(run.gaps, measured);
+	const slowest = slowestWork(run.gaps, run.work);
+	return shown && slowest ? { ...shown, slowest } : shown;
+}
+
+/** The slowest gap's work: the frame that opened it and the one before, added. */
+export function slowestWork(
+	gaps: readonly number[],
+	work: readonly ShownWork[],
+): ShownFrames["slowest"] {
+	if (gaps.length === 0 || work.length === 0) return undefined;
+	let at = 0;
+	for (let i = 1; i < gaps.length; i++) if (gaps[i] > gaps[at]) at = i;
+	const redrawn: Record<string, number> = {};
+	let page = 0;
+	for (const w of work.slice(Math.max(0, at - 1), at + 1)) {
+		page = Math.max(page, w.page);
+		for (const [k, v] of Object.entries(w.redrawn)) redrawn[k] = (redrawn[k] ?? 0) + v;
+	}
+	return { page, redrawn };
 }
 
 /**

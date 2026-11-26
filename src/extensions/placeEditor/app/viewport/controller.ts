@@ -80,9 +80,12 @@ import {
 	type LevelRow,
 	type MovingRow,
 	type ProfileResult,
+	type ShownWork,
 	type StageFrame,
 	type StageSink,
 	shownFrames,
+	shownWithSlowest,
+	slowestWork,
 	spread,
 	stageRows,
 	stagesTotal,
@@ -131,16 +134,17 @@ import { trickle } from "./trickle.js";
 import { loadUnionModels } from "./unions.js";
 import type { UpscaleMode } from "./upscale.js";
 import {
+	ambientGrid,
 	type Camera,
 	DEFAULT_RENDER,
 	type EffectSteps,
 	lightGridCell,
-	ambientGrid,
 	type MeshGeometry,
 	madeGeometry,
 	meshGeometry,
 	type RenderSettings,
 	type RenderStats,
+	redrawnSince,
 	reflectionGrid,
 	splitByMesh,
 	stillSkip,
@@ -2530,8 +2534,9 @@ export class ViewportController {
 				busy &&
 				(this.options.renderScale === "dynamic" || this.options.dynamicOptimization === true);
 			if (adapting) await this.busyFrames(MOVING_MOST, byClock, undefined, DYNAMIC_SETTLE_MS, true);
-			const times = shown
-				? await this.shownFrameGaps(MOVING_MS, byClock)
+			const shownRun = shown ? await this.shownFrameGaps(MOVING_MS, byClock) : null;
+			const times = shownRun
+				? shownRun.gaps
 				: busy
 					? await this.busyFrames(MOVING_MOST, byClock, undefined, MOVING_MS, adapting)
 					: await this.waitedFrames(MOVING_MOST, MOVING_MS, byClock);
@@ -2543,7 +2548,7 @@ export class ViewportController {
 				label,
 				...spread(times),
 				...(busy ? { median: steady(times) } : {}),
-				...(shown ? { shown: shownFrames(times, this.shownRefresh ?? undefined) } : {}),
+				...(shownRun ? { shown: shownWithSlowest(shownRun, this.shownRefresh ?? undefined) } : {}),
 				frames: times.length,
 				stages: stageRows(frames),
 				gpu: stageRows(gpuFrames, busy ? steady : undefined),
@@ -3951,22 +3956,35 @@ export class ViewportController {
 	 * for `ms`, `step` before each: the gaps between them, as they reached the
 	 * screen. No timer, fence or read back: what a Smoothness run measures.
 	 */
-	private shownFrameGaps(ms: number, step?: () => void): Promise<number[]> {
+	private shownFrameGaps(
+		ms: number,
+		step?: () => void,
+	): Promise<{ gaps: number[]; work: ShownWork[] }> {
 		return new Promise((resolve) => {
 			const view = this.view;
 			const stamps: number[] = [];
+			// Each frame's own: the page's time drawing it, and what it drew again.
+			const work: ShownWork[] = [];
 			let from = Number.NaN;
+			const done = () => resolve({ gaps: stamps.slice(1).map((t, i) => t - stamps[i]), work });
 			const tick = (at: number) => {
 				if (this.view !== view || !view) {
-					resolve(stamps.slice(1).map((t, i) => t - stamps[i]));
+					done();
 					return;
 				}
 				if (Number.isNaN(from)) from = at;
 				stamps.push(at);
 				step?.();
+				const was = view.redraws?.() ?? null;
+				const t0 = performance.now();
 				this.drawOnce(at);
+				const now = view.redraws?.() ?? null;
+				work.push({
+					page: performance.now() - t0,
+					redrawn: was && now ? redrawnSince(was, now) : {},
+				});
 				if (at - from < ms) requestAnimationFrame(tick);
-				else resolve(stamps.slice(1).map((t, i) => t - stamps[i]));
+				else done();
 			};
 			requestAnimationFrame(tick);
 		});
@@ -3977,8 +3995,10 @@ export class ViewportController {
 		await this.pipelinesWithin();
 		this.view?.setProfiling(null);
 		await this.shownFrameGaps(300);
-		const gaps = await this.shownFrameGaps(SHOWN_MS);
-		return { label, ...spread(gaps), shown: shownFrames(gaps, this.shownRefresh ?? undefined) };
+		const { gaps, work } = await this.shownFrameGaps(SHOWN_MS);
+		const shown = shownFrames(gaps, this.shownRefresh ?? undefined);
+		const slowest = slowestWork(gaps, work);
+		return { label, ...spread(gaps), shown: shown && slowest ? { ...shown, slowest } : shown };
 	}
 
 	/** The display's refresh as a Smoothness run found it, nothing drawn: see idleRefresh. */

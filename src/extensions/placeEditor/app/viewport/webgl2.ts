@@ -125,6 +125,7 @@ import {
 	postActive,
 	probeFaces,
 	REFLECTION_CACHE,
+	type Redrawn,
 	type RenderSettings,
 	type RenderStats,
 	reflectionCell,
@@ -136,6 +137,7 @@ import {
 	SKY_CELLS,
 	SKY_COARSE_CELL,
 	SKY_COARSE_CELLS,
+	SKY_COARSE_SLICES,
 	SKY_GAIN,
 	SKY_LAYERS,
 	SKY_LEAK,
@@ -1204,6 +1206,8 @@ ${SKY_VIS}
 uniform float cellSlice;
 uniform highp sampler3D cellMask;
 uniform float masked;
+// The cells being filled, not those read: see SKY_COARSE_SLICES.
+uniform vec4 skyCoarseFill;
 out vec4 o;
 void main() {
 	if (masked > 0.5 && texelFetch(cellMask, ivec3(int(gl_FragCoord.x), int(gl_FragCoord.y), int(cellSlice)), 0).r < 0.5) {
@@ -1211,7 +1215,7 @@ void main() {
 		return;
 	}
 	vec3 cell = vec3(floor(gl_FragCoord.x), cellSlice, floor(gl_FragCoord.y));
-	vec3 p = skyCoarseAt.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
+	vec3 p = skyCoarseFill.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
 	o = vec4(skyVisibilityMaps(p, vec3(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
 }`;
 const FS_CELL_AROUND = `#version 300 es
@@ -2816,6 +2820,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.viewport(0, 0, this.width, this.height);
 		gl.enable(gl.DEPTH_TEST);
 		this.cellsRead = 1 - this.cellsRead;
+		this.redrawn.skyCells++;
 		gl.activeTexture(gl.TEXTURE13);
 		gl.bindTexture(gl.TEXTURE_3D, this.cellTex[this.cellsRead]);
 		gl.activeTexture(gl.TEXTURE0);
@@ -2836,6 +2841,7 @@ export class WebGl2View implements ViewRenderer {
 		mask: Uint8Array | null,
 		dims: readonly [number, number, number],
 		kind: "own" | "coarse",
+		upload = true,
 	): void {
 		const gl = this.gl;
 		const on = this.maskAble && mask !== null;
@@ -2852,23 +2858,27 @@ export class WebGl2View implements ViewRenderer {
 			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
 			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 		} else gl.bindTexture(gl.TEXTURE_3D, tex);
-		// One byte a cell, 1 where marked: R8 reads it as 1/255, under a half, so 255.
-		const bytes = mask.map((v) => (v ? 255 : 0));
-		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-		gl.texSubImage3D(
-			gl.TEXTURE_3D,
-			0,
-			0,
-			0,
-			0,
-			dims[0],
-			dims[2],
-			dims[1],
-			gl.RED,
-			gl.UNSIGNED_BYTE,
-			bytes,
-		);
-		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+		// One byte a cell, 1 where marked: R8 reads it as 1/255, under a half, so
+		// 255. A spread refill's later slices rebind it alone: the other block's
+		// mask shares the unit.
+		if (upload) {
+			const bytes = mask.map((v) => (v ? 255 : 0));
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texSubImage3D(
+				gl.TEXTURE_3D,
+				0,
+				0,
+				0,
+				0,
+				dims[0],
+				dims[2],
+				dims[1],
+				gl.RED,
+				gl.UNSIGNED_BYTE,
+				bytes,
+			);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+		}
 		gl.uniform1i(this.loc(program.program, "cellMask"), MASK_UNIT);
 		gl.activeTexture(gl.TEXTURE0);
 	}
@@ -2877,7 +2887,6 @@ export class WebGl2View implements ViewRenderer {
 
 	/** Their first corner, and w 1 once filled for Grid: the shaders' skyCoarseAt. */
 	private coarseAt = new Float32Array(4);
-	private coarseTex: WebGLTexture | null = null;
 	private coarseProg?: Program;
 	/** Whether this device has a unit for them (COARSE_UNIT); without, Grid reads the maps a tap each. */
 	private coarseAble = false;
@@ -2888,66 +2897,103 @@ export class WebGl2View implements ViewRenderer {
 			this.ambientGrid && this.coarseAble && featureOn(this.render.features, "skyShadows");
 		if (!want) {
 			this.coarseAt[3] = 0;
+			this.coarseFill = null;
 			return false;
 		}
 		const origin = coarseOrigin(camera.eye);
-		const moved = origin.some((v, a) => v !== this.coarseAt[a]);
-		if (!partsMoved && !moved && this.coarseAt[3] > 0.5) return false;
-		this.coarseAt.set([...origin, 1]);
+		const filling = this.coarseFill;
+		// The parts moved while a refill was under way: another once it is done.
+		if (partsMoved && filling) filling.again = true;
+		const there = filling ? filling.origin : [...this.coarseAt];
+		const moved = origin.some((v, a) => v !== there[a]);
+		if (!filling) {
+			if (!partsMoved && !moved && this.coarseAt[3] > 0.5) return false;
+			this.coarseFill = this.startCoarse(origin);
+		} else if (moved) this.coarseFill = this.startCoarse(origin);
 		this.fillCoarse(camera);
 		return true;
 	}
 
-	/** Each coarse cell from the maps as drawn, a slice a draw, into COARSE_UNIT's texture. */
+	/** A coarse refill under way: where, the next slice, its marks, and whether the parts moved meanwhile. */
+	private coarseFill: {
+		origin: number[];
+		next: number;
+		block: ReturnType<typeof cellBlock> | null;
+		again: boolean;
+	} | null = null;
+	/** The coarse cells' two textures: one read on COARSE_UNIT while the other is filled. */
+	private coarseTexs: WebGLTexture[] = [];
+	private coarseRead = 0;
+
+	private startCoarse(origin: number[]): NonNullable<WebGl2View["coarseFill"]> {
+		// Only the cells near a part (see cellSpans).
+		const block = this.scene
+			? cellBlock(boxesOf(this.scene), origin, SKY_COARSE_CELLS, SKY_COARSE_CELL, COARSE_PAD)
+			: null;
+		return { origin, next: 0, block, again: false };
+	}
+
+	/**
+	 * SKY_COARSE_SLICES slices of the refill under way, a slice a draw, into
+	 * the texture not read; read from once all are filled.
+	 */
 	private fillCoarse(camera: Camera): void {
 		const gl = this.gl;
+		const fill = this.coarseFill;
+		if (!fill) return;
 		if (!this.coarseProg) {
 			this.coarseProg = this.link(VS_CELL, FS_COARSE);
-			this.coarseTex = gl.createTexture()!;
-			gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
-			gl.bindTexture(gl.TEXTURE_3D, this.coarseTex);
-			gl.texStorage3D(
-				gl.TEXTURE_3D,
-				1,
-				gl.R8,
-				SKY_COARSE_CELLS[0],
-				SKY_COARSE_CELLS[2],
-				SKY_COARSE_CELLS[1],
-			);
-			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-			for (const wrap of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R])
-				gl.texParameteri(gl.TEXTURE_3D, wrap, gl.CLAMP_TO_EDGE);
+			for (let k = 0; k < 2; k++) {
+				const tex = gl.createTexture()!;
+				gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
+				gl.bindTexture(gl.TEXTURE_3D, tex);
+				gl.texStorage3D(
+					gl.TEXTURE_3D,
+					1,
+					gl.R8,
+					SKY_COARSE_CELLS[0],
+					SKY_COARSE_CELLS[2],
+					SKY_COARSE_CELLS[1],
+				);
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+				gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+				for (const wrap of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R])
+					gl.texParameteri(gl.TEXTURE_3D, wrap, gl.CLAMP_TO_EDGE);
+				this.coarseTexs.push(tex);
+			}
+			gl.bindTexture(gl.TEXTURE_3D, this.coarseTexs[this.coarseRead]);
+			gl.activeTexture(gl.TEXTURE0);
 		}
-		// Not bound while drawn into: the fill reads only the maps.
-		gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
-		gl.bindTexture(gl.TEXTURE_3D, null);
-		gl.activeTexture(gl.TEXTURE0);
+		const target = this.coarseTexs[1 - this.coarseRead];
 		this.use(this.coarseProg, camera, false);
+		gl.uniform4f(
+			this.loc(this.coarseProg.program, "skyCoarseFill"),
+			fill.origin[0],
+			fill.origin[1],
+			fill.origin[2],
+			1,
+		);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.cellFbo);
 		gl.disable(gl.DEPTH_TEST);
 		gl.disable(gl.BLEND);
 		gl.bindVertexArray(this.cellVao);
 		const slice = this.loc(this.coarseProg.program, "cellSlice");
 		gl.viewport(0, 0, SKY_COARSE_CELLS[0], SKY_COARSE_CELLS[2]);
-		// Only the cells near a part (see cellSpans).
-		const block = this.scene
-			? cellBlock(
-					boxesOf(this.scene),
-					[this.coarseAt[0], this.coarseAt[1], this.coarseAt[2]],
-					SKY_COARSE_CELLS,
-					SKY_COARSE_CELL,
-					COARSE_PAD,
-				)
-			: null;
-		const spans = block?.spans ?? [];
-		this.useMask(this.coarseProg, block?.mask ?? null, SKY_COARSE_CELLS, "coarse");
+		const spans = fill.block?.spans ?? [];
+		this.useMask(
+			this.coarseProg,
+			fill.block?.mask ?? null,
+			SKY_COARSE_CELLS,
+			"coarse",
+			fill.next === 0,
+		);
 		gl.enable(gl.SCISSOR_TEST);
-		for (let y = 0; y < SKY_COARSE_CELLS[1]; y++) {
+		const to = Math.min(SKY_COARSE_CELLS[1], fill.next + SKY_COARSE_SLICES);
+		for (let y = fill.next; y < to; y++) {
 			const s = spans[y];
 			if (!s) continue;
 			gl.scissor(s.x0, s.z0, s.x1 - s.x0 + 1, s.z1 - s.z0 + 1);
-			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.coarseTex, 0, y);
+			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, target, 0, y);
 			gl.uniform1f(slice, y);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
 		}
@@ -2956,9 +3002,20 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.viewport(0, 0, this.width, this.height);
 		gl.enable(gl.DEPTH_TEST);
+		fill.next = to;
+		if (to < SKY_COARSE_CELLS[1]) {
+			this.onRedraw?.();
+			return;
+		}
+		// All filled: read from here on.
+		this.coarseRead = 1 - this.coarseRead;
 		gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
-		gl.bindTexture(gl.TEXTURE_3D, this.coarseTex);
+		gl.bindTexture(gl.TEXTURE_3D, this.coarseTexs[this.coarseRead]);
 		gl.activeTexture(gl.TEXTURE0);
+		this.coarseAt.set([...fill.origin, 1]);
+		this.redrawn.coarseCells++;
+		this.coarseFill = fill.again ? this.startCoarse(fill.origin) : null;
+		if (this.coarseFill) this.onRedraw?.();
 	}
 
 	// -- occlusion: the solid parts' distances, small, read back a frame late -------
@@ -3500,9 +3557,23 @@ export class WebGl2View implements ViewRenderer {
 	/** The occupancy window's lowest cell; null, to be uploaded whole. */
 	private occAt: number[] | null = null;
 	private occBuilding = false;
-	private redrawn = { probeFaces: 0, nearMaps: 0, sunMaps: 0, lightGrid: 0 };
+	/**
+	 * What has been drawn again, counted since the view began: the reflection
+	 * cube's faces, the near and whole place's sky maps, the sun's, the light
+	 * grid's cells, and the lighting and coarse cells' refills. A benchmark
+	 * reads them round a motion, and Smoothness round its slowest frame.
+	 */
+	private redrawn = {
+		probeFaces: 0,
+		nearMaps: 0,
+		farMaps: 0,
+		sunMaps: 0,
+		lightGrid: 0,
+		skyCells: 0,
+		coarseCells: 0,
+	};
 
-	redraws(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid: number } {
+	redraws(): Redrawn {
 		return { ...this.redrawn };
 	}
 
@@ -5022,6 +5093,7 @@ export class WebGl2View implements ViewRenderer {
 		this.sunDirty = false;
 		this.nearCentre = centre;
 		if (which.near) this.redrawn.nearMaps++;
+		if (which.far) this.redrawn.farMaps++;
 		const box = this.scene ? sceneBox(this.scene) : null;
 		this.skyData = skyBlock(box, this.lighting?.sun ?? [0, 1, 0], false);
 		if (box) nearSkyInto(this.skyData, box, centre, false);

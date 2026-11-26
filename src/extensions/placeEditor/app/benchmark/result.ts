@@ -322,9 +322,43 @@ function shownReport(result: BenchmarkResult): string[] {
 			for (const m of s.moving.length > 1 ? s.moving.slice(1) : [])
 				lines.push(`  ${`      ${m.label}`.padEnd(28)}${"".padStart(25)}${shownColumns(m)}`);
 		}
+		// Each frame over SLOW_REFRESHES refreshes long, and what it drew again.
+		const slow: string[] = [];
+		for (const s of level.stations) {
+			const name = `${s.n} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`;
+			for (const t of [s.still, ...s.moving]) {
+				const shown = t.shown;
+				if (!shown?.slowest || shown.worst < SLOW_REFRESHES * shown.refresh) continue;
+				const drew = Object.entries(shown.slowest.redrawn).map(
+					([k, v]) => `${REDRAWN_NAMES[k] ?? k} ${v.toLocaleString("en")}`,
+				);
+				slow.push(
+					`  ${name} · ${t === s.still ? "Still" : t.label}: ${msText(shown.worst)} (the page ${msText(shown.slowest.page)})${drew.length ? `, drew again: ${drew.join(", ")}` : ", nothing drawn again"}`,
+				);
+			}
+		}
+		if (slow.length) {
+			lines.push("");
+			lines.push(`  Slowest frames over ${SLOW_REFRESHES} refreshes:`);
+			lines.push(...slow);
+		}
 	}
 	return lines;
 }
+
+/** A frame this many refreshes long is named, with what it drew again. */
+const SLOW_REFRESHES = 3;
+
+/** Redrawn's counts, by name in a report. */
+const REDRAWN_NAMES: Record<string, string> = {
+	probeFaces: "reflection faces",
+	nearMaps: "near sky maps",
+	farMaps: "the place's sky maps",
+	sunMaps: "sun maps",
+	lightGrid: "light grid cells",
+	skyCells: "ambient cells",
+	coarseCells: "coarse ambient cells",
+};
 
 /** The run as text, to paste: a section a level, a line a station, then each station's stages. */
 export function benchmarkReport(result: BenchmarkResult): string {

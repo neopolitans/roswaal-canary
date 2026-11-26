@@ -28,7 +28,15 @@ import {
 	jitterClip,
 	StillFrames,
 } from "./antialias.js";
-import { boxesOf, CELL_PAD, COARSE_PAD, cellBlock, innerSpans, unionSpan } from "./cellSpans.js";
+import {
+	boxesOf,
+	CELL_PAD,
+	type CellSpan,
+	COARSE_PAD,
+	cellBlock,
+	innerSpans,
+	unionSpan,
+} from "./cellSpans.js";
 import {
 	boxHidden,
 	boxInView,
@@ -141,6 +149,7 @@ import {
 	postActive,
 	probeFaces,
 	REFLECTION_CACHE,
+	type Redrawn,
 	type RenderSettings,
 	type RenderStats,
 	reflectionCell,
@@ -152,6 +161,7 @@ import {
 	SKY_CELLS,
 	SKY_COARSE_CELL,
 	SKY_COARSE_CELLS,
+	SKY_COARSE_SLICES,
 	SKY_GAIN,
 	SKY_LAYERS,
 	SKY_LEAK,
@@ -612,7 +622,7 @@ fn has(bit: u32) -> bool { return (FEATURES & bit) != 0u && (u32(u.debug.y) & bi
 // Then the near maps' views, their vec4 and their box: see nearSkyInto.
 // nearSet.x: how many layers on the near maps the shaders read are, 0 or
 // SKY_VIEWS: their other set is drawn a few a frame, then read (nearFillStep).
-struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f, nearSet: vec4f, coarse: vec4f };
+struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f, nearSet: vec4f, coarse: vec4f, coarseFill: vec4f };
 @group(0) @binding(6) var skyMaps: texture_depth_2d_array;
 @group(0) @binding(7) var skyCompare: sampler_comparison;
 @group(0) @binding(8) var<uniform> skyU: SkyU;
@@ -1061,7 +1071,8 @@ fn cellOwn(x: f32, y: f32, z: f32) -> vec4f {
 	if (textureLoad(cellMask, vec3i(i32(cell.x), i32(cell.z), i32(cell.y)), 0).r < 0.5) {
 		return vec4f(1.0, 0.0, 0.0, 1.0);
 	}
-	let p = skyU.coarse.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
+	// The cells being filled, not those read: see SKY_COARSE_SLICES.
+	let p = skyU.coarseFill.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
 	return vec4f(skyVisibilityMaps(p, vec3f(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
 }
 struct Cells8 { @location(0) a: vec4f, @location(1) b: vec4f, @location(2) c: vec4f, @location(3) d: vec4f, @location(4) e: vec4f, @location(5) f: vec4f, @location(6) g: vec4f, @location(7) h: vec4f };
@@ -6466,9 +6477,23 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** Whether any cube has been drawn yet: the first is drawn whole. */
 	private reflEver = false;
 	/** What has been drawn again, counted: see ViewRenderer.redraws. */
-	private redrawn = { probeFaces: 0, nearMaps: 0, sunMaps: 0, lightGrid: 0 };
+	/**
+	 * What has been drawn again, counted since the view began: the reflection
+	 * cube's faces, the near and whole place's sky maps, the sun's, the light
+	 * grid's cells, and the lighting and coarse cells' refills. A benchmark
+	 * reads them round a motion, and Smoothness round its slowest frame.
+	 */
+	private redrawn = {
+		probeFaces: 0,
+		nearMaps: 0,
+		farMaps: 0,
+		sunMaps: 0,
+		lightGrid: 0,
+		skyCells: 0,
+		coarseCells: 0,
+	};
 
-	redraws(): { probeFaces: number; nearMaps: number; sunMaps: number; lightGrid: number } {
+	redraws(): Redrawn {
 		return { ...this.redrawn };
 	}
 	private reflGroups: { buffer: GPUBuffer; group: GPUBindGroup }[] = [];
@@ -6935,6 +6960,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			}
 			if (swap && part !== "own") {
 				this.cellsRead = 1 - this.cellsRead;
+				this.redrawn.skyCells++;
+				this.redrawn.skyCells++;
 				this.rebind();
 			}
 			return;
@@ -6965,6 +6992,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		}
 		if (!swap) return;
 		this.cellsRead = 1 - this.cellsRead;
+		this.redrawn.skyCells++;
 		this.rebind();
 	}
 
@@ -7031,6 +7059,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const want =
 			this.ambientGrid && !!this.coarsePipe && featureOn(this.render.features, "skyShadows");
 		if (!want) {
+			this.coarseFill = null;
 			if (this.coarseAt[3] > 0.5) {
 				this.coarseAt[3] = 0;
 				this.writeCoarseAt();
@@ -7038,20 +7067,23 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			return false;
 		}
 		const origin = coarseOrigin(camera.eye);
-		const moved = origin.some((v, a) => v !== this.coarseAt[a]);
-		if (!partsMoved && !moved && this.coarseAt[3] > 0.5) return false;
-		this.coarseAt.set([...origin, 1]);
-		this.writeCoarseAt();
-		// Into the cells not read, a slice a pass, then read.
+		const filling = this.coarseFill;
+		// The parts moved while a refill was under way: another once it is done.
+		if (partsMoved && filling) filling.again = true;
+		const there = filling ? filling.origin : [...this.coarseAt];
+		const moved = origin.some((v, a) => v !== there[a]);
+		if (!filling) {
+			if (!partsMoved && !moved && this.coarseAt[3] > 0.5) return false;
+			this.startCoarse(origin);
+		} else if (moved) this.startCoarse(origin);
+		const fill = this.coarseFill!;
+		// Into the cells not read, SKY_COARSE_SLICES slices a frame, a slice a pass.
 		const target = this.coarse[1 - this.coarseRead];
 		const view = target.createView({ dimension: "3d" });
-		// Only the cells near a part (see cellSpans).
-		const marked = this.scene
-			? cellBlock(boxesOf(this.scene), origin, SKY_COARSE_CELLS, SKY_COARSE_CELL, COARSE_PAD)
-			: null;
-		const spans = marked?.spans ?? [];
-		if (marked) this.writeMask("coarse", marked.mask, SKY_COARSE_CELLS);
-		for (let y = 0; y < SKY_COARSE_CELLS[1]; y++) {
+		const from = fill.next;
+		const to = Math.min(SKY_COARSE_CELLS[1], from + SKY_COARSE_SLICES);
+		const spans = fill.spans;
+		for (let y = from; y < to; y++) {
 			const span = spans[y];
 			if (!span) continue;
 			const pass = encoder.beginRenderPass({
@@ -7073,9 +7105,43 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			pass.draw(3, 1, 0, y);
 			pass.end();
 		}
+		fill.next = to;
+		if (to < SKY_COARSE_CELLS[1]) {
+			this.onRedraw?.();
+			return true;
+		}
+		// All filled: read from here on.
+		this.coarseAt.set([...fill.origin, 1]);
+		this.writeCoarseAt();
 		this.coarseRead = 1 - this.coarseRead;
+		this.redrawn.coarseCells++;
 		this.rebind();
+		this.coarseFill = null;
+		if (fill.again) {
+			this.startCoarse(fill.origin);
+			this.onRedraw?.();
+		}
 		return true;
+	}
+
+	/** A coarse refill under way: where, the next slice, its slices' spans, and whether the parts moved meanwhile. */
+	private coarseFill: {
+		origin: number[];
+		next: number;
+		spans: (CellSpan | null)[];
+		again: boolean;
+	} | null = null;
+
+	/** A coarse refill from its first slice: the cells worth filling marked, and where they are told to the fill. */
+	private startCoarse(origin: number[]): void {
+		// Only the cells near a part (see cellSpans).
+		const marked = this.scene
+			? cellBlock(boxesOf(this.scene), origin, SKY_COARSE_CELLS, SKY_COARSE_CELL, COARSE_PAD)
+			: null;
+		if (marked) this.writeMask("coarse", marked.mask, SKY_COARSE_CELLS);
+		this.coarseFill = { origin, next: 0, spans: marked?.spans ?? [], again: false };
+		for (const b of [this.skyUniform, this.skyUniformNext])
+			this.device.queue.writeBuffer(b, SKY_BLOCK * 4 + 48, new Float32Array([...origin, 1]));
 	}
 
 	/** skyU.coarse, in both sky blocks: the one read, and the one the near maps are filled with. */
@@ -7186,7 +7252,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		// see SkyU. The second, the block for the near maps being drawn, which
 		// their cells are found from.
 		const skyBuffer = () =>
-			d.createBuffer({ size: SKY_BLOCK * 4 + 48, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+			d.createBuffer({ size: SKY_BLOCK * 4 + 64, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
 		this.skyUniform = skyBuffer();
 		this.skyUniformNext = skyBuffer();
 		const layout = d.createBindGroupLayout({
@@ -7704,6 +7770,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 		q.writeBuffer(this.skyUniform, SKY_BLOCK * 4 + 16, new Float32Array([other, 0, 0, 0]));
 		this.nearSet = 1 - this.nearSet;
 		this.cellsRead = 1 - this.cellsRead;
+		this.redrawn.skyCells++;
 		this.nearCentre = fill.centre;
 		this.nearFill = null;
 		this.redrawn.nearMaps++;
@@ -7762,6 +7829,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			pass.end();
 		});
 		if (which.near) this.redrawn.nearMaps++;
+		if (which.far) this.redrawn.farMaps++;
 		// While profiling, each part a stage of its own: the maps, the thin
 		// parts taken out of the near ones, and the cells found from them.
 		let at = this.cut(encoder, "skyMaps");

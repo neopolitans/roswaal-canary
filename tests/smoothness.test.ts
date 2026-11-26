@@ -12,7 +12,12 @@ import {
 	benchmarkReport,
 	shownScore,
 } from "../src/extensions/placeEditor/app/benchmark/result.js";
-import { shownFrames } from "../src/extensions/placeEditor/app/viewport/profile.js";
+import {
+	type ShownWork,
+	shownFrames,
+	shownWithSlowest,
+	slowestWork,
+} from "../src/extensions/placeEditor/app/viewport/profile.js";
 
 const hz60 = 1000 / 60;
 
@@ -142,6 +147,39 @@ describe("a Smoothness run's report", () => {
 		expect(compareRuns(run("busy"), run("shown")).levels).toEqual([]);
 		expect(compareRuns(run("shown"), run("shown")).warnings.join(" ")).not.toMatch(
 			/Smoothness run/,
+		);
+	});
+});
+
+describe("a Smoothness run's slowest frame (1.1.0-canary.139)", () => {
+	it("is put to the frame that opened it and the one before", () => {
+		const gaps = [hz60, hz60, 126, hz60];
+		const work: ShownWork[] = [
+			{ page: 1, redrawn: {} },
+			{ page: 2, redrawn: { nearMaps: 1 } },
+			{ page: 9, redrawn: { lightGrid: 2048, coarseCells: 1 } },
+			{ page: 1, redrawn: { sunMaps: 1 } },
+		];
+		expect(slowestWork(gaps, work)).toEqual({
+			page: 9,
+			redrawn: { nearMaps: 1, lightGrid: 2048, coarseCells: 1 },
+		});
+		expect(slowestWork([], [])).toBeUndefined();
+	});
+
+	it("is named in the report where it took over three refreshes", () => {
+		const r = run("shown");
+		const orbit = r.levels[0].stations[0].moving[0];
+		const gaps = [...Array(30).fill(hz60), 126];
+		const work = gaps.map(
+			(_, i): ShownWork =>
+				i === 30 ? { page: 4, redrawn: { lightGrid: 2048 } } : { page: 1, redrawn: {} },
+		);
+		orbit.shown = shownWithSlowest({ gaps, work }, hz60);
+		const text = benchmarkReport(r);
+		expect(text).toContain("Slowest frames over 3 refreshes:");
+		expect(text).toMatch(
+			/1 Empty · Orbit drag: 126\.0 ms \(the page 4\.00 ms\), drew again: light grid cells 2,048/,
 		);
 	});
 });

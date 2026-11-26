@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.139",
+		date: "2026-11-26",
+		headline: "Ambient lighting's coarse cells over four frames, and a Smoothness run names its slowest frames.",
+		changed: [
+			"**Ambient lighting's coarse cells are worked out again over four frames** as the camera moves on, not in one, the old cells read until the new are done.",
+		],
+		added: [
+			"**Smoothness names its slowest frames**: each over three refreshes, with the page's time and what was drawn again in it, in the report and the results file.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.138",
 		date: "2026-11-26",
 		headline: "The light grid at 4 studs on a tablet.",

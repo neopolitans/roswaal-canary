@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.86.0",
+	version: "0.87.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.87.0",
+			roswaal: "1.1.0-canary.139",
+			date: "2026-11-26",
+			text: "The coarse cells refilled SKY_COARSE_SLICES (8) slices a frame into the texture not read (two in WebGL2 too, skyCoarseFill / skyU.coarseFill the fill's corner), read once all are; parts moved meanwhile, another refill after. Redrawn counts the place's sky maps, the lighting and coarse cells' refills too; Smoothness notes each frame's page time and what it drew again, keeps the slowest's (with the frame before) as shown.slowest, and its report names each over three refreshes.",
+		},
 		{
 			version: "0.86.0",
 			roswaal: "1.1.0-canary.138",

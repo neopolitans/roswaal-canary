@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.126",
+		date: "2026-11-26",
+		headline: "Compile mode in a list, and a deprecation that says what to use.",
+		changed: [
+			"**Compile mode, Interpreted or Native**, in a graph's settings and a function's Inspector, in place of the Native code box. A function in a script that is Native as a whole says so.",
+		],
+		added: [
+			"**Use instead and Reason on a deprecated function**: written as `@[deprecated {use = …, reason = …}]`, so the Luau linter's warning says them. Import as graph reads them back, with `@native` in the same brackets.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.125",
 		date: "2026-11-26",
 		headline: "Benchmark files named for what they measured.",

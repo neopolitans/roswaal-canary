@@ -110,8 +110,15 @@ export function functionsPage({ registry }: PageContext): DocPage {
 						"**Return values**",
 						"Name and optional Luau type each. They become input pins on every **Return** in this function",
 					],
-					["**Native code**", "Writes `@native`: the function is compiled to native code"],
+					[
+						"**Compile mode**",
+						"**Native** writes `@native`: the function is compiled to native code. In a script that is Native as a whole, every function already is",
+					],
 					["**Deprecated**", "Writes `@deprecated`: the Luau linter warns where it is called"],
+					[
+						"**Use instead** and **Reason**",
+						"Shown when Deprecated is on. Either writes `@[deprecated {use = …, reason = …}]`, and the warning says them",
+					],
 				],
 			},
 			{

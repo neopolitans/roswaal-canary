@@ -169,6 +169,17 @@ describe("statements", () => {
 		expect(stat.kind === "localFunction" && stat.attributes.map((a) => a.name)).toEqual(["native"]);
 	});
 
+	it("reads each attribute in @[ ], with its arguments as a call's", () => {
+		const [stat] = ok(
+			'@[native, deprecated {use = "neu", reason = "old"}, checked()] local function f() end',
+		);
+		const attrs = stat.kind === "localFunction" ? stat.attributes : [];
+		expect(attrs.map((a) => a.name)).toEqual(["native", "deprecated", "checked"]);
+		expect(attrs[0].args).toBeUndefined();
+		expect(attrs[1].args?.[0].kind).toBe("table");
+		expect(attrs[2].args).toEqual([]);
+	});
+
 	it("still reads continue, type and export as names where they are values", () => {
 		ok("continue = 1\ntype(x)\nexport.y = 2\nlocal type = 3");
 	});

@@ -98,18 +98,20 @@ export function GraphSettings(props: GraphSettingsProps) {
 						<option value="2">2</option>
 					</select>
 				</Field>
-				<label
-					className="check-row"
-					title="Writes --!native: the whole file is compiled to native code."
+				<Field
+					label="Compile mode"
+					hint="Native writes --!native: Roblox compiles the whole script to native code where it can. Interpreted writes nothing."
 				>
-					<input
-						type="checkbox"
-						checked={props.native}
+					<select
+						className="tb"
+						value={props.native ? "native" : "interpreted"}
 						disabled={props.locked}
-						onChange={(e) => props.onNative(e.target.checked)}
-					/>
-					<span>Native code</span>
-				</label>
+						onChange={(e) => props.onNative(e.target.value === "native")}
+					>
+						<option value="interpreted">Interpreted</option>
+						<option value="native">Native</option>
+					</select>
+				</Field>
 				<Field
 					label="Target"
 					hint={

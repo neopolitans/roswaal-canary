@@ -1922,13 +1922,18 @@ class Importer {
 	): Tail | undefined {
 		const sig = this.signature(stat.func);
 		if (!sig) return undefined;
-		// `@native` and `@deprecated`, written plainly, are the node's to keep.
-		// Any other attribute, or one with arguments, keeps the line as code.
+		// `@native` and `@deprecated`, plainly or in `@[ ]`, are the node's to
+		// keep, and a deprecation's `use` and `reason` with it. Any other
+		// attribute, or arguments the node cannot hold, keep the line as code.
 		const attributes = new Set<string>();
+		let deprecation: { use?: string; reason?: string } = {};
 		for (const a of stat.attributes) {
-			const raw = this.src.slice(a.start, a.end).replace(/\s+/g, "");
-			if (!FUNCTION_ATTRIBUTES.has(a.name) || (raw !== `@${a.name}` && raw !== `@[${a.name}]`))
-				return undefined;
+			if (!FUNCTION_ATTRIBUTES.has(a.name) || attributes.has(a.name)) return undefined;
+			if (a.args && a.args.length > 0) {
+				const said = a.name === "deprecated" ? deprecationArgs(a.args) : undefined;
+				if (!said) return undefined;
+				deprecation = said;
+			}
 			attributes.add(a.name);
 		}
 		let name: string;
@@ -1970,6 +1975,8 @@ class Importer {
 				...(global ? { global: true } : {}),
 				...(attributes.has("native") ? { native: true } : {}),
 				...(attributes.has("deprecated") ? { deprecated: true } : {}),
+				...(deprecation.use !== undefined ? { deprecatedUse: deprecation.use } : {}),
+				...(deprecation.reason !== undefined ? { deprecatedReason: deprecation.reason } : {}),
 			},
 		});
 		if (owner) this.feed(owner, { node: id, pin: "owner" });
@@ -2180,6 +2187,63 @@ export function graphNameOf(fileName: string): { name: string; scriptClass: Scri
 function typecheckOf(src: string): NodeScript["typecheck"] {
 	const mode = /^\s*--!(strict|nonstrict)\b/m.exec(src)?.[1];
 	return mode === "strict" || mode === "nonstrict" ? mode : "default";
+}
+
+/**
+ * `@[deprecated {use = "…", reason = "…"}]`'s one table, its fields plain
+ * strings; undefined for anything else, which the node cannot hold.
+ */
+function deprecationArgs(args: readonly Expr[]): { use?: string; reason?: string } | undefined {
+	if (args.length !== 1 || args[0].kind !== "table") return undefined;
+	const out: { use?: string; reason?: string } = {};
+	for (const field of args[0].fields) {
+		if (field.kind !== "named" || (field.name.name !== "use" && field.name.name !== "reason"))
+			return undefined;
+		if (field.value.kind !== "string") return undefined;
+		const text = luauStringText(field.value.raw);
+		if (text === undefined || out[field.name.name] !== undefined) return undefined;
+		out[field.name.name] = text;
+	}
+	return out;
+}
+
+/**
+ * A quoted Luau string's text, with the escapes the compiler writes (`\\`,
+ * `\"`, `\'`, `\n`, `\r`, `\t`, `\ddd`); undefined for a long string or
+ * any other escape.
+ */
+function luauStringText(raw: string): string | undefined {
+	const quote = raw[0];
+	if ((quote !== '"' && quote !== "'") || raw.length < 2 || raw[raw.length - 1] !== quote)
+		return undefined;
+	const body = raw.slice(1, -1);
+	let out = "";
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i];
+		if (ch === "\n" || ch === "\r") return undefined;
+		if (ch !== "\\") {
+			out += ch;
+			continue;
+		}
+		const next = body[++i];
+		const simple: Record<string, string> = {
+			"\\": "\\",
+			'"': '"',
+			"'": "'",
+			n: "\n",
+			r: "\r",
+			t: "\t",
+		};
+		if (next !== undefined && next in simple) out += simple[next];
+		else if (next !== undefined && /[0-9]/.test(next)) {
+			const digits = /^[0-9]{1,3}/.exec(body.slice(i))![0];
+			const code = Number(digits);
+			if (code > 255) return undefined;
+			out += String.fromCharCode(code);
+			i += digits.length - 1;
+		} else return undefined;
+	}
+	return out;
 }
 
 /** The file's `--!native` and `--!optimize N`, as the graph's settings. */

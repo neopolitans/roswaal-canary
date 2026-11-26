@@ -6,6 +6,7 @@
  * express. Custom node packs deliberately cannot reach this category.
  */
 
+import { quoteString } from "../compiler/quote.js";
 import { CLASS_OPTIONS } from "../roblox.js";
 import type { NodeConfig, NodeDef, PinDef } from "../schema.js";
 import { isClassNameType, pinDefaultFor, pinTypeOf } from "./variables.js";
@@ -52,13 +53,30 @@ export function signatureOf(config: NodeConfig | undefined): Signature {
 /**
  * The attributes a function is declared with, `@native` and `@deprecated`,
  * from its node's `native` and `deprecated` flags, each on its own line
- * above the `function`.
+ * above the `function`. A deprecation with what to use instead or why
+ * (`deprecatedUse`, `deprecatedReason`) is written with them, as the Luau
+ * linter reads them: `@[deprecated {use = "bar()", reason = "…"}]`.
  */
 export function functionAttributes(config: NodeConfig | undefined): string[] {
 	const out: string[] = [];
 	if (config?.native === true) out.push("@native");
-	if (config?.deprecated === true) out.push("@deprecated");
+	if (config?.deprecated === true) {
+		const said = deprecationSaid(config);
+		const fields = [
+			...(said.use !== undefined ? [`use = ${quoteString(said.use)}`] : []),
+			...(said.reason !== undefined ? [`reason = ${quoteString(said.reason)}`] : []),
+		];
+		out.push(fields.length > 0 ? `@[deprecated {${fields.join(", ")}}]` : "@deprecated");
+	}
 	return out;
+}
+
+/** What a deprecated function's node says to use instead and why; blank is unsaid. */
+export function deprecationSaid(config: NodeConfig | undefined): { use?: string; reason?: string } {
+	const text = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v : undefined);
+	const use = text(config?.deprecatedUse);
+	const reason = text(config?.deprecatedReason);
+	return { ...(use !== undefined ? { use } : {}), ...(reason !== undefined ? { reason } : {}) };
 }
 
 /** The attributes a function node can carry, by name. */

@@ -87,14 +87,72 @@ describe("@native and @deprecated on a function", () => {
 		expect(out).toMatch(/@deprecated\nfunction old\(\)/);
 	});
 
-	it("keep a function as code when an attribute is another one, or has arguments", () => {
+	it("keep a function as code when an attribute is another one, or its arguments are not use and reason", () => {
 		for (const src of [
-			'@[deprecated {use = "neu"}]\nlocal function go()\nend\n',
 			"@checked\nlocal function go()\nend\n",
+			'@[deprecated "neu"]\nlocal function go()\nend\n',
+			'@[deprecated {since = "2"}]\nlocal function go()\nend\n',
+			"@[deprecated {use = 1}]\nlocal function go()\nend\n",
+			'@[native("x")]\nlocal function go()\nend\n',
+			"@native @native\nlocal function go()\nend\n",
 		]) {
 			const s = imported(src);
 			expect(functions(s), src).toEqual([]);
 			expect(code(s), src).toContain("local function go()");
 		}
+	});
+});
+
+describe("a deprecation's use and reason (1.1.0-canary.126)", () => {
+	const declared = (config: Record<string, unknown>) => {
+		const b = new Builder();
+		b.node("function.entry", { config: { name: "old", params: [], returns: [], ...config } });
+		return code(b.build());
+	};
+
+	it("are written in the bracketed form the Luau linter reads", () => {
+		expect(declared({ deprecated: true, deprecatedUse: "neu()" })).toContain(
+			'@[deprecated {use = "neu()"}]\nlocal function old()',
+		);
+		expect(
+			declared({ deprecated: true, deprecatedUse: "neu()", deprecatedReason: 'Says "why".' }),
+		).toContain('@[deprecated {use = "neu()", reason = "Says \\"why\\"."}]');
+		expect(declared({ native: true, deprecated: true, deprecatedReason: "Old." })).toContain(
+			'@native\n@[deprecated {reason = "Old."}]\nlocal function old',
+		);
+	});
+
+	it("write plain @deprecated when blank, and nothing when not deprecated", () => {
+		expect(declared({ deprecated: true, deprecatedUse: "  " })).toContain(
+			"\n@deprecated\nlocal function old",
+		);
+		expect(declared({ deprecatedUse: "neu()" })).not.toContain("deprecated");
+	});
+
+	it("are read back on import, with @native in the same brackets", () => {
+		const s = imported(
+			'@[native, deprecated {use = \'neu()\', reason = "Line\\none \\"two\\""}]\nlocal function old()\nend\n',
+		);
+		const [old] = functions(s);
+		expect(old.config).toMatchObject({
+			name: "old",
+			native: true,
+			deprecated: true,
+			deprecatedUse: "neu()",
+			deprecatedReason: 'Line\none "two"',
+		});
+		expect(code(s)).toContain(
+			'@native\n@[deprecated {use = "neu()", reason = "Line\\none \\"two\\""}]\nlocal function old()',
+		);
+	});
+
+	it("round trip what they write", () => {
+		const out = declared({
+			deprecated: true,
+			deprecatedUse: "a\tb\\c",
+			deprecatedReason: "\u0001",
+		});
+		const [old] = functions(imported(out));
+		expect(old.config).toMatchObject({ deprecatedUse: "a\tb\\c", deprecatedReason: "\u0001" });
 	});
 });

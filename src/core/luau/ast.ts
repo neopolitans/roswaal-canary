@@ -128,9 +128,13 @@ export interface ConditionBinding {
 	name: Binding;
 }
 
-/** `@native`, or the bracketed form `@[deprecated]`. */
+/**
+ * `@native`, or one of the bracketed form's, `@[native, deprecated {use = "f"}]`,
+ * its arguments as a call's: `(…)`, a table or a string; absent written bare.
+ */
 export interface Attribute extends Span {
 	name: string;
+	args?: Expr[];
 }
 
 // -- expressions -------------------------------------------------------------

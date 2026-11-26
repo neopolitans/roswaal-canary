@@ -446,16 +446,17 @@ class Parser {
 		while (this.is("@")) {
 			const at = this.next();
 			if (this.accept("[")) {
-				// `@[name, name(args)]`: kept by name; the arguments are skipped.
-				let depth = 1;
-				let name = "";
-				while (depth > 0 && this.peek().kind !== "eof") {
-					const token = this.next();
-					if (token.text === "[") depth++;
-					else if (token.text === "]") depth--;
-					else if (!name && token.kind === "name") name = token.text;
-				}
-				out.push({ name, ...this.span(at.start) });
+				// `@[name, name(args), name {…}, name "…"]`: each attribute, its
+				// arguments written as a call's (RFC: attribute parameters).
+				do {
+					const name = this.expectName("an attribute name inside @[ ]");
+					const args =
+						this.is("(") || this.is("{") || this.peek().kind === "string"
+							? this.callArgs()
+							: undefined;
+					out.push({ name: name.name, ...(args ? { args } : {}), ...this.span(at.start) });
+				} while (this.accept(","));
+				this.expect("]", "to close the attributes");
 				continue;
 			}
 			const name = this.expectName("an attribute name after @");

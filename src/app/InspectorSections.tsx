@@ -495,45 +495,104 @@ function FunctionEditor({ node }: { node: GraphNode }) {
 				title="Returns"
 				hint="Return nodes inside this function follow along automatically."
 			/>
-			<AttributeToggle
-				node={node}
-				flag="native"
-				label="Native code"
-				title="Writes @native: this function is compiled to native code."
-			/>
-			<AttributeToggle
-				node={node}
-				flag="deprecated"
-				label="Deprecated"
-				title="Writes @deprecated: the Luau linter warns where it is called."
-			/>
+			<CompileModeField node={node} />
+			<DeprecationFields node={node} />
 		</>
 	);
 }
 
-/** A function attribute, `@native` or `@deprecated`, as a box; unticked leaves it out of the config. */
-function AttributeToggle({
-	node,
-	flag,
-	label,
-	title,
-}: {
-	node: GraphNode;
-	flag: "native" | "deprecated";
-	label: string;
-	title: string;
-}) {
+/**
+ * A function's compile mode: Native writes `@native` above it. In a script
+ * that is Native as a whole (`--!native`) every function already is, so it
+ * says so and is not asked.
+ */
+function CompileModeField({ node }: { node: GraphNode }) {
+	const wholeScript = useEditor().script?.native === true;
+	const native = configFlag(node, "native");
 	return (
-		<label className="check-row" title={title}>
-			<input
-				type="checkbox"
-				checked={configFlag(node, flag)}
+		<Field
+			label="Compile mode"
+			hint={
+				wholeScript
+					? "The whole script is compiled to native code: see its settings."
+					: "Native writes @native: Roblox compiles this function to native code where it can. Interpreted writes nothing."
+			}
+		>
+			<select
+				className="tb"
+				value={wholeScript ? "script" : native ? "native" : "interpreted"}
+				disabled={wholeScript}
 				onChange={(e) =>
-					store.edit((s) => setConfig(s, node.id, { [flag]: e.target.checked ? true : undefined }))
+					store.edit((s) =>
+						setConfig(s, node.id, { native: e.target.value === "native" ? true : undefined }),
+					)
 				}
-			/>
-			<span>{label}</span>
-		</label>
+			>
+				{wholeScript && <option value="script">Native, as the whole script</option>}
+				<option value="interpreted">Interpreted</option>
+				<option value="native">Native</option>
+			</select>
+		</Field>
+	);
+}
+
+/**
+ * Deprecated writes `@deprecated`, and with what to use instead or why,
+ * `@[deprecated {use = "…", reason = "…"}]`: the Luau linter's warning where
+ * the function is called says them.
+ */
+function DeprecationFields({ node }: { node: GraphNode }) {
+	const useTyping = useEditBurst();
+	const reasonTyping = useEditBurst();
+	const deprecated = configFlag(node, "deprecated");
+	return (
+		<>
+			<label
+				className="check-row"
+				title="Writes @deprecated: the Luau linter warns where this function is called."
+			>
+				<input
+					type="checkbox"
+					checked={deprecated}
+					onChange={(e) =>
+						store.edit((s) =>
+							setConfig(s, node.id, { deprecated: e.target.checked ? true : undefined }),
+						)
+					}
+				/>
+				<span>Deprecated</span>
+			</label>
+			{deprecated && (
+				<>
+					<Field label="Use instead" hint="Written as use: the warning says to use this instead.">
+						<input
+							className="tb"
+							value={configText(node, "deprecatedUse") ?? ""}
+							placeholder="newFunction()"
+							onChange={(e) =>
+								useTyping.edit((s) =>
+									setConfig(s, node.id, { deprecatedUse: e.target.value || undefined }),
+								)
+							}
+							{...useTyping.field}
+						/>
+					</Field>
+					<Field label="Reason" hint="Written as reason: the warning ends with it.">
+						<input
+							className="tb"
+							value={configText(node, "deprecatedReason") ?? ""}
+							placeholder="Why it should not be used"
+							onChange={(e) =>
+								reasonTyping.edit((s) =>
+									setConfig(s, node.id, { deprecatedReason: e.target.value || undefined }),
+								)
+							}
+							{...reasonTyping.field}
+						/>
+					</Field>
+				</>
+			)}
+		</>
 	);
 }
 

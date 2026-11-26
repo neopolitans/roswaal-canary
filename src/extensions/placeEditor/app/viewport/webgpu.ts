@@ -28,6 +28,7 @@ import {
 	jitterClip,
 	StillFrames,
 } from "./antialias.js";
+import { boxesOf, CELL_PAD, COARSE_PAD, cellBlock, innerSpans, unionSpan } from "./cellSpans.js";
 import {
 	boxHidden,
 	boxInView,
@@ -95,6 +96,7 @@ import {
 	type CascadeFit,
 	COST_FULL,
 	cascadeBlock,
+	coarseOrigin,
 	DEFAULT_RENDER,
 	type EffectSteps,
 	FOV,
@@ -103,6 +105,8 @@ import {
 	GLOW_NARROW,
 	GLOW_WIDE,
 	type GlowShape,
+	GRID_FILL_BUDGET,
+	GridFillPlan,
 	glowShape,
 	glowSpread,
 	gradeBlock,
@@ -113,8 +117,6 @@ import {
 	type ImageQuad,
 	imageOrder,
 	imageQuads,
-	GRID_FILL_BUDGET,
-	GridFillPlan,
 	LIGHT_CELL,
 	LIGHT_CHANGES_MOST,
 	LIGHT_GRID_CASCADES,
@@ -149,7 +151,6 @@ import {
 	SKY_CELLS,
 	SKY_COARSE_CELL,
 	SKY_COARSE_CELLS,
-	coarseOrigin,
 	SKY_GAIN,
 	SKY_LAYERS,
 	SKY_LEAK,
@@ -164,8 +165,6 @@ import {
 	type StudBox,
 	SUN_CASCADES,
 	SUN_GAIN,
-	TIMER_SAMPLE,
-	type TimerMode,
 	sceneBox,
 	sceneFingerprint,
 	seeThroughSets,
@@ -173,6 +172,8 @@ import {
 	sharesView,
 	skyBlock,
 	splitByMesh,
+	TIMER_SAMPLE,
+	type TimerMode,
 	type ViewQuality,
 	type ViewRenderer,
 } from "./view.js";
@@ -1042,13 +1043,21 @@ struct CellOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) 
 // the maps: each cell's own share, once, with a cell's border round them, as
 // the average reaches a cell out; then each cell the average of its own and
 // its 26 neighbours', read back. Eight slices a draw, each its own target.
+// The cells worth filling (see cellSpans): the rest the open sky, the maps not read.
+@group(1) @binding(0) var cellMask: texture_3d<f32>;
 fn cellOwn(x: f32, y: f32, z: f32) -> vec4f {
+	if (textureLoad(cellMask, vec3i(i32(x) + 1, i32(z) + 1, i32(y) + 1), 0).r < 0.5) {
+		return vec4f(1.0, 0.0, 0.0, 1.0);
+	}
 	let p = cellOrigin() + (vec3f(x, y, z) + 0.5) * ${SKY_CELL}.0;
 	return vec4f(skyVisibilityMaps(p, vec3f(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
 }
 // A coarse cell (see SKY_COARSE_CELL): the share of the sky its middle sees, from every map and tap.
 @fragment fn fsCoarse(c: CellOut) -> @location(0) vec4f {
 	let cell = vec3f(floor(c.pos.x), f32(c.slice), floor(c.pos.y));
+	if (textureLoad(cellMask, vec3i(i32(cell.x), i32(cell.z), i32(cell.y)), 0).r < 0.5) {
+		return vec4f(1.0, 0.0, 0.0, 1.0);
+	}
 	let p = skyU.coarse.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
 	return vec4f(skyVisibilityMaps(p, vec3f(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
 }
@@ -2869,7 +2878,13 @@ export class WebGpuView implements ViewRenderer {
 			}),
 		);
 		this.pipeline((p) => (this.coarsePipe = p), {
-			layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
+			layout: d.createPipelineLayout({
+				bindGroupLayouts: [
+					layout,
+					this.maskFor("coarse", [SKY_COARSE_CELLS[0], SKY_COARSE_CELLS[2], SKY_COARSE_CELLS[1]])
+						.layout,
+				],
+			}),
 			vertex: { module, entryPoint: "vsCell" },
 			fragment: { module, entryPoint: "fsCoarse", targets: [{ format: "r8unorm" }] },
 			primitive: { topology: "triangle-list" },
@@ -6803,10 +6818,11 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const ownLayout = d.createBindGroupLayout({
 			entries: [{ binding: 1, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } }],
 		});
+		const mask = this.maskFor("own", [w, h, s]);
 		try {
 			const [ownPipe, aroundPipe] = await Promise.all([
 				d.createRenderPipelineAsync({
-					layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
+					layout: d.createPipelineLayout({ bindGroupLayouts: [layout, mask.layout] }),
 					vertex: { module, entryPoint: "vsCell" },
 					fragment: { module, entryPoint: "fsCellOwn", targets },
 					primitive: { topology: "triangle-list" },
@@ -6858,25 +6874,51 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	 */
 	private fillCells(
 		encoder: GPUCommandEncoder,
+		block: Float32Array,
 		bind: GPUBindGroup = this.bind,
 		part: "all" | "own" | "around" = "all",
 		swap = true,
 	): void {
+		// Only the cells near a part (see cellSpans), from the near maps' box in
+		// `block`: marked for the first step, which reads the mask, in its own
+		// texture's cells (a cell's border round them, slices to a multiple of 8).
+		const origin = [0, 1, 2].map(
+			(a) => block[16 * SKY_LAYERS + 8 + a] - (SKY_CELLS[a] * SKY_CELL) / 2,
+		);
 		const steps = this.cellSteps;
+		const own = steps?.own.depthOrArrayLayers ?? SKY_CELLS[1] + 2;
+		const ownDims = [SKY_CELLS[0] + 2, own, SKY_CELLS[2] + 2] as const;
+		const marked = this.scene
+			? cellBlock(
+					boxesOf(this.scene),
+					origin.map((v) => v - SKY_CELL),
+					ownDims,
+					SKY_CELL,
+					CELL_PAD,
+				)
+			: null;
+		const ownSpans = marked?.spans ?? [];
+		const spans = innerSpans(ownSpans, SKY_CELLS);
+		if (part !== "around" && marked) this.writeMask("own", marked.mask, ownDims);
 		if (steps) {
 			const target = this.cells[1 - this.cellsRead];
-			const own = steps.own.depthOrArrayLayers;
 			for (let s = 0; part !== "around" && s * 8 < own; s++) {
+				const span = unionSpan(ownSpans.slice(s * 8, s * 8 + 8));
+				if (!span) continue;
 				const pass = encoder.beginRenderPass({
 					timestampWrites: this.stamp(null),
 					colorAttachments: this.eightSlices(steps.own, s * 8),
 				});
 				pass.setPipeline(steps.ownPipe);
 				pass.setBindGroup(0, bind);
+				pass.setBindGroup(1, this.masks.own!.group);
+				pass.setScissorRect(span.x0, span.z0, span.x1 - span.x0 + 1, span.z1 - span.z0 + 1);
 				pass.draw(3, 1, 0, s);
 				pass.end();
 			}
 			for (let s = 0; part !== "own" && s * 8 < SKY_CELLS[1]; s++) {
+				const span = unionSpan(spans.slice(s * 8, s * 8 + 8));
+				if (!span) continue;
 				const pass = encoder.beginRenderPass({
 					timestampWrites: this.stamp(null),
 					colorAttachments: this.eightSlices(target, s * 8),
@@ -6884,6 +6926,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				pass.setPipeline(steps.aroundPipe);
 				pass.setBindGroup(0, bind);
 				pass.setBindGroup(1, steps.aroundGroup);
+				pass.setScissorRect(span.x0, span.z0, span.x1 - span.x0 + 1, span.z1 - span.z0 + 1);
 				pass.draw(3, 1, 0, s);
 				pass.end();
 			}
@@ -6897,6 +6940,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		if (!this.cellPipe || part === "own") return;
 		const target = this.cells[1 - this.cellsRead];
 		for (let y = 0; y < SKY_CELLS[1]; y++) {
+			const span = spans[y];
+			if (!span) continue;
 			const pass = encoder.beginRenderPass({
 				timestampWrites: this.stamp(null),
 				colorAttachments: [
@@ -6911,12 +6956,62 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			});
 			pass.setPipeline(this.cellPipe);
 			pass.setBindGroup(0, bind);
+			pass.setScissorRect(span.x0, span.z0, span.x1 - span.x0 + 1, span.z1 - span.z0 + 1);
 			pass.draw(3, 1, 0, y);
 			pass.end();
 		}
 		if (!swap) return;
 		this.cellsRead = 1 - this.cellsRead;
 		this.rebind();
+	}
+
+	// -- the cells worth filling: see cellSpans ---------------------------------------------
+
+	/** The masks, one for each block's size, each in its own group (1) for the fill's pipeline. */
+	private masks: {
+		own?: { texture: GPUTexture; layout: GPUBindGroupLayout; group: GPUBindGroup };
+		coarse?: { texture: GPUTexture; layout: GPUBindGroupLayout; group: GPUBindGroup };
+	} = {};
+
+	/** A mask `size` texels (x across, z down, y the slice), made once, with its group. */
+	private maskFor(kind: "own" | "coarse", size: [number, number, number]) {
+		const had = this.masks[kind];
+		if (had) return had;
+		const d = this.device;
+		const texture = d.createTexture({
+			size,
+			dimension: "3d",
+			format: "r8unorm",
+			usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST,
+		});
+		const layout = d.createBindGroupLayout({
+			entries: [{ binding: 0, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } }],
+		});
+		const group = d.createBindGroup({
+			layout,
+			entries: [{ binding: 0, resource: texture.createView({ dimension: "3d" }) }],
+		});
+		const made = { texture, layout, group };
+		this.masks[kind] = made;
+		return made;
+	}
+
+	/** A block's marks into its mask, before the fill this frame reads them. */
+	private writeMask(
+		kind: "own" | "coarse",
+		mask: Uint8Array,
+		dims: readonly [number, number, number],
+	): void {
+		const to = this.masks[kind];
+		if (!to) return;
+		// One byte a cell, 1 where marked: r8unorm reads 255 as 1.
+		const bytes = mask.map((v) => (v ? 255 : 0));
+		this.device.queue.writeTexture(
+			{ texture: to.texture },
+			bytes,
+			{ bytesPerRow: dims[0], rowsPerImage: dims[2] },
+			[dims[0], dims[2], dims[1]],
+		);
 	}
 
 	// -- the coarse cells: Ambient lighting's Grid past the lighting cells ---------------
@@ -6947,7 +7042,15 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		// Into the cells not read, a slice a pass, then read.
 		const target = this.coarse[1 - this.coarseRead];
 		const view = target.createView({ dimension: "3d" });
+		// Only the cells near a part (see cellSpans).
+		const marked = this.scene
+			? cellBlock(boxesOf(this.scene), origin, SKY_COARSE_CELLS, SKY_COARSE_CELL, COARSE_PAD)
+			: null;
+		const spans = marked?.spans ?? [];
+		if (marked) this.writeMask("coarse", marked.mask, SKY_COARSE_CELLS);
 		for (let y = 0; y < SKY_COARSE_CELLS[1]; y++) {
+			const span = spans[y];
+			if (!span) continue;
 			const pass = encoder.beginRenderPass({
 				timestampWrites: this.stamp(null),
 				colorAttachments: [
@@ -6962,6 +7065,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			});
 			pass.setPipeline(this.coarsePipe!);
 			pass.setBindGroup(0, this.bind);
+			pass.setBindGroup(1, this.masks.coarse!.group);
+			pass.setScissorRect(span.x0, span.z0, span.x1 - span.x0 + 1, span.z1 - span.z0 + 1);
 			pass.draw(3, 1, 0, y);
 			pass.end();
 		}
@@ -7585,11 +7690,11 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			return at;
 		}
 		if (fill.step === SKY_VIEWS) {
-			this.fillCells(at, fill.bind, "own", false);
+			this.fillCells(at, fill.block, fill.bind, "own", false);
 			fill.step++;
 			return this.cut(at, "skyCells");
 		}
-		this.fillCells(at, fill.bind, "around", false);
+		this.fillCells(at, fill.block, fill.bind, "around", false);
 		at = this.cut(at, "skyCells");
 		// All drawn: the maps, their block and their cells read from here on.
 		q.writeBuffer(this.skyUniform, 0, fill.block);
@@ -7662,7 +7767,7 @@ ${entry("csErode", "textureLoad(srcFloat, c, 0).r", "min")}
 			at = this.cut(at, "skyOpen");
 		}
 		if (which.near) {
-			this.fillCells(at);
+			this.fillCells(at, block);
 			at = this.cut(at, "skyCells");
 		}
 		return at;

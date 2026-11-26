@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.84.2",
+	version: "0.85.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.85.0",
+			roswaal: "1.1.0-canary.136",
+			date: "2026-11-26",
+			text: "The lighting and coarse cells worth filling (cellSpans.ts): within CELL_PAD or COARSE_PAD cells of a part's box (MeshParts, unions and parts seen through too; the boxes in 128-stud buckets once a scene), marked in a mask the fill shaders read (WebGL2 unit 29; WebGPU group 1), the rest given the open sky unread; each slice drawn only over its marked cells' rectangle, or not at all.",
+		},
 		{
 			version: "0.84.2",
 			roswaal: "1.1.0-canary.135",

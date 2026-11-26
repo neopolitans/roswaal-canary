@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.136",
+		date: "2026-11-26",
+		headline: "Ambient lighting's cells worked out only near parts.",
+		changed: [
+			"**Ambient lighting's cells are worked out only near parts** as the camera moves: the open air over a place and empty ground are left as open sky, about half the work in a dense town and more in open places, for the same picture.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.135",
 		date: "2026-11-26",
 		headline: "A profile goes on where shaders never finish.",

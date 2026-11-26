@@ -28,6 +28,7 @@ import {
 	jitterClip,
 	StillFrames,
 } from "./antialias.js";
+import { boxesOf, CELL_PAD, COARSE_PAD, cellBlock, innerSpans } from "./cellSpans.js";
 import {
 	boxHidden,
 	boxInView,
@@ -80,6 +81,7 @@ import {
 	type CascadeFit,
 	COST_FULL,
 	cascadeBlock,
+	coarseOrigin,
 	DEFAULT_RENDER,
 	FOV,
 	FULL_QUALITY,
@@ -133,7 +135,6 @@ import {
 	SKY_CELLS,
 	SKY_COARSE_CELL,
 	SKY_COARSE_CELLS,
-	coarseOrigin,
 	SKY_GAIN,
 	SKY_LAYERS,
 	SKY_LEAK,
@@ -166,6 +167,8 @@ import {
 const LIT_GRID = 1 << 28;
 /** The coarse cells' texture unit, past every other: see SKY_COARSE_CELL. */
 const COARSE_UNIT = 28;
+/** The cells-worth-filling mask's unit, while a fill reads it: see cellSpans. */
+const MASK_UNIT = 29;
 
 const COMMON = `
 uniform vec4 L[11];
@@ -1178,8 +1181,15 @@ precision highp int;
 ${COMMON}
 ${SKY_VIS}
 uniform float cellSlice;
+// The cells worth filling (see cellSpans), where masked: the rest the open sky, the maps not read.
+uniform highp sampler3D cellMask;
+uniform float masked;
 out vec4 o;
 void main() {
+	if (masked > 0.5 && texelFetch(cellMask, ivec3(int(gl_FragCoord.x), int(gl_FragCoord.y), int(cellSlice)), 0).r < 0.5) {
+		o = vec4(1.0, 0.0, 0.0, 1.0);
+		return;
+	}
 	vec3 cell = vec3(floor(gl_FragCoord.x) - 1.0, cellSlice - 1.0, floor(gl_FragCoord.y) - 1.0);
 	vec3 p = cellOrigin() + (cell + 0.5) * ${SKY_CELL}.0;
 	o = vec4(skyVisibilityMaps(p, vec3(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
@@ -1191,8 +1201,14 @@ precision highp int;
 ${COMMON}
 ${SKY_VIS}
 uniform float cellSlice;
+uniform highp sampler3D cellMask;
+uniform float masked;
 out vec4 o;
 void main() {
+	if (masked > 0.5 && texelFetch(cellMask, ivec3(int(gl_FragCoord.x), int(gl_FragCoord.y), int(cellSlice)), 0).r < 0.5) {
+		o = vec4(1.0, 0.0, 0.0, 1.0);
+		return;
+	}
 	vec3 cell = vec3(floor(gl_FragCoord.x), cellSlice, floor(gl_FragCoord.y));
 	vec3 p = skyCoarseAt.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
 	o = vec4(skyVisibilityMaps(p, vec3(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
@@ -2743,10 +2759,34 @@ export class WebGl2View implements ViewRenderer {
 		gl.disable(gl.DEPTH_TEST);
 		gl.disable(gl.BLEND);
 		gl.bindVertexArray(this.cellVao);
-		// Each cell's own share, a cell's border round them, a slice a draw.
+		// Each cell's own share, a cell's border round them, a slice a draw:
+		// only the cells near a part (see cellSpans).
+		const near = this.skyData.subarray(16 * SKY_LAYERS + 8, 16 * SKY_LAYERS + 12);
+		const origin = [
+			near[0] - (SKY_CELLS[0] * SKY_CELL) / 2,
+			near[1] - (SKY_CELLS[1] * SKY_CELL) / 2,
+			near[2] - (SKY_CELLS[2] * SKY_CELL) / 2,
+		];
+		const ownDims = [SKY_CELLS[0] + 2, SKY_CELLS[1] + 2, SKY_CELLS[2] + 2] as const;
+		const own = this.scene
+			? cellBlock(
+					boxesOf(this.scene),
+					origin.map((v) => v - SKY_CELL),
+					ownDims,
+					SKY_CELL,
+					CELL_PAD,
+				)
+			: null;
+		const ownSpans = own?.spans ?? [];
+		this.cellsMarked = own ? own.marked / own.mask.length : 0;
+		this.useMask(this.cellProg, own?.mask ?? null, ownDims, "own");
 		const ownSlice = gl.getUniformLocation(this.cellProg.program, "cellSlice");
 		gl.viewport(0, 0, SKY_CELLS[0] + 2, SKY_CELLS[2] + 2);
+		gl.enable(gl.SCISSOR_TEST);
 		for (let y = 0; y < SKY_CELLS[1] + 2; y++) {
+			const s = ownSpans[y];
+			if (!s) continue;
+			gl.scissor(s.x0, s.z0, s.x1 - s.x0 + 1, s.z1 - s.z0 + 1);
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.cellOwn, 0, y);
 			gl.uniform1f(ownSlice, y);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -2759,11 +2799,16 @@ export class WebGl2View implements ViewRenderer {
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_3D, this.cellOwn);
 		gl.viewport(0, 0, SKY_CELLS[0], SKY_CELLS[2]);
+		const spans = innerSpans(ownSpans, SKY_CELLS);
 		for (let y = 0; y < SKY_CELLS[1]; y++) {
+			const s = spans[y];
+			if (!s) continue;
+			gl.scissor(s.x0, s.z0, s.x1 - s.x0 + 1, s.z1 - s.z0 + 1);
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, target, 0, y);
 			gl.uniform1f(aroundSlice, y);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
 		}
+		gl.disable(gl.SCISSOR_TEST);
 		gl.bindTexture(gl.TEXTURE_3D, null);
 		gl.bindVertexArray(null);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -2772,6 +2817,58 @@ export class WebGl2View implements ViewRenderer {
 		this.cellsRead = 1 - this.cellsRead;
 		gl.activeTexture(gl.TEXTURE13);
 		gl.bindTexture(gl.TEXTURE_3D, this.cellTex[this.cellsRead]);
+		gl.activeTexture(gl.TEXTURE0);
+	}
+
+	// -- the cells worth filling: see cellSpans ------------------------------------------
+
+	/** The masks, one for each block's size, on MASK_UNIT while a fill reads one. */
+	private masks: { own?: WebGLTexture; coarse?: WebGLTexture } = {};
+	/** Whether this device has a unit for them; without, a fill draws only each slice's rectangle. */
+	private maskAble = false;
+	/** The share of the lighting cells last marked worth filling, for a profile. */
+	cellsMarked = 0;
+
+	/** `mask` into the program's cellMask on MASK_UNIT, or masked off where there is none or no unit for it. */
+	private useMask(
+		program: Program,
+		mask: Uint8Array | null,
+		dims: readonly [number, number, number],
+		kind: "own" | "coarse",
+	): void {
+		const gl = this.gl;
+		const on = this.maskAble && mask !== null;
+		gl.useProgram(program.program);
+		gl.uniform1f(this.loc(program.program, "masked"), on ? 1 : 0);
+		if (!on) return;
+		let tex = this.masks[kind];
+		gl.activeTexture(gl.TEXTURE0 + MASK_UNIT);
+		if (!tex) {
+			tex = gl.createTexture()!;
+			this.masks[kind] = tex;
+			gl.bindTexture(gl.TEXTURE_3D, tex);
+			gl.texStorage3D(gl.TEXTURE_3D, 1, gl.R8, dims[0], dims[2], dims[1]);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		} else gl.bindTexture(gl.TEXTURE_3D, tex);
+		// One byte a cell, 1 where marked: R8 reads it as 1/255, under a half, so 255.
+		const bytes = mask.map((v) => (v ? 255 : 0));
+		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+		gl.texSubImage3D(
+			gl.TEXTURE_3D,
+			0,
+			0,
+			0,
+			0,
+			dims[0],
+			dims[2],
+			dims[1],
+			gl.RED,
+			gl.UNSIGNED_BYTE,
+			bytes,
+		);
+		gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+		gl.uniform1i(this.loc(program.program, "cellMask"), MASK_UNIT);
 		gl.activeTexture(gl.TEXTURE0);
 	}
 
@@ -2832,11 +2929,28 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindVertexArray(this.cellVao);
 		const slice = this.loc(this.coarseProg.program, "cellSlice");
 		gl.viewport(0, 0, SKY_COARSE_CELLS[0], SKY_COARSE_CELLS[2]);
+		// Only the cells near a part (see cellSpans).
+		const block = this.scene
+			? cellBlock(
+					boxesOf(this.scene),
+					[this.coarseAt[0], this.coarseAt[1], this.coarseAt[2]],
+					SKY_COARSE_CELLS,
+					SKY_COARSE_CELL,
+					COARSE_PAD,
+				)
+			: null;
+		const spans = block?.spans ?? [];
+		this.useMask(this.coarseProg, block?.mask ?? null, SKY_COARSE_CELLS, "coarse");
+		gl.enable(gl.SCISSOR_TEST);
 		for (let y = 0; y < SKY_COARSE_CELLS[1]; y++) {
+			const s = spans[y];
+			if (!s) continue;
+			gl.scissor(s.x0, s.z0, s.x1 - s.x0 + 1, s.z1 - s.z0 + 1);
 			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.coarseTex, 0, y);
 			gl.uniform1f(slice, y);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
 		}
+		gl.disable(gl.SCISSOR_TEST);
 		gl.bindVertexArray(null);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.viewport(0, 0, this.width, this.height);
@@ -3248,6 +3362,7 @@ export class WebGl2View implements ViewRenderer {
 			(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number) >= 28;
 		this.coarseAble =
 			(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number) > COARSE_UNIT;
+		this.maskAble = (gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number) > MASK_UNIT;
 		this.makeReflections();
 		this.makeAntialias();
 		if (clip) this.pre = this.link(VS, FS_DEPTH);

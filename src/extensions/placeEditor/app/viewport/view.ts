@@ -639,6 +639,13 @@ export function nearSkyInto(
  * far off to count.
  */
 export const LIGHT_CELL = 16;
+/**
+ * Within this many studs of a SpotLight or SurfaceLight, a light grid sample
+ * takes its light whichever way the light faces: at the light, its cone's
+ * direction means nothing. Past it, the cone counts, as at a pixel; within
+ * half a sample it did not, and the light reached what faced away from it.
+ */
+export const LIGHT_AT = 0.5;
 export const LIGHT_TABLE = 65536;
 /** At most this many lights are added at a pixel. */
 export const LIGHT_MOST = 64;

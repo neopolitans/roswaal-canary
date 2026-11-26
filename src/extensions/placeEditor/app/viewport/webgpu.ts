@@ -117,6 +117,7 @@ import {
 	type ImageQuad,
 	imageOrder,
 	imageQuads,
+	LIGHT_AT,
 	LIGHT_CELL,
 	LIGHT_CHANGES_MOST,
 	LIGHT_GRID_CASCADES,
@@ -457,8 +458,10 @@ fn lightCell(p: vec3f) -> u32 {
 			if ((bits & kind) == 0u) { continue; }
 			var at = a.xyz;
 			if (col.w > 1.5) {
-				// Wholly behind its face: none of its light.
-				if (dot(p - a.xyz, d.xyz) < -r) { continue; }
+				// Behind its face: none of its light, as a pixel there gets none.
+				// Within half a sample of it did, and a light on a wall lit the wall
+				// (a window's SurfaceLight, 26 Nov 2026).
+				if (dot(p - a.xyz, d.xyz) < 0.0) { continue; }
 				let u = lightData[k + 3u].xyz;
 				let v = lightData[k + 4u].xyz;
 				let off = p - a.xyz;
@@ -475,7 +478,7 @@ fn lightCell(p: vec3f) -> u32 {
 			let soft = gp.info.z > 0.5;
 			if (soft && col.w > 0.5 && col.w < 1.5) {
 				k2 = k2 * softSpot(d.w);
-			} else if (col.w > 0.5 && dist > r) {
+			} else if (col.w > 0.5 && dist > ${LIGHT_AT}) {
 				let l = to / dist;
 				let c = dot(-l, d.xyz);
 				if (c <= 0.0) { continue; }

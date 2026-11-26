@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.137",
+		date: "2026-11-26",
+		headline: "The light grid keeps a light off what faces away from it.",
+		fixed: [
+			"**The light grid no longer lights what is behind a SurfaceLight**, or round a SpotLight outside its cone, within half a cell of it: a light on a wall lit the wall it was on.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.136",
 		date: "2026-11-26",
 		headline: "Ambient lighting's cells worked out only near parts.",

@@ -101,6 +101,7 @@ import {
 	type ImageQuad,
 	imageOrder,
 	imageQuads,
+	LIGHT_AT,
 	LIGHT_CELL,
 	LIGHT_CHANGES_MOST,
 	LIGHT_GRID_CASCADES,
@@ -1101,8 +1102,8 @@ void main() {
 			if (!has(kind)) continue;
 			vec3 at = a.xyz;
 			if (col.w > 1.5) {
-				// Wholly behind its face: none of its light.
-				if (dot(p - a.xyz, d.xyz) < -r) continue;
+				// Behind its face: none of its light, as WebGpuView's GRID_FILL.
+				if (dot(p - a.xyz, d.xyz) < 0.0) continue;
 				vec3 u = texelFetch(lightData, ivec2(3, i), 0).xyz;
 				vec3 v = texelFetch(lightData, ivec2(4, i), 0).xyz;
 				vec3 off = p - a.xyz;
@@ -1117,7 +1118,7 @@ void main() {
 			float k2 = soft ? softFall(reach / a.w) : 1.0 - smoothstep(0.7, 1.0, reach / a.w);
 			if (soft && col.w > 0.5 && col.w < 1.5) {
 				k2 *= softSpot(d.w);
-			} else if (col.w > 0.5 && dist > r) {
+			} else if (col.w > 0.5 && dist > ${LIGHT_AT}) {
 				vec3 l = to / dist;
 				float c = dot(-l, d.xyz);
 				if (c <= 0.0) continue;

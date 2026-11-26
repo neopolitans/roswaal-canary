@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.81.0",
+	version: "0.82.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.82.0",
+			roswaal: "1.1.0-canary.130",
+			date: "2026-11-26",
+			text: "Coarse cells for Ambient lighting's Grid (SKY_COARSE_CELL 16, SKY_COARSE_CELLS 96 x 32 x 96, round the camera on a 128-stud step; coarseOrigin): each the share of the sky its middle sees, filled when the parts move or the camera crosses a step, read by skyFar past the lighting cells and over their edge band, easing to the maps a tap each at their own edge. WebGL2 on unit 28 (where the device has 29); WebGPU binding 25, two textures swapped, skyU.coarse.",
+		},
 		{
 			version: "0.81.0",
 			roswaal: "1.1.0-canary.129",

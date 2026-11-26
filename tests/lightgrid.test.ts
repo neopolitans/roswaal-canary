@@ -8,12 +8,16 @@ import { describe, expect, it } from "vitest";
 import {
 	ambientGrid,
 	autoLightGrid,
+	coarseOrigin,
 	LIGHT_CELL,
 	LIGHT_GRID_CELLS,
 	LIGHT_GRID_SLACK,
 	lightGridCell,
 	lightGridMove,
 	lightGridSamples,
+	SKY_COARSE_CELL,
+	SKY_COARSE_CELLS,
+	SKY_COARSE_SNAP,
 	SOFT_LIGHT_CELL,
 	TOUCH_LIGHT_CELL,
 } from "../src/extensions/placeEditor/app/viewport/view.js";
@@ -104,5 +108,21 @@ describe("Ambient lighting (1.1.0-canary.129)", () => {
 		expect(ambientGrid("auto", true)).toBe(true);
 		expect(ambientGrid("grid")).toBe(true);
 		expect(ambientGrid("realtime", true)).toBe(false);
+	});
+});
+
+describe("the coarse cells (1.1.0-canary.130)", () => {
+	const middle = (o: number[]) => o.map((v, a) => v + (SKY_COARSE_CELLS[a] * SKY_COARSE_CELL) / 2);
+
+	it("stand round the eye, their middle on the step's grid", () => {
+		expect(middle(coarseOrigin([0, 0, 0]))).toEqual([0, 0, 0]);
+		expect(middle(coarseOrigin([1079, 601, -625]))).toEqual([1024, 640, -640]);
+		expect(coarseOrigin([1079, 601, -625]).every((v) => v % SKY_COARSE_CELL === 0)).toBe(true);
+	});
+
+	it("move only once the eye crosses half a step", () => {
+		const at = coarseOrigin([10, 10, 10]);
+		expect(coarseOrigin([SKY_COARSE_SNAP / 2 - 1, 10, -SKY_COARSE_SNAP / 2 + 1])).toEqual(at);
+		expect(coarseOrigin([SKY_COARSE_SNAP / 2 + 1, 10, 10])).not.toEqual(at);
 	});
 });

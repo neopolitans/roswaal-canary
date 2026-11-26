@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.130",
+		date: "2026-11-26",
+		headline: "Ambient lighting's Grid reaches 768 studs.",
+		changed: [
+			"**Ambient lighting on Grid** reads coarser 16-stud cells past the 4-stud ones, out to 768 studs round the camera, in place of the sky's maps; they are worked out again only when parts move or the camera moves on 128 studs.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.129",
 		date: "2026-11-26",
 		headline: "Ambient lighting from the lighting cells, on a tablet.",

@@ -340,7 +340,7 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Ambient lighting",
 				help: "Where the sky's light reaches, from cells or every pixel.",
 				detail:
-					"How much of the sky each surface sees: OutdoorAmbient and the sky's light reach what the sky does, and rooms closed from it get Ambient alone. Grid reads it from the lighting cells, 4 studs a side round the camera, as Studio holds its own, and past them four of the sky's maps a tap each, far fewer reads a pixel: the saving is largest on a tablet at Native. Realtime works it out at every pixel from eight of the sky's maps, sharper past the cells. Automatic is Grid on a touch screen and Realtime elsewhere.",
+					"How much of the sky each surface sees: OutdoorAmbient and the sky's light reach what the sky does, and rooms closed from it get Ambient alone. Grid reads it from the lighting cells, 4 studs a side round the camera, as Studio holds its own, then from cells 16 studs a side out to 768 studs, and past those four of the sky's maps a tap each: far fewer reads a pixel, the saving largest on a tablet at Native. Realtime works it out at every pixel from eight of the sky's maps, sharper past the cells. Automatic is Grid on a touch screen and Realtime elsewhere.",
 				type: "choice",
 				default: "auto",
 				choices: VIEWPORT_AMBIENT_LIGHTING,

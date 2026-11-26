@@ -147,6 +147,9 @@ import {
 	SKY_BLOCK,
 	SKY_CELL,
 	SKY_CELLS,
+	SKY_COARSE_CELL,
+	SKY_COARSE_CELLS,
+	coarseOrigin,
 	SKY_GAIN,
 	SKY_LAYERS,
 	SKY_LEAK,
@@ -603,7 +606,7 @@ fn has(bit: u32) -> bool { return (FEATURES & bit) != 0u && (u32(u.debug.y) & bi
 // Then the near maps' views, their vec4 and their box: see nearSkyInto.
 // nearSet.x: how many layers on the near maps the shaders read are, 0 or
 // SKY_VIEWS: their other set is drawn a few a frame, then read (nearFillStep).
-struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f, nearSet: vec4f };
+struct SkyU { views: array<mat4x4f, 17>, info: vec4f, near: vec4f, nearAt: vec4f, probeAt: vec4f, nearSet: vec4f, coarse: vec4f };
 @group(0) @binding(6) var skyMaps: texture_depth_2d_array;
 @group(0) @binding(7) var skyCompare: sampler_comparison;
 @group(0) @binding(8) var<uniform> skyU: SkyU;
@@ -966,14 +969,36 @@ fn heat(i: VOut) -> f32 {
 @group(0) @binding(14) var skyCells: texture_3d<f32>;
 @group(0) @binding(15) var skyCellSampler: sampler;
 fn cellOrigin() -> vec3f { return skyU.nearAt.xyz - vec3f(${(SKY_CELLS[0] * SKY_CELL) / 2}.0, ${(SKY_CELLS[1] * SKY_CELL) / 2}.0, ${(SKY_CELLS[2] * SKY_CELL) / 2}.0); }
+// Ambient lighting's Grid past the lighting cells: the coarse cells (see
+// SKY_COARSE_CELL, skyU.coarse their first corner, w they are filled), easing
+// to the maps a tap each at their edge.
+@group(0) @binding(25) var skyCoarse: texture_3d<f32>;
+fn skyFar(p: vec3f, n: vec3f) -> f32 {
+	if (skyU.coarse.w < 0.5) { return skyVisibilityMapsAt(p, n, true); }
+	let uvw = (p + n * ${SKY_COARSE_CELL / 2}.0 - skyU.coarse.xyz) / vec3f(${SKY_COARSE_CELLS[0] * SKY_COARSE_CELL}.0, ${SKY_COARSE_CELLS[1] * SKY_COARSE_CELL}.0, ${SKY_COARSE_CELLS[2] * SKY_COARSE_CELL}.0);
+	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) { return skyVisibilityMapsAt(p, n, true); }
+	let seen = textureSampleLevel(skyCoarse, skyCellSampler, vec3f(uvw.x, uvw.z, uvw.y), 0.0).r;
+	let edge = min(min(uvw.x, 1.0 - uvw.x), min(min(uvw.y, 1.0 - uvw.y), min(uvw.z, 1.0 - uvw.z)));
+	let k = smoothstep(0.0, 0.03, edge);
+	if (k >= 1.0) { return seen; }
+	return mix(skyVisibilityMapsAt(p, n, true), seen, k);
+}
 // How much of the sky reaches p: the maps', and at least what the lighting
 // cells round it see, blended between their middles, as Studio's lighting is.
 fn skyVisibility(p: vec3f, n: vec3f) -> f32 {
 	let cheap = has(${FEATURE_BIT.skyGrid}u);
-	if (!has(${FEATURE_BIT.leak}u) || skyU.near.w < 0.5) { return skyVisibilityMapsAt(p, n, cheap); }
+	// Thin walls block sky: the maps, a tap each in Grid; the cells let it through.
+	if (!has(${FEATURE_BIT.leak}u)) { return skyVisibilityMapsAt(p, n, cheap); }
+	if (skyU.near.w < 0.5) {
+		if (cheap) { return skyFar(p, n); }
+		return skyVisibilityMapsAt(p, n, false);
+	}
 	// Read half a cell out from the face, where the light it gathers is.
 	let uvw = (p + n * ${SKY_CELL / 2}.0 - cellOrigin()) / vec3f(${SKY_CELLS[0] * SKY_CELL}.0, ${SKY_CELLS[1] * SKY_CELL}.0, ${SKY_CELLS[2] * SKY_CELL}.0);
-	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) { return skyVisibilityMapsAt(p, n, cheap); }
+	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) {
+		if (cheap) { return skyFar(p, n); }
+		return skyVisibilityMapsAt(p, n, false);
+	}
 	let seen = textureSampleLevel(skyCells, skyCellSampler, vec3f(uvw.x, uvw.z, uvw.y), 0.0).r * ${SKY_LEAK.toFixed(3)};
 	// Studio's sky light is its cells', blended between their middles, so a
 	// beam overhead casts no sharp sky shadow: the cells' alone, then, easing
@@ -983,7 +1008,8 @@ fn skyVisibility(p: vec3f, n: vec3f) -> f32 {
 	// Grid eases over a narrower band: the maps and the cells both read there.
 	let k = smoothstep(0.0, select(0.08, 0.03, cheap), edge);
 	if (k >= 1.0) { return seen; }
-	return mix(skyVisibilityMapsAt(p, n, cheap), seen, k);
+	if (cheap) { return mix(skyFar(p, n), seen, k); }
+	return mix(skyVisibilityMapsAt(p, n, false), seen, k);
 }
 // A lighting cell: the share of the sky its middle sees, a slice of cells a draw.
 struct CellOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) slice: u32 };
@@ -1014,6 +1040,12 @@ struct CellOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) 
 // its 26 neighbours', read back. Eight slices a draw, each its own target.
 fn cellOwn(x: f32, y: f32, z: f32) -> vec4f {
 	let p = cellOrigin() + (vec3f(x, y, z) + 0.5) * ${SKY_CELL}.0;
+	return vec4f(skyVisibilityMaps(p, vec3f(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
+}
+// A coarse cell (see SKY_COARSE_CELL): the share of the sky its middle sees, from every map and tap.
+@fragment fn fsCoarse(c: CellOut) -> @location(0) vec4f {
+	let cell = vec3f(floor(c.pos.x), f32(c.slice), floor(c.pos.y));
+	let p = skyU.coarse.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
 	return vec4f(skyVisibilityMaps(p, vec3f(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
 }
 struct Cells8 { @location(0) a: vec4f, @location(1) b: vec4f, @location(2) c: vec4f, @location(3) d: vec4f, @location(4) e: vec4f, @location(5) f: vec4f, @location(6) g: vec4f, @location(7) h: vec4f };
@@ -2803,6 +2835,7 @@ export class WebGpuView implements ViewRenderer {
 				{ binding: 22, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } },
 				{ binding: 23, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } },
 				{ binding: 24, visibility: STAGE.FRAGMENT, sampler: {} },
+				{ binding: 25, visibility: STAGE.FRAGMENT, texture: { viewDimension: "3d" } },
 			],
 		});
 		this.layout = layout;
@@ -2819,6 +2852,21 @@ export class WebGpuView implements ViewRenderer {
 			}),
 		);
 		this.cellSampler = d.createSampler({ magFilter: "linear", minFilter: "linear" });
+		// The coarse cells, two, as the lighting cells: see updateCoarse.
+		this.coarse = [0, 1].map(() =>
+			d.createTexture({
+				size: [SKY_COARSE_CELLS[0], SKY_COARSE_CELLS[2], SKY_COARSE_CELLS[1]],
+				dimension: "3d",
+				format: "r8unorm",
+				usage: TEXTURE.TEXTURE_BINDING | TEXTURE.RENDER_ATTACHMENT,
+			}),
+		);
+		this.pipeline((p) => (this.coarsePipe = p), {
+			layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
+			vertex: { module, entryPoint: "vsCell" },
+			fragment: { module, entryPoint: "fsCoarse", targets: [{ format: "r8unorm" }] },
+			primitive: { topology: "triangle-list" },
+		});
 		this.pipeline((p) => (this.cellPipe = p), {
 			layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
 			vertex: { module, entryPoint: "vsCell" },
@@ -4351,6 +4399,9 @@ fn at(c: vec2i) -> u32 {
 		// as when the camera moves: a still camera draws them only once.
 		this.drawCascades(encoder, camera, partsMoved || this.clock !== null);
 		encoder = this.cut(encoder, "shadows");
+		// Not in a frame that drew a near map's share, unless every map was drawn.
+		if ((!nearStep || mapsDue) && this.updateCoarse(encoder, camera, partsMoved))
+			encoder = this.cut(encoder, "skyCells");
 		const whole = this.fillLightGrid(encoder, camera.eye, !nearStep || mapsDue);
 		encoder = this.cut(encoder, "lightGrid");
 		// The parts moved or the light changed: the cube shows them again. Not
@@ -5905,6 +5956,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 				{ binding: 19, resource: shine.createView() },
 				{ binding: 20, resource: facing.createView() },
 				...this.gridEntries(),
+				{ binding: 25, resource: this.coarse[this.coarseRead].createView({ dimension: "3d" }) },
 			],
 		});
 	}
@@ -6842,6 +6894,63 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		this.rebind();
 	}
 
+	// -- the coarse cells: Ambient lighting's Grid past the lighting cells ---------------
+
+	private coarse: GPUTexture[] = [];
+	/** Which of the two the shaders read; the other is filled. */
+	private coarseRead = 0;
+	private coarsePipe?: GPURenderPipeline;
+	/** Their first corner, and w 1 once filled for Grid: the shaders' skyU.coarse. */
+	private coarseAt = new Float32Array(4);
+
+	/** The coarse cells, again where the parts moved or the camera crossed a step; dropped outside Grid. */
+	private updateCoarse(encoder: GPUCommandEncoder, camera: Camera, partsMoved: boolean): boolean {
+		const want =
+			this.ambientGrid && !!this.coarsePipe && featureOn(this.render.features, "skyShadows");
+		if (!want) {
+			if (this.coarseAt[3] > 0.5) {
+				this.coarseAt[3] = 0;
+				this.writeCoarseAt();
+			}
+			return false;
+		}
+		const origin = coarseOrigin(camera.eye);
+		const moved = origin.some((v, a) => v !== this.coarseAt[a]);
+		if (!partsMoved && !moved && this.coarseAt[3] > 0.5) return false;
+		this.coarseAt.set([...origin, 1]);
+		this.writeCoarseAt();
+		// Into the cells not read, a slice a pass, then read.
+		const target = this.coarse[1 - this.coarseRead];
+		const view = target.createView({ dimension: "3d" });
+		for (let y = 0; y < SKY_COARSE_CELLS[1]; y++) {
+			const pass = encoder.beginRenderPass({
+				timestampWrites: this.stamp(null),
+				colorAttachments: [
+					{
+						view,
+						depthSlice: y,
+						loadOp: "clear",
+						storeOp: "store",
+						clearValue: { r: 1, g: 0, b: 0, a: 1 },
+					},
+				],
+			});
+			pass.setPipeline(this.coarsePipe!);
+			pass.setBindGroup(0, this.bind);
+			pass.draw(3, 1, 0, y);
+			pass.end();
+		}
+		this.coarseRead = 1 - this.coarseRead;
+		this.rebind();
+		return true;
+	}
+
+	/** skyU.coarse, in both sky blocks: the one read, and the one the near maps are filled with. */
+	private writeCoarseAt(): void {
+		for (const b of [this.skyUniform, this.skyUniformNext])
+			this.device.queue.writeBuffer(b, SKY_BLOCK * 4 + 32, this.coarseAt);
+	}
+
 	// -- sky visibility: see skyBlock ------------------------------------------------
 
 	private skyMaps!: GPUTexture;
@@ -6944,7 +7053,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		// see SkyU. The second, the block for the near maps being drawn, which
 		// their cells are found from.
 		const skyBuffer = () =>
-			d.createBuffer({ size: SKY_BLOCK * 4 + 32, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+			d.createBuffer({ size: SKY_BLOCK * 4 + 48, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
 		this.skyUniform = skyBuffer();
 		this.skyUniformNext = skyBuffer();
 		const layout = d.createBindGroupLayout({

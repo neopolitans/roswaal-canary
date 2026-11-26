@@ -131,6 +131,9 @@ import {
 	SKY_BLOCK,
 	SKY_CELL,
 	SKY_CELLS,
+	SKY_COARSE_CELL,
+	SKY_COARSE_CELLS,
+	coarseOrigin,
 	SKY_GAIN,
 	SKY_LAYERS,
 	SKY_LEAK,
@@ -161,6 +164,8 @@ import {
  * whether the light grid is read (see WebGl2View.mainFor).
  */
 const LIT_GRID = 1 << 28;
+/** The coarse cells' texture unit, past every other: see SKY_COARSE_CELL. */
+const COARSE_UNIT = 28;
 
 const COMMON = `
 uniform vec4 L[11];
@@ -534,14 +539,30 @@ float skyVisibilityMapsAt(vec3 p, vec3 n, bool cheap) {
 }
 // Every direction, every tap: the lighting cells are filled from this.
 float skyVisibilityMaps(vec3 p, vec3 n) { return skyVisibilityMapsAt(p, n, false); }
+// Ambient lighting's Grid past the lighting cells: the coarse cells (see
+// SKY_COARSE_CELL), easing to the maps a tap each at their edge; w, they are filled.
+uniform highp sampler3D skyCoarse;
+uniform vec4 skyCoarseAt;
+float skyFar(vec3 p, vec3 n) {
+	if (skyCoarseAt.w < 0.5) return skyVisibilityMapsAt(p, n, true);
+	vec3 uvw = (p + n * ${SKY_COARSE_CELL / 2}.0 - skyCoarseAt.xyz) / vec3(${SKY_COARSE_CELLS[0] * SKY_COARSE_CELL}.0, ${SKY_COARSE_CELLS[1] * SKY_COARSE_CELL}.0, ${SKY_COARSE_CELLS[2] * SKY_COARSE_CELL}.0);
+	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return skyVisibilityMapsAt(p, n, true);
+	float seen = texture(skyCoarse, vec3(uvw.x, uvw.z, uvw.y)).r;
+	float edge = min(min(uvw.x, 1.0 - uvw.x), min(min(uvw.y, 1.0 - uvw.y), min(uvw.z, 1.0 - uvw.z)));
+	float k = smoothstep(0.0, 0.03, edge);
+	if (k >= 1.0) return seen;
+	return mix(skyVisibilityMapsAt(p, n, true), seen, k);
+}
 // The lighting cells round the near maps' centre, as WebGpuView's skyVisibility reads them.
 uniform highp sampler3D skyCells;
 vec3 cellOrigin() { return skyNearAt.xyz - vec3(${(SKY_CELLS[0] * SKY_CELL) / 2}.0, ${(SKY_CELLS[1] * SKY_CELL) / 2}.0, ${(SKY_CELLS[2] * SKY_CELL) / 2}.0); }
 float skyVisibility(vec3 p, vec3 n) {
 	bool cheap = has(${FEATURE_BIT.skyGrid});
-	if (!has(${FEATURE_BIT.leak}) || skyNear.w < 0.5) return skyVisibilityMapsAt(p, n, cheap);
+	// Thin walls block sky: the maps, a tap each in Grid; the cells let it through.
+	if (!has(${FEATURE_BIT.leak})) return skyVisibilityMapsAt(p, n, cheap);
+	if (skyNear.w < 0.5) return cheap ? skyFar(p, n) : skyVisibilityMapsAt(p, n, false);
 	vec3 uvw = (p + n * ${SKY_CELL / 2}.0 - cellOrigin()) / vec3(${SKY_CELLS[0] * SKY_CELL}.0, ${SKY_CELLS[1] * SKY_CELL}.0, ${SKY_CELLS[2] * SKY_CELL}.0);
-	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return skyVisibilityMapsAt(p, n, cheap);
+	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return cheap ? skyFar(p, n) : skyVisibilityMapsAt(p, n, false);
 	float seen = texture(skyCells, vec3(uvw.x, uvw.z, uvw.y)).r * ${SKY_LEAK.toFixed(3)};
 	// As WebGpuView's: the cells' alone, easing to the maps at their edge,
 	// which are read only where they show.
@@ -549,7 +570,7 @@ float skyVisibility(vec3 p, vec3 n) {
 	// Grid eases over a narrower band: the maps and the cells both read there.
 	float k = smoothstep(0.0, cheap ? 0.03 : 0.08, edge);
 	if (k >= 1.0) return seen;
-	return mix(skyVisibilityMapsAt(p, n, cheap), seen, k);
+	return mix(cheap ? skyFar(p, n) : skyVisibilityMapsAt(p, n, false), seen, k);
 }
 // The sun's shadow near the camera, as WebGpuView's cascadeSees.
 uniform highp sampler2DArrayShadow sunMaps;
@@ -1157,6 +1178,19 @@ out vec4 o;
 void main() {
 	vec3 cell = vec3(floor(gl_FragCoord.x) - 1.0, cellSlice - 1.0, floor(gl_FragCoord.y) - 1.0);
 	vec3 p = cellOrigin() + (cell + 0.5) * ${SKY_CELL}.0;
+	o = vec4(skyVisibilityMaps(p, vec3(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
+}`;
+/** A coarse cell (see SKY_COARSE_CELL): the share of the sky its middle sees, from every map and tap. */
+const FS_COARSE = `#version 300 es
+precision highp float;
+precision highp int;
+${COMMON}
+${SKY_VIS}
+uniform float cellSlice;
+out vec4 o;
+void main() {
+	vec3 cell = vec3(floor(gl_FragCoord.x), cellSlice, floor(gl_FragCoord.y));
+	vec3 p = skyCoarseAt.xyz + (cell + 0.5) * ${SKY_COARSE_CELL}.0;
 	o = vec4(skyVisibilityMaps(p, vec3(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
 }`;
 const FS_CELL_AROUND = `#version 300 es
@@ -2737,6 +2771,77 @@ export class WebGl2View implements ViewRenderer {
 		gl.activeTexture(gl.TEXTURE0);
 	}
 
+	// -- the coarse cells: Ambient lighting's Grid past the lighting cells -------------
+
+	/** Their first corner, and w 1 once filled for Grid: the shaders' skyCoarseAt. */
+	private coarseAt = new Float32Array(4);
+	private coarseTex: WebGLTexture | null = null;
+	private coarseProg?: Program;
+	/** Whether this device has a unit for them (COARSE_UNIT); without, Grid reads the maps a tap each. */
+	private coarseAble = false;
+
+	/** The coarse cells, again where the parts moved or the camera crossed a step; dropped outside Grid. */
+	private updateCoarse(camera: Camera, partsMoved: boolean): boolean {
+		const want =
+			this.ambientGrid && this.coarseAble && featureOn(this.render.features, "skyShadows");
+		if (!want) {
+			this.coarseAt[3] = 0;
+			return false;
+		}
+		const origin = coarseOrigin(camera.eye);
+		const moved = origin.some((v, a) => v !== this.coarseAt[a]);
+		if (!partsMoved && !moved && this.coarseAt[3] > 0.5) return false;
+		this.coarseAt.set([...origin, 1]);
+		this.fillCoarse(camera);
+		return true;
+	}
+
+	/** Each coarse cell from the maps as drawn, a slice a draw, into COARSE_UNIT's texture. */
+	private fillCoarse(camera: Camera): void {
+		const gl = this.gl;
+		if (!this.coarseProg) {
+			this.coarseProg = this.link(VS_CELL, FS_COARSE);
+			this.coarseTex = gl.createTexture()!;
+			gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
+			gl.bindTexture(gl.TEXTURE_3D, this.coarseTex);
+			gl.texStorage3D(
+				gl.TEXTURE_3D,
+				1,
+				gl.R8,
+				SKY_COARSE_CELLS[0],
+				SKY_COARSE_CELLS[2],
+				SKY_COARSE_CELLS[1],
+			);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+			for (const wrap of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R])
+				gl.texParameteri(gl.TEXTURE_3D, wrap, gl.CLAMP_TO_EDGE);
+		}
+		// Not bound while drawn into: the fill reads only the maps.
+		gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
+		gl.bindTexture(gl.TEXTURE_3D, null);
+		gl.activeTexture(gl.TEXTURE0);
+		this.use(this.coarseProg, camera, false);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.cellFbo);
+		gl.disable(gl.DEPTH_TEST);
+		gl.disable(gl.BLEND);
+		gl.bindVertexArray(this.cellVao);
+		const slice = this.loc(this.coarseProg.program, "cellSlice");
+		gl.viewport(0, 0, SKY_COARSE_CELLS[0], SKY_COARSE_CELLS[2]);
+		for (let y = 0; y < SKY_COARSE_CELLS[1]; y++) {
+			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.coarseTex, 0, y);
+			gl.uniform1f(slice, y);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+		}
+		gl.bindVertexArray(null);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.viewport(0, 0, this.width, this.height);
+		gl.enable(gl.DEPTH_TEST);
+		gl.activeTexture(gl.TEXTURE0 + COARSE_UNIT);
+		gl.bindTexture(gl.TEXTURE_3D, this.coarseTex);
+		gl.activeTexture(gl.TEXTURE0);
+	}
+
 	// -- occlusion: the solid parts' distances, small, read back a frame late -------
 
 	private far: {
@@ -3137,6 +3242,8 @@ export class WebGl2View implements ViewRenderer {
 		this.lampAble =
 			gl.getExtension("EXT_color_buffer_float") !== null &&
 			(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number) >= 28;
+		this.coarseAble =
+			(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) as number) > COARSE_UNIT;
 		this.makeReflections();
 		this.makeAntialias();
 		if (clip) this.pre = this.link(VS, FS_DEPTH);
@@ -4654,7 +4761,9 @@ export class WebGl2View implements ViewRenderer {
 			| "cells"
 			| "cascViews"
 			| "cascFar"
-			| "cascTexel",
+			| "cascTexel"
+			| "coarse"
+			| "coarseAt",
 			WebGLUniformLocation | null
 		>
 	>();
@@ -4674,6 +4783,8 @@ export class WebGl2View implements ViewRenderer {
 				lightIndex: gl.getUniformLocation(program, "lightIndex"),
 				sunMaps: gl.getUniformLocation(program, "sunMaps"),
 				cells: gl.getUniformLocation(program, "skyCells"),
+				coarse: gl.getUniformLocation(program, "skyCoarse"),
+				coarseAt: gl.getUniformLocation(program, "skyCoarseAt"),
 				cascViews: gl.getUniformLocation(program, "cascViews"),
 				cascFar: gl.getUniformLocation(program, "cascFar"),
 				cascTexel: gl.getUniformLocation(program, "cascTexel"),
@@ -4984,6 +5095,8 @@ export class WebGl2View implements ViewRenderer {
 			gl.uniform1i(sky.lightIndex, 9);
 			gl.uniform1i(sky.sunMaps, 10);
 			gl.uniform1i(sky.cells, 13);
+			gl.uniform1i(sky.coarse, COARSE_UNIT);
+			gl.uniform4fv(sky.coarseAt, this.coarseAt);
 			const n = SUN_CASCADES.length * 16;
 			gl.uniformMatrix4fv(sky.cascViews, false, this.cascadeLast.subarray(0, n));
 			gl.uniform4fv(sky.cascFar, this.cascadeLast.subarray(n, n + 4));
@@ -5309,6 +5422,8 @@ export class WebGl2View implements ViewRenderer {
 			this.fillCells(camera);
 			clock?.mark("skyCells");
 		}
+		// The coarse cells come after the lighting cells, whose framebuffer and draw they share.
+		if (this.cellFbo && this.updateCoarse(camera, partsMoved)) clock?.mark("skyCells");
 		// Not a whole cascade in a frame that drew the near maps: the next.
 		if (this.fillLightGrid(camera, !nearDrawn)) clock?.mark("lightGrid");
 		// The parts moved or the light changed: the cube shows them again.

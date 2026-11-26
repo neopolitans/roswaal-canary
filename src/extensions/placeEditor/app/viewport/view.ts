@@ -418,6 +418,28 @@ export const SKY_REACH = 116;
 export const SKY_CELL = 4;
 export const SKY_CELLS = [96, 32, 96] as const;
 export const SKY_LEAK = 1;
+/**
+ * Ambient lighting's Grid past the lighting cells: coarser cells,
+ * SKY_COARSE_CELL studs a side, SKY_COARSE_CELLS across x, y and z, round the
+ * camera, each the share of the sky its middle sees. Read where the lighting
+ * cells end, out to 768 studs, rather than the sky's maps; filled again only
+ * when the place's parts move or the camera crosses SKY_COARSE_SNAP studs.
+ */
+export const SKY_COARSE_CELL = 16;
+export const SKY_COARSE_CELLS = [96, 32, 96] as const;
+export const SKY_COARSE_SNAP = 128;
+
+/** The coarse cells' first corner for an eye: their middle on the SKY_COARSE_SNAP grid nearest it. */
+export function coarseOrigin(eye: readonly number[]): [number, number, number] {
+	const at = (v: number, cells: number) =>
+		Math.round(v / SKY_COARSE_SNAP) * SKY_COARSE_SNAP - (cells * SKY_COARSE_CELL) / 2;
+	return [
+		at(eye[0], SKY_COARSE_CELLS[0]),
+		at(eye[1], SKY_COARSE_CELLS[1]),
+		at(eye[2], SKY_COARSE_CELLS[2]),
+	];
+}
+
 /** See nearSkyCentre: how far the camera goes from the near maps' centre before they move, how far ahead of it they go, and the grid they keep to. Lead plus a snap stays within the reach. */
 export const SKY_NEAR_RECENTRE = 64;
 export const SKY_NEAR_LEAD = 56;

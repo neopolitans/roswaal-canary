@@ -2719,9 +2719,10 @@ export class ViewportController {
 		};
 		let done = 0;
 		let lastFrame = Number.NaN;
-		// The GPU's errors, put to what was being drawn before they were seen.
-		let errorsSeen = this.view.gpuErrors?.().length ?? 0;
-		let drawing = "Starting";
+		// The GPU's errors, put to what was being drawn before they were seen:
+		// those from before the run too, as a view builds some shaders once.
+		let errorsSeen = 0;
+		let drawing = "Before the benchmark";
 		const noteErrors = () => {
 			const all = this.view?.gpuErrors?.() ?? [];
 			for (const message of all.slice(errorsSeen))
@@ -3692,7 +3693,8 @@ export class ViewportController {
 		};
 		// What did not settle in time, and the GPU's errors from here on.
 		const stalls: string[] = [];
-		const errorsFrom = this.view?.gpuErrors?.().length ?? 0;
+		// Those from before it too: a view builds some shaders once.
+		const errorsFrom = 0;
 		const settle = async () => {
 			if (!(await this.viewSettled()))
 				stalls.push(

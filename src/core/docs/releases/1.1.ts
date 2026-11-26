@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.141",
+		date: "2026-11-26",
+		headline: "A benchmark says where Highlights stop.",
+		added: [
+			"**A benchmark or profile reports GPU errors from before it began** as well, and on WebGL2 whether Highlights drew nothing, checked once when a place's Highlights are first drawn.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.140",
 		date: "2026-11-26",
 		headline: "WebGL2 errors in a benchmark's results.",

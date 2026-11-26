@@ -4061,6 +4061,7 @@ export class WebGl2View implements ViewRenderer {
 
 	private setHighlights(list: readonly SceneHighlight[] | undefined): void {
 		const gl = this.gl;
+		this.hlChecked = "mask";
 		if (this.hl) gl.deleteTexture(this.hl.rows);
 		this.hl = null;
 		if (!list || list.length === 0) return;
@@ -4214,6 +4215,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.disable(gl.BLEND);
 		gl.enable(gl.CULL_FACE);
 		const lists = [...this.hlDraws, ...(seeThrough ? this.ghosts : [])];
+		if (lists.length === 0) this.noteHighlightCheck("no parts to draw into the mask");
 		for (const onTop of [false, true]) {
 			if (!(onTop ? hl.onTop : hl.occluded)) continue;
 			gl.uniform4f(
@@ -4238,6 +4240,11 @@ export class WebGl2View implements ViewRenderer {
 			gl.bindVertexArray(null);
 		}
 		gl.bindTexture(gl.TEXTURE_2D, null);
+		if (this.hlChecked === "mask") {
+			const n = this.countedPixels(w, h);
+			if (n === 0) this.noteHighlightCheck(`nothing drawn into the mask (${lists.length} draws)`);
+			this.hlChecked = "rows";
+		}
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(this.nearer);
 		gl.depthMask(true);
@@ -4271,6 +4278,11 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniform1i(this.loc(progs.rows, "mask"), 0);
 		gl.uniform1f(this.loc(progs.rows, "wide"), wide);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		if (this.hlChecked === "rows") {
+			if (this.countedPixels(this.width, this.height) === 0)
+				this.noteHighlightCheck("the mask drawn, but nothing in the outline's rows");
+			this.hlChecked = "done";
+		}
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.useProgram(progs.over);
 		gl.activeTexture(gl.TEXTURE12);
@@ -5476,6 +5488,35 @@ export class WebGl2View implements ViewRenderer {
 	private seenErrors: string[] = [];
 	/** Highlights' shaders did not build: they are not tried again. */
 	private hlFailed = false;
+	/**
+	 * The first frame a place's Highlights are drawn in, what their mask and
+	 * the outline's rows came to is read back, once: an iPad's WebGL2 drew
+	 * neither fill nor outline and said no error (1.1.0-canary.141).
+	 */
+	private hlChecked: "mask" | "rows" | "done" = "done";
+
+	private noteHighlightCheck(what: string): void {
+		this.noteGpuError(`Highlights: ${what}`);
+		this.hlChecked = "done";
+	}
+
+	/**
+	 * The bound target's pixels not 0, of every 8th row: integer targets are
+	 * read as RGBA_INTEGER, a row at a time to keep the copy small.
+	 */
+	private countedPixels(w: number, h: number): number {
+		const gl = this.gl;
+		const row = new Uint32Array(w * 4);
+		let n = 0;
+		for (let y = 0; y < h; y += 8) {
+			gl.readPixels(0, y, w, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT, row);
+			for (let x = 0; x < w; x++) if (row[x * 4] !== 0) n++;
+		}
+		const e = gl.getError();
+		if (e !== gl.NO_ERROR)
+			this.noteGpuError(`Highlights' check could not read back (${glName(gl, e)})`);
+		return n;
+	}
 
 	gpuErrors(): readonly string[] {
 		const gl = this.gl;

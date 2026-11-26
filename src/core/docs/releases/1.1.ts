@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.123",
+		date: "2026-11-26",
+		headline: "Benchmark settings in a line each, and room on an iPad Mini.",
+		changed: [
+			"**Settings, Benchmark** says each run in a line, as Graphics does, with an i for the rest.",
+			"**Settings on an iPad Mini** puts each control under its name, so the words have the page's width.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.122",
 		date: "2026-11-26",
 		headline: "WebGL2 benchmark times as the screen shows them.",

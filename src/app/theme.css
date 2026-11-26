@@ -14290,6 +14290,21 @@ a.docs-minor-row .aside {
 	min-width: 0;
 	min-height: 0;
 	background: color-mix(in srgb, var(--bg-canvas) 14%, var(--bg-panel));
+	container: settings-main / inline-size;
+}
+
+/* A page too narrow for a name beside a 260px control -- an iPad Mini's,
+   with the list of pages beside it -- puts the control below, at full
+   width, as a phone's screen does. */
+@container settings-main (max-width: 560px) {
+	.settings-main .setting {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 8px;
+	}
+
+	.settings-main .setting-control {
+		justify-content: flex-start;
+	}
 }
 
 .settings-close {

@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.85.1",
+	version: "0.86.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.86.0",
+			roswaal: "1.1.0-canary.138",
+			date: "2026-11-26",
+			text: "TOUCH_LIGHT_CELL is 4: Automatic light grid on a touch screen is 4-stud cells for either style, as an iPad Mini holds 60 Hz at Native with them since Ambient lighting's Grid.",
+		},
 		{
 			version: "0.85.1",
 			roswaal: "1.1.0-canary.137",

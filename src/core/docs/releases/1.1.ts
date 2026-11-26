@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.138",
+		date: "2026-11-26",
+		headline: "The light grid at 4 studs on a tablet.",
+		changed: [
+			"**On a touch screen, Light object grid Automatic is 4-stud cells**, not 8: an iPad Mini holds 60 Hz at Native with them, and a SpotLight's or SurfaceLight's light spreads half as far past its cone.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.137",
 		date: "2026-11-26",
 		headline: "The light grid keeps a light off what faces away from it.",

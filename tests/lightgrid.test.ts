@@ -33,7 +33,7 @@ describe("the light grid", () => {
 
 	it("is 8-stud cells when Automatic on a touch screen, whatever the style; as set otherwise", () => {
 		expect(lightGridCell("auto", true)).toBe(TOUCH_LIGHT_CELL);
-		expect(lightGridCell(undefined, true)).toBe(8);
+		expect(lightGridCell(undefined, true)).toBe(4);
 		expect(lightGridCell("4", true)).toBe(4);
 		expect(lightGridCell("off", true)).toBeNull();
 	});

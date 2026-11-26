@@ -943,13 +943,13 @@ export const LIGHT_GRID_CELLS = 32;
 export const LIGHT_GRID_CASCADES = 3;
 
 /**
- * Automatic's grid on a touch screen, whatever the place's style: 8-stud
- * cells. A tablet at Native could not keep 60 Hz with Soft's 4-stud cells,
- * which fill four times as many cells as the camera moves, or with
- * Realistic's light worked out at every pixel; at 8 studs an iPad Mini (A15)
- * did (25 Nov 2026).
+ * Automatic's grid on a touch screen, whatever the place's style: 4-stud
+ * cells, Soft's own. 8 from 25 Nov 2026, when a tablet at Native could not
+ * keep 60 Hz at 4; since Ambient lighting's Grid an iPad Mini (A15) holds 60
+ * at 4 (26 Nov 2026), and 8-stud cells spread a SpotLight's or SurfaceLight's
+ * light twice as far past its cone.
  */
-export const TOUCH_LIGHT_CELL = 8;
+export const TOUCH_LIGHT_CELL = 4;
 
 /**
  * The Light object grid setting's finest cell, in studs; null, off;

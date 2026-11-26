@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.121",
+		date: "2026-11-26",
+		headline: "Smoothness: a benchmark of the frames that reach the screen.",
+		added: [
+			"**Smoothness, on the Benchmark page**: the same scenes and movements, paced by the display as in use, with nothing on the GPU timed. Each station says the frames that reached the screen each second, the longest gap between two, and the refreshes that showed no new frame: how smooth it looks, where the benchmark says what it costs. Its results compare with another Smoothness run's.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.120",
 		date: "2026-11-26",
 		headline: "Less measuring while you move: light objects are set, and the depth path is measured once.",

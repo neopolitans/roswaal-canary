@@ -42,6 +42,7 @@ export function runBefore(run: BenchmarkResult): BenchmarkResult | null {
 				!run.ab &&
 				r.kind !== "pixels" &&
 				run.kind !== "pixels" &&
+				(r.measure === "shown") === (run.measure === "shown") &&
 				r.gpu === run.gpu &&
 				r.levels.some((l) => run.levels.some((m) => m.level === l.level)),
 		) ?? null

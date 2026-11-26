@@ -82,6 +82,7 @@ import {
 	type ProfileResult,
 	type StageFrame,
 	type StageSink,
+	shownFrames,
 	spread,
 	stageRows,
 	stagesTotal,
@@ -2446,6 +2447,8 @@ export class ViewportController {
 		phase: (name: string) => void,
 		only?: readonly string[],
 		busy = false,
+		/** A Smoothness run: paced by the display, nothing timed but the frames shown. */
+		shown = false,
 	): Promise<MovingRow[]> {
 		// Each motion by the clock, not by the frame: a drag of 720 px a second
 		// (12 a frame at 60), for MOVING_MS, so every device takes the same
@@ -2473,10 +2476,11 @@ export class ViewportController {
 			const frames: StageFrame[] = [];
 			const gpuFrames: StageFrame[] = [];
 			const was = view.redraws?.() ?? null;
-			view.setProfiling(
-				(each) => frames.push(each),
-				(each) => gpuFrames.push(each),
-			);
+			if (!shown)
+				view.setProfiling(
+					(each) => frames.push(each),
+					(each) => gpuFrames.push(each),
+				);
 			if (busy) {
 				await this.warmBusy(300);
 				// Two frames in flight cross the waited stages' sums: kept to the GPU's own.
@@ -2495,9 +2499,11 @@ export class ViewportController {
 				busy &&
 				(this.options.renderScale === "dynamic" || this.options.dynamicOptimization === true);
 			if (adapting) await this.busyFrames(MOVING_MOST, byClock, undefined, DYNAMIC_SETTLE_MS, true);
-			const times = busy
-				? await this.busyFrames(MOVING_MOST, byClock, undefined, MOVING_MS, adapting)
-				: await this.waitedFrames(MOVING_MOST, MOVING_MS, byClock);
+			const times = shown
+				? await this.shownFrameGaps(MOVING_MS, byClock)
+				: busy
+					? await this.busyFrames(MOVING_MOST, byClock, undefined, MOVING_MS, adapting)
+					: await this.waitedFrames(MOVING_MOST, MOVING_MS, byClock);
 			await view.settled();
 			await new Promise((r) => setTimeout(r, 50));
 			view.setProfiling(null);
@@ -2506,6 +2512,7 @@ export class ViewportController {
 				label,
 				...spread(times),
 				...(busy ? { median: steady(times) } : {}),
+				...(shown ? { shown: shownFrames(times) } : {}),
 				frames: times.length,
 				stages: stageRows(frames),
 				gpu: stageRows(gpuFrames, busy ? steady : undefined),
@@ -2626,13 +2633,16 @@ export class ViewportController {
 				]
 			: [{ want: null, pixels: run.kind === "pixels" && !run.ab }];
 		const passes = run.ab || run.kind === "pixels" ? 1 : (run.passes ?? 1);
-		const busy = run.measure === "busy";
+		// Smoothness: frames paced by the display, what reached the screen, nothing on the GPU timed.
+		const shown = run.kind === "smooth";
+		const busy = run.measure === "busy" && !shown;
+		this.quietTimers = shown;
 		const renderWas = this.state.render;
 		const base = run.features ?? renderWas.features;
 		if (run.features) this.setRender({ ...renderWas, features: run.features });
 		const switchedOff = FEATURES.filter((f) => !featureOn(base, f.key)).map((f) => f.label);
 		const timeStill = (label: string) =>
-			busy ? this.timeBusy(label, 60) : this.timeWaited(label, 60);
+			shown ? this.timeShown(label) : busy ? this.timeBusy(label, 60) : this.timeWaited(label, 60);
 		const variants = run.stations.reduce((n, s) => n + s.variants.length, 0) * passes;
 		const facts = this.view.deviceFacts();
 		const result: BenchmarkResult = {
@@ -2640,7 +2650,7 @@ export class ViewportController {
 			seed: run.seed,
 			kind: run.kind,
 			...(passes > 1 ? { passes } : {}),
-			...(busy ? { measure: "busy" as const } : {}),
+			...(shown ? { measure: "shown" as const } : busy ? { measure: "busy" as const } : {}),
 			...(switchedOff.length > 0 ? { switchedOff } : {}),
 			settings: {
 				...benchmarkSettings(options),
@@ -2765,7 +2775,7 @@ export class ViewportController {
 						lastFrame = still.median;
 						report(label, station, variant.label, "Stages");
 						if (!this.view) break;
-						const gpuFrames = await this.stageFrames(busy);
+						const gpuFrames = shown ? [] : await this.stageFrames(busy);
 						report(
 							label,
 							station,
@@ -2776,6 +2786,7 @@ export class ViewportController {
 							(name) => report(label, station, variant.label, name),
 							station.allMotions ? undefined : ["Orbit drag"],
 							busy,
+							shown,
 						);
 						rows.push({
 							n: station.n,
@@ -2823,6 +2834,7 @@ export class ViewportController {
 			}
 		} finally {
 			endStart(run.cancelled() ? "Benchmark stopped" : "Benchmark finished");
+			this.quietTimers = false;
 			this.set({ profiling: null });
 			this.view?.setProbe(null);
 			this.options = options;
@@ -3413,11 +3425,13 @@ export class ViewportController {
 		// benchmark, a profile or the Performance panel's graph; Automatic's
 		// level, which adds up time over many frames, from one in a few.
 		view.setTimers?.(
-			this.state.profiling !== null || this.frameWatchers > 0
-				? "every"
-				: this.auto !== null
-					? "sampled"
-					: "off",
+			this.quietTimers
+				? "off"
+				: this.state.profiling !== null || this.frameWatchers > 0
+					? "every"
+					: this.auto !== null
+						? "sampled"
+						: "off",
 		);
 		view.draw(camera, this.stillNext);
 		this.stillNext = false;
@@ -3860,6 +3874,44 @@ export class ViewportController {
 			scene: gpu?.scene ?? Number.NaN,
 			post: gpu?.post ?? Number.NaN,
 		});
+	}
+
+	/** A Smoothness run under way: nothing on the GPU is timed, as in use with nothing reading it. */
+	private quietTimers = false;
+
+	/**
+	 * Frames drawn as the display paces them, one in each requestAnimationFrame,
+	 * for `ms`, `step` before each: the gaps between them, as they reached the
+	 * screen. No timer, fence or read back: what a Smoothness run measures.
+	 */
+	private shownFrameGaps(ms: number, step?: () => void): Promise<number[]> {
+		return new Promise((resolve) => {
+			const view = this.view;
+			const stamps: number[] = [];
+			let from = Number.NaN;
+			const tick = (at: number) => {
+				if (this.view !== view || !view) {
+					resolve(stamps.slice(1).map((t, i) => t - stamps[i]));
+					return;
+				}
+				if (Number.isNaN(from)) from = at;
+				stamps.push(at);
+				step?.();
+				this.drawOnce(at);
+				if (at - from < ms) requestAnimationFrame(tick);
+				else resolve(stamps.slice(1).map((t, i) => t - stamps[i]));
+			};
+			requestAnimationFrame(tick);
+		});
+	}
+
+	/** A still frame as it reaches the screen: SHOWN_MS of frames paced by the display, after a short warm. */
+	private async timeShown(label: string): Promise<Timed> {
+		await this.view?.pipelinesReady();
+		this.view?.setProfiling(null);
+		await this.shownFrameGaps(300);
+		const gaps = await this.shownFrameGaps(SHOWN_MS);
+		return { label, ...spread(gaps), shown: shownFrames(gaps) };
 	}
 
 	/** Performance panel graphs showing: the GPU's passes are timed while any is. */
@@ -4615,6 +4667,8 @@ const PROFILE_BUDGET = 1500;
 const PROFILE_FEWEST = 8;
 /** How long each motion of a profile or benchmark runs: one second, as many frames as that takes. */
 const MOVING_MS = 1000;
+/** A Smoothness run's still frames, each station: long enough to catch an uneven refresh. */
+const SHOWN_MS = 1500;
 /** With Dynamic or Dynamic optimization on, how long a benchmark's motion lets them settle before it is timed. */
 const DYNAMIC_SETTLE_MS = 3000;
 /** A bound on those frames, for a display or GPU far beyond any yet. */

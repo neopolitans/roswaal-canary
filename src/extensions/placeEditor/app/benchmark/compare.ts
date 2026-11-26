@@ -153,6 +153,16 @@ export function compareRuns(before: BenchmarkResult, after: BenchmarkResult): Co
 				"One of these is an A/B run, which measures a switch rather than the stations: its own report says what the switch saves.",
 			],
 		};
+	// What reached the screen against what the GPU took: two different questions.
+	if ((before.measure === "shown") !== (after.measure === "shown"))
+		return {
+			before,
+			after,
+			levels: [],
+			warnings: [
+				"One of these is a Smoothness run, which measures the frames that reach the screen, and the other what the GPU takes: compare two of the same kind.",
+			],
+		};
 	// Another benchmark measures other scenes, or the same ones another way: no station compares.
 	if (before.benchmark !== after.benchmark)
 		return {

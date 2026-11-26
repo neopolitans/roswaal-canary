@@ -175,9 +175,12 @@ export interface BenchmarkResult {
 	 * still frame's `median` is the time between frames (Benchmark 2). Its
 	 * times are the mean of each set's middle 80%, not medians, since 1.1.0-canary.25:
 	 * a coarse clock (Safari's whole milliseconds) rounded every median.
+	 * "shown": a Smoothness run, frames paced by the display as in use and
+	 * nothing on the GPU timed; `median` is the gap between frames shown, and
+	 * each still frame and motion carries what reached the screen (`shown`).
 	 * Absent: one at a time, waited for (Benchmark 1).
 	 */
-	measure?: "busy";
+	measure?: "busy" | "shown";
 	release: string;
 	date: string;
 	renderer: string;
@@ -274,12 +277,54 @@ export function benchmarkSettings(options: object): Record<string, string> {
 	return out;
 }
 
+/**
+ * A Smoothness run's frames shown a second across its stations: the
+ * geometric mean of each station's still frames shown, as runScore's.
+ */
+export function shownScore(result: BenchmarkResult): number {
+	const rates = result.levels
+		.filter((l) => !l.pixels)
+		.flatMap((l) => l.stations.map((s) => s.still.shown?.fps ?? Number.NaN))
+		.filter((v) => Number.isFinite(v) && v > 0);
+	if (rates.length === 0) return Number.NaN;
+	return Math.exp(rates.reduce((a, v) => a + Math.log(v), 0) / rates.length);
+}
+
+/** What reached the screen, as a report's columns: frames a second, the longest gap, refreshes missed. */
+function shownColumns(t: { shown?: Timed["shown"] } | undefined): string {
+	const s = t?.shown;
+	if (!s) return `${"–".padStart(8)}${"–".padStart(9)}${"–".padStart(8)}`;
+	return `${s.fps.toFixed(1).padStart(8)}${msText(s.worst).padStart(9)}${String(s.missed).padStart(8)}`;
+}
+
+/** A Smoothness run's levels: a line a station, still and orbiting, and each motion where there are more. */
+function shownReport(result: BenchmarkResult): string[] {
+	const lines: string[] = [];
+	for (const level of result.levels) {
+		lines.push("");
+		lines.push(
+			`${level.label} · ${level.canvas.width}×${level.canvas.height} · ${level.antialias}`,
+		);
+		lines.push(`  ${"".padEnd(28)}${"Still".padStart(25)}${"Orbit".padStart(25)}`);
+		lines.push(
+			`  ${"Station".padEnd(28)}${["fps", "worst", "missed", "fps", "worst", "missed"].map((h, i) => h.padStart(i % 3 === 1 ? 9 : 8)).join("")}`,
+		);
+		for (const s of level.stations) {
+			const name = `${String(s.n).padStart(2)} ${s.name}${s.variant ? ` · ${s.variant}` : ""}`;
+			lines.push(`  ${name.padEnd(28)}${shownColumns(s.still)}${shownColumns(s.moving[0])}`);
+			for (const m of s.moving.length > 1 ? s.moving.slice(1) : [])
+				lines.push(`  ${`      ${m.label}`.padEnd(28)}${"".padStart(25)}${shownColumns(m)}`);
+		}
+	}
+	return lines;
+}
+
 /** The run as text, to paste: a section a level, a line a station, then each station's stages. */
 export function benchmarkReport(result: BenchmarkResult): string {
 	const lines: string[] = [];
 	const total = runScore(result);
 	lines.push(
-		`Roswaal Benchmark ${result.benchmark} · Roswaal ${result.release} · ${result.ab ? `A/B: ${result.ab.label}` : result.kind === "sweep" ? "Full sweep" : result.kind === "pixels" ? "Pixel cost" : "Current settings"}`,
+		`Roswaal Benchmark ${result.benchmark} · Roswaal ${result.release} · ${result.ab ? `A/B: ${result.ab.label}` : result.kind === "sweep" ? "Full sweep" : result.kind === "pixels" ? "Pixel cost" : result.kind === "smooth" ? "Smoothness" : "Current settings"}`,
 	);
 	lines.push(
 		`Renderer: ${result.renderer} · GPU: ${result.gpu} · GPU timers: ${result.gpuTimers ? "yes" : "no"} · Pixel ratio ${Number(result.pixelRatio.toFixed(2))}`,
@@ -301,9 +346,22 @@ export function benchmarkReport(result: BenchmarkResult): string {
 		lines.push(
 			"Measured with the GPU kept busy, two frames in flight: the time between frames, and the GPU's own time for one, at its full clock.",
 		);
+	if (result.measure === "shown")
+		lines.push(
+			"Measured as it reaches the screen: frames paced by the display, as in use, with nothing on the GPU timed. Each station's frames shown a second, the longest gap between two, and the refreshes that showed no new frame.",
+		);
 	lines.push(
 		`Seed ${result.seed} · ${result.date}${(result.passes ?? 1) > 1 ? " · with a warm pass" : ""}${result.cancelled ? " · stopped before the end" : ""}`,
 	);
+	if (result.measure === "shown") {
+		const fps = shownScore(result);
+		const refresh = result.levels[0]?.stations[0]?.still.shown?.refresh;
+		lines.push(
+			`Shown: ${Number.isFinite(fps) ? fps.toFixed(1) : "–"} frames a second across the stations${refresh ? `, against a ${msText(refresh)} refresh` : ""}`,
+		);
+		lines.push(...shownReport(result));
+		return lines.join("\n");
+	}
 	lines.push(
 		`Score: ${score(total.gpu)} by the GPU's time, ${score(total.waited)} by the ${result.measure === "busy" ? "frame interval" : "waited frame"}`,
 	);

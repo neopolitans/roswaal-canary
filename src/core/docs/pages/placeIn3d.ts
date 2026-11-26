@@ -524,7 +524,8 @@ export function placeEditorPerformancePage(): DocPage {
 					"every device, and times each on the GPU and the CPU, with the GPU kept busy, two frames in " +
 					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Benchmark or " +
 					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
-					"**Full sweep** runs every quality level at Native, then every render scale at the level the view was at, about 45 minutes. The editor is hidden while it runs. " +
+					"**Full sweep** runs every quality level at Native, then every render scale at the level the view was at, about 45 minutes. " +
+					"**Smoothness** draws the same scenes and movements paced by the display, as in use, with nothing on the GPU timed, and says the frames that reached the screen each second, the longest gap between two and the refreshes that showed no new frame: how smooth it looks, where the others say what it costs. The editor is hidden while it runs. " +
 					"The Roswaal logo, or Esc, stops it and brings the editor back as it was.",
 			},
 			{

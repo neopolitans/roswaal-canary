@@ -21,6 +21,7 @@ export type {
 } from "./manifest.js";
 export {
 	BENCHMARK_EVENT,
+	BENCHMARK_KINDS,
 	type BenchmarkKind,
 	type BenchmarkRequest,
 	startBenchmark,

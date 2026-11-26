@@ -34,6 +34,7 @@ import { unformattedGroups, unformattedMessage, unformattedWhat } from "../core/
 import {
 	antialiasSetting,
 	BENCHMARK_EVENT,
+	BENCHMARK_KINDS,
 	type BenchmarkRequest,
 	EXTENSIONS,
 	OUTLINE_WIDTHS,
@@ -589,7 +590,7 @@ export function App() {
 	useEffect(() => {
 		const start = (e: Event) => {
 			const asked = (e as CustomEvent<BenchmarkRequest>).detail;
-			if (!["current", "sweep", "ab", "pixels"].includes(asked?.kind)) return;
+			if (!BENCHMARK_KINDS.includes(asked?.kind)) return;
 			if (asked.kind === "ab" && !asked.ab) return;
 			setSettingsOpen(false);
 			setBenchmark({

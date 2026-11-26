@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.79.0",
+	version: "0.80.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.80.0",
+			roswaal: "1.1.0-canary.121",
+			date: "2026-11-26",
+			text: "Smoothness, a benchmark kind (smooth, measure shown): each station's still frame and motions drawn in requestAnimationFrame, timers off (quietTimers), no stage profile; what reached the screen (shownFrames: fps, worst gap, refreshes missed, the refresh). Its report, end screen and comparisons; not compared with a run that timed the GPU. BENCHMARK_KINDS, one list for what starts a run.",
+		},
 		{
 			version: "0.79.0",
 			roswaal: "1.1.0-canary.120",

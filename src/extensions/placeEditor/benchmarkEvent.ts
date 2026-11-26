@@ -8,8 +8,19 @@
 /**
  * "ab": each station's still frame with one render switch on and off, in
  * turn. "pixels": each at every render scale, for what a pixel costs.
+ * "smooth": Smoothness, the frames that reach the screen, paced by the
+ * display as in use, with nothing on the GPU timed.
  */
-export type BenchmarkKind = "current" | "sweep" | "ab" | "pixels";
+export type BenchmarkKind = "current" | "sweep" | "ab" | "pixels" | "smooth";
+
+/** Every kind, for what listens to start a run: one list, so a new kind is never refused there. */
+export const BENCHMARK_KINDS: readonly BenchmarkKind[] = [
+	"current",
+	"sweep",
+	"ab",
+	"pixels",
+	"smooth",
+];
 
 /** What a run is asked for: its kind, and whether each station is measured twice. */
 export interface BenchmarkRequest {

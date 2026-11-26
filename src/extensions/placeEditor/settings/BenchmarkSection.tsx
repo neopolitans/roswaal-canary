@@ -33,6 +33,14 @@ export function BenchmarkSection() {
 					</button>
 				</Row>
 				<Row
+					label="Smoothness"
+					help="The same scenes and movements, paced by the display as in use, with nothing on the GPU timed: the frames that reach the screen each second, the longest gap between two, and the refreshes that showed no new frame. How smooth it looks, where the benchmark says what it costs. About 2 minutes."
+				>
+					<button type="button" className="tb" onClick={() => startBenchmark("smooth", 1)}>
+						Run Smoothness
+					</button>
+				</Row>
+				<Row
 					label="A/B a switch"
 					help="Measures every station with one Rendering panel switch on, off, on and off, back to back, so a warming device slows both alike, and says what the switch saves or costs at each. About 3 minutes."
 				>

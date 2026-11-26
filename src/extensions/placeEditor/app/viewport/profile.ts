@@ -306,6 +306,35 @@ export interface Timed {
 	cpuMs?: number;
 	/** Of that, effects simulated and sent, and parts culled: see RenderStats.cpuSteps. */
 	cpuSteps?: { effects: number; culling: number; fx?: EffectSteps };
+	/** What reached the screen, in a Smoothness run: see shownFrames. */
+	shown?: ShownFrames;
+}
+
+/**
+ * What reached the screen over a run of frames paced by the display (a
+ * Smoothness run): frames a second, the longest gap between two, the
+ * refreshes that showed no new frame, and the refresh they were counted
+ * against, the shortest gap most frames keep (60 Hz's 16.7 ms; 33.3 ms
+ * where Low Power Mode holds Safari to 30). Nothing on the GPU is timed.
+ */
+export interface ShownFrames {
+	fps: number;
+	worst: number;
+	missed: number;
+	refresh: number;
+}
+
+/** What a run of gaps between shown frames comes to; undefined with too few to say. */
+export function shownFrames(gaps: readonly number[]): ShownFrames | undefined {
+	const sorted = gaps.filter((g) => Number.isFinite(g) && g > 0).sort((a, b) => a - b);
+	if (sorted.length < 5) return undefined;
+	// The refresh: a tenth of the way up, so a run of late frames does not set
+	// it; no shorter than a 500 Hz screen's, against a clock's jitter. A floor
+	// of 144 Hz's counted a 240 Hz screen's one late frame as none.
+	const refresh = Math.max(2, sorted[Math.floor(sorted.length / 10)]);
+	const total = sorted.reduce((a, b) => a + b, 0);
+	const missed = sorted.reduce((n, g) => n + Math.max(0, Math.round(g / refresh) - 1), 0);
+	return { fps: (sorted.length * 1000) / total, worst: sorted[sorted.length - 1], missed, refresh };
 }
 
 /** A row's GPU time as a column, or nothing where the GPU has no timers. */

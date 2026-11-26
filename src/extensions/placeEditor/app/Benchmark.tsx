@@ -19,6 +19,7 @@ import {
 	benchmarkJson,
 	benchmarkReport,
 	runScore,
+	shownScore,
 } from "./benchmark/result.js";
 import {
 	BENCHMARK_MEASURE,
@@ -189,10 +190,17 @@ export function Benchmark({
 			{result && total && (
 				<div className="benchmark-end">
 					<strong>Roswaal Benchmark {BENCHMARK_VERSION}</strong>
-					<span className="benchmark-score">
-						{score(total.gpu)} <small>by the GPU's time</small> · {score(total.waited)}{" "}
-						<small>by the waited frame</small>
-					</span>
+					{result.measure === "shown" ? (
+						<span className="benchmark-score">
+							{Number.isFinite(shownScore(result)) ? shownScore(result).toFixed(1) : "–"}{" "}
+							<small>frames a second shown</small>
+						</span>
+					) : (
+						<span className="benchmark-score">
+							{score(total.gpu)} <small>by the GPU's time</small> · {score(total.waited)}{" "}
+							<small>by the waited frame</small>
+						</span>
+					)}
 					{result.fellBack && (
 						<span>
 							Drawn by WebGL2: WebGPU did not start ({result.fellBack}). These times do not compare

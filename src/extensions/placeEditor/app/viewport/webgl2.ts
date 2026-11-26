@@ -4241,9 +4241,11 @@ export class WebGl2View implements ViewRenderer {
 		}
 		gl.bindTexture(gl.TEXTURE_2D, null);
 		if (this.hlChecked === "mask") {
-			const n = this.countedPixels(w, h);
-			if (n === 0) this.noteHighlightCheck(`nothing drawn into the mask (${lists.length} draws)`);
-			this.hlChecked = "rows";
+			const n = this.countedPixels(w, h).count;
+			if (n === 0) {
+				this.noteHighlightCheck(`nothing drawn into the mask (${lists.length} draws)`);
+				this.highlightSelfTest(camera, lists, t.fbo);
+			} else this.hlChecked = "rows";
 		}
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(this.nearer);
@@ -4279,7 +4281,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.uniform1f(this.loc(progs.rows, "wide"), wide);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 		if (this.hlChecked === "rows") {
-			if (this.countedPixels(this.width, this.height) === 0)
+			if (this.countedPixels(this.width, this.height).count === 0)
 				this.noteHighlightCheck("the mask drawn, but nothing in the outline's rows");
 			this.hlChecked = "done";
 		}
@@ -5507,21 +5509,100 @@ export class WebGl2View implements ViewRenderer {
 	}
 
 	/**
-	 * The bound target's pixels not 0, of every 8th row: integer targets are
-	 * read as RGBA_INTEGER, a row at a time to keep the copy small.
+	 * The bound target's pixels not 0, of every 8th row, and how many of each
+	 * value: integer targets are read as RGBA_INTEGER, a row at a time to
+	 * keep the copy small.
 	 */
-	private countedPixels(w: number, h: number): number {
+	private countedPixels(w: number, h: number): { count: number; values: Map<number, number> } {
 		const gl = this.gl;
 		const row = new Uint32Array(w * 4);
-		let n = 0;
+		const values = new Map<number, number>();
+		let count = 0;
 		for (let y = 0; y < h; y += 8) {
 			gl.readPixels(0, y, w, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT, row);
-			for (let x = 0; x < w; x++) if (row[x * 4] !== 0) n++;
+			for (let x = 0; x < w; x++) {
+				const v = row[x * 4];
+				if (v === 0) continue;
+				count++;
+				values.set(v, (values.get(v) ?? 0) + 1);
+			}
 		}
 		const e = gl.getError();
 		if (e !== gl.NO_ERROR)
 			this.noteGpuError(`Highlights' check could not read back (${glName(gl, e)})`);
-		return n;
+		return { count, values };
+	}
+
+	/**
+	 * Where an iPad's mask came out empty (1.1.0-canary.142): the same parts
+	 * drawn into it again, once, by shaders that each stop sooner, no depth
+	 * test and no culling, and what each wrote said. A constant; the part's
+	 * id plus one; and the row read for it plus 100 (its slot in the low
+	 * byte). Which one first writes nothing is where the mask pass fails.
+	 */
+	private highlightSelfTest(camera: Camera, lists: readonly Draw[], fbo: WebGLFramebuffer): void {
+		const gl = this.gl;
+		const hl = this.hl;
+		if (!hl) return;
+		const head = `#version 300 es
+precision highp float; precision highp int; flat in uint vId;
+uniform highp usampler2D hlRows;
+out uint o;
+void main() {
+`;
+		const tests: [string, string][] = [
+			["constant", "o = 7u; }"],
+			["ids", "o = min(vId + 1u, 255u); }"],
+			[
+				"rows",
+				"uint r = texelFetch(hlRows, ivec2(int(vId & 4095u), int(vId >> 12u)), 0).r; o = (r & 255u) + 100u; }",
+			],
+		];
+		const said: string[] = [];
+		for (const [name, body] of tests) {
+			let prog: Program;
+			try {
+				prog = this.link(VS, head + body);
+			} catch (err) {
+				said.push(`${name} did not build (${String(err).slice(0, 80)})`);
+				continue;
+			}
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.viewport(0, 0, this.width, this.height);
+			gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
+			this.use(prog, camera, false);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, hl.rows);
+			gl.uniform1i(this.loc(prog.program, "hlRows"), 0);
+			gl.disable(gl.DEPTH_TEST);
+			gl.disable(gl.CULL_FACE);
+			gl.disable(gl.BLEND);
+			gl.disable(gl.SCISSOR_TEST);
+			gl.colorMask(true, true, true, true);
+			for (const d of lists) {
+				gl.bindVertexArray(d.vao);
+				gl.drawElementsInstanced(gl.TRIANGLES, d.indexCount, d.type, 0, d.count);
+			}
+			gl.bindVertexArray(null);
+			const { count, values } = this.countedPixels(this.width, this.height);
+			const top = [...values]
+				.sort((a, b) => b[1] - a[1])
+				.slice(0, 6)
+				.map(([v, n]) => `${v}×${n}`)
+				.join(" ");
+			said.push(`${name} ${count}${top ? ` (${top})` : ""}`);
+			gl.deleteProgram(prog.program);
+		}
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		gl.enable(gl.CULL_FACE);
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(this.nearer);
+		gl.depthMask(true);
+		const scissor = gl.getParameter(gl.SCISSOR_BOX) as Int32Array;
+		const front = gl.getParameter(gl.FRONT_FACE) === gl.CW ? "CW" : "CCW";
+		this.noteGpuError(
+			`Highlights' self-test, pixels written (every 8th row): ${said.join("; ")}. Rows texture ${HL_ROW_WIDTH}×${Math.ceil(hl.count / HL_ROW_WIDTH)}, ids under ${hl.count}; front face ${front}, scissor ${[...scissor].join(",")}`,
+		);
 	}
 
 	gpuErrors(): readonly string[] {
@@ -5532,7 +5613,7 @@ export class WebGl2View implements ViewRenderer {
 	}
 
 	private noteGpuError(message: string): void {
-		const text = message.trim().replace(/\s+/g, " ").slice(0, 400);
+		const text = message.trim().replace(/\s+/g, " ").slice(0, 900);
 		if (this.seenErrors.length >= GPU_ERRORS || this.seenErrors.includes(text)) return;
 		this.seenErrors.push(text);
 	}

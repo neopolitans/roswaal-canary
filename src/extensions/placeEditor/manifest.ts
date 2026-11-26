@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.87.3",
+	version: "0.87.4",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.87.4",
+			roswaal: "1.1.0-canary.143",
+			date: "2026-11-26",
+			text: "Where WebGL2's Highlights mask comes out empty, the same parts are drawn into it again once by three shaders that each stop sooner (a constant, the id plus one, the row read plus 100), with no depth test or culling, and what each wrote is said with the rows texture's size, the front face and the scissor. The rows check no longer follows an empty mask.",
+		},
 		{
 			version: "0.87.3",
 			roswaal: "1.1.0-canary.142",

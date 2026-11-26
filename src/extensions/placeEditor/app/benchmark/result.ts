@@ -163,7 +163,7 @@ export interface BenchmarkResult {
 	/** The render switches that were off for the run, by their names in the Rendering panel. */
 	switchedOff?: string[];
 	/**
-	 * Settings › Scene view as the run found it, by name: the quality level,
+	 * Settings › Graphics as the run found it, by name: the quality level,
 	 * render scale and each effect's resolution ("Automatic" where unset).
 	 * Since 1.1.0-canary.111; absent before.
 	 */
@@ -234,7 +234,7 @@ function cpuBound(s: BenchmarkStationResult): boolean {
 	);
 }
 
-/** The Scene view settings a run records, by their names in Settings: see BenchmarkResult.settings. */
+/** The Graphics settings a run records, by their names in Settings: see BenchmarkResult.settings. */
 const RECORDED: [key: string, name: string][] = [
 	["quality", "Quality"],
 	["renderScale", "Render scale"],
@@ -252,7 +252,7 @@ const RECORDED: [key: string, name: string][] = [
 	["textureResolution", "Texture resolution"],
 ];
 
-/** Scene view's settings as a run found them, by name, each value as Settings words it near enough. */
+/** Graphics' settings as a run found them, by name, each value as Settings words it near enough. */
 export function benchmarkSettings(options: object): Record<string, string> {
 	const o = options as Record<string, unknown>;
 	const out: Record<string, string> = {};

@@ -1,5 +1,5 @@
 /**
- * A benchmark run records Settings › Scene view as it found them (1.1.0-canary.111):
+ * A benchmark run records Settings › Graphics as it found them (1.1.0-canary.111):
  * the quality level, render scale and each effect's resolution, by their
  * names in Settings, in the file, in its text, and in a comparison where
  * two runs differ.

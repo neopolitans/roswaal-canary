@@ -1,7 +1,7 @@
 /**
  * Settings › Roblox account: Sign in with Roblox. Roswaal's own, first under
  * This browser, so whatever fetches from Roblox can use it: today the Place
- * Editor's meshes and images, whose downloads it lists on its Scene view page.
+ * Editor's meshes and images, whose downloads it lists on its Graphics page.
  *
  * Before Roblox's own page, what is asked for, where it is kept, how to
  * remove it, and a word for anyone under 18 -- the screen the sign-in research

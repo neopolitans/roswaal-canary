@@ -82,7 +82,7 @@ export function automaticLines(
 		lines.push({
 			label: "Light objects",
 			value: cap(lamps.mode),
-			detail: "Set in Settings › Scene view, not measured.",
+			detail: "Set in Settings › Graphics, not measured.",
 		});
 	} else if (lamps.lights === 0) {
 		lines.push({ label: "Light objects", value: "None in this place" });

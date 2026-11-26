@@ -1,6 +1,6 @@
 /**
  * Asking Roswaal to run its benchmark, from wherever the button is: Settings ›
- * Scene view, or the Rendering panel. App listens, hides the editor and shows
+ * Benchmark, or the Rendering panel. App listens, hides the editor and shows
  * the run. Small, so the editor's own bundle carries it without the Place
  * Editor's.
  */

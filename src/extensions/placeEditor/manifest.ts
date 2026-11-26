@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.77.0",
+	version: "0.78.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -28,19 +28,33 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 			what: "Panels from the place toolbar.",
 			kind: "Panels",
 		},
-		{ title: "Scene view", what: "Its page in Settings.", kind: "Settings" },
+		{ title: "Graphics and Benchmark", what: "Their pages in Settings.", kind: "Settings" },
 	],
 	pages: [
 		{
+			// "scene": the page's id from when it was Scene view (until 1.1.0-canary.119), kept for links to it.
 			id: "scene",
-			title: "Scene view",
+			title: "Graphics",
 			note: "How a place is drawn in 3D. Part of the Place Editor, kept in this browser.",
 			groups: SCENE_VIEW,
 			component: () =>
 				import("./settings/SceneViewSections.jsx").then((m) => ({ default: m.SceneViewSections })),
 		},
+		{
+			id: "benchmark",
+			title: "Benchmark",
+			note: "How fast this device draws Roswaal's own test scenes. Part of the Place Editor.",
+			component: () =>
+				import("./settings/BenchmarkSection.jsx").then((m) => ({ default: m.BenchmarkSection })),
+		},
 	],
 	releases: [
+		{
+			version: "0.78.0",
+			roswaal: "1.1.0-canary.119",
+			date: "2026-11-26",
+			text: "Settings: Scene view is Graphics (its id still scene), and the benchmark has a page of its own, Benchmark, its runs and its results apart.",
+		},
 		{
 			version: "0.77.0",
 			roswaal: "1.1.0-canary.118",

@@ -1,5 +1,5 @@
 /**
- * Settings › Scene view's Downloaded assets: what the open project holds from
+ * Settings › Graphics' Downloaded assets: what the open project holds from
  * Sign in with Roblox, and a way to delete it. Shown while signed in.
  */
 

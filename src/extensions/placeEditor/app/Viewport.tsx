@@ -826,7 +826,7 @@ function AssetCard({ assets }: { assets: AssetProgress | null }) {
 	);
 }
 
-/** Settings' own words for a Scene view setting, by key: the panel says what Settings says. */
+/** Settings' own words for a Graphics setting, by key: the panel says what Settings says. */
 const SCENE_WORDS = new Map(
 	SCENE_VIEW.flatMap((group) => group.settings).map((decl) => [decl.key, decl] as const),
 );
@@ -957,7 +957,7 @@ function SettingButtons({
 }
 
 /**
- * The Scene view settings the Rendering panel offers beside Quality and
+ * The Graphics settings the Rendering panel offers beside Quality and
  * Antialiasing, so they are at hand while looking at the view: each saved
  * as Settings saves it. Three or four short choices are side by side, so all
  * of them show and each is one tap.
@@ -1881,7 +1881,7 @@ export function RenderPanel({
 	/** Settings' Antialiasing, chosen here too: "auto", or a mode's setting value. */
 	antialias: string;
 	onAntialias: (antialias: string) => void;
-	/** Settings' Scene view, chosen here too: frame rate, render scale, upscaling, renderer, Dynamic optimization. */
+	/** Settings' Graphics, chosen here too: frame rate, render scale, upscaling, renderer, Dynamic optimization. */
 	scene?: PlaceEditorSettings;
 	onScene?: (key: string, value: string | boolean) => void;
 }) {

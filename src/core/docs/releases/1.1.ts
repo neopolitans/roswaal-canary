@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.119",
+		date: "2026-11-26",
+		headline: "Settings: Graphics, and the benchmark on a page of its own.",
+		changed: [
+			"**Settings › Scene view is now Graphics.**",
+			"**The benchmark has its own page in Settings**, under Place Editor beside Graphics: its runs, and comparing two results.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.118",
 		date: "2026-11-26",
 		headline: "Moving through a busy place hitches far less: reflections and the sky's light are spread out and cheaper.",

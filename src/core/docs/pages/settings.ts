@@ -76,9 +76,14 @@ export function settingsPage(): DocPage {
 						"An extension: its version, its switch, what it adds and its release notes. Its pages are listed under it while it is on",
 					],
 					[
-						"**Scene view**",
+						"**Graphics**",
 						"This browser",
-						"Under Place Editor. How a place is drawn in 3D: the renderer, the selection outline, Alt-click, Glass and post effects, the shaders, the benchmark, and what Sign in with Roblox downloaded into the project",
+						"Under Place Editor. How a place is drawn in 3D: the renderer, the selection outline, Alt-click, Glass and post effects, the shaders, and what Sign in with Roblox downloaded into the project",
+					],
+					[
+						"**Benchmark**",
+						"This browser",
+						"Under Place Editor. Roswaal Benchmark 5 at the view's settings, every quality level, a switch on and off or each render scale, and two results files compared",
 					],
 				],
 			},

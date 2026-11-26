@@ -1,5 +1,5 @@
 /**
- * Settings › Scene view's Shaders: whether an update changed them, and
+ * Settings › Graphics' Shaders: whether an update changed them, and
  * building them for every quality level ahead, so changing level later waits
  * for none. See shaderEvent.ts.
  */

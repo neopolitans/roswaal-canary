@@ -1,6 +1,5 @@
-/** Settings › Scene view's actions, below its settings: downloads, the shaders, then the benchmark. */
+/** Settings › Graphics' actions, below its settings: downloads, then the shaders. The benchmark has a page of its own. */
 
-import { BenchmarkSection } from "./BenchmarkSection.jsx";
 import { DownloadedAssetsSection } from "./DownloadedAssets.jsx";
 import { ShaderSection } from "./ShaderSection.jsx";
 
@@ -9,7 +8,6 @@ export function SceneViewSections() {
 		<>
 			<DownloadedAssetsSection />
 			<ShaderSection />
-			<BenchmarkSection />
 		</>
 	);
 }

@@ -1,6 +1,6 @@
 /**
  * A setting says what it is in one line, and the rest behind an "i": the
- * Scene view's texts, and the Settings row that shows them.
+ * Graphics' texts, and the Settings row that shows them.
  */
 
 import { createElement } from "react";
@@ -12,7 +12,7 @@ import { SCENE_VIEW } from "../src/extensions/placeEditor/settings.js";
 
 const declared = SCENE_VIEW.flatMap((group) => group.settings);
 
-describe("the Scene view's texts", () => {
+describe("the Graphics page's texts", () => {
 	/** One line under the name, on a tablet's panel as in Settings. */
 	it("say what each setting is in one short line", () => {
 		for (const decl of declared) {

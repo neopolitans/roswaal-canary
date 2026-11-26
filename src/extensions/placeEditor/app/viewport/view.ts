@@ -161,7 +161,7 @@ export interface ViewRenderer {
 	 * them: rows naming one are drawn as it from then on, the rest as boxes.
 	 */
 	setMeshes(meshes: ReadonlyMap<number, MeshGeometry>): void;
-	/** Whether the place's post effects are drawn: Settings › Scene view. */
+	/** Whether the place's post effects are drawn: Settings › Graphics. */
 	setPostEffects(on: boolean): void;
 	/** The quality level's render distance and sun shadows: see quality.ts. */
 	setQuality(quality: ViewQuality): void;

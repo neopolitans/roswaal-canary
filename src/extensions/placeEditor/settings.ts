@@ -234,7 +234,7 @@ export interface PlaceEditorSettings {
 	postEffects: boolean;
 }
 
-/** Settings › Scene view. */
+/** Settings › Graphics (Scene view until 1.1.0-canary.119). */
 export const SCENE_VIEW: readonly SettingGroup[] = [
 	{
 		title: "Renderer",

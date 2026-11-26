@@ -1,7 +1,7 @@
 /**
  * A comparison of two benchmark runs as text, with a way to copy it, and
  * reading results files for one: shared by the benchmark's end and
- * Settings › Scene view.
+ * Settings › Benchmark.
  */
 
 import { useRef, useState } from "react";

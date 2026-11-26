@@ -94,7 +94,7 @@ export function placeEditorMovingPage(): DocPage {
 					["Pick the part itself", "`Alt` or `Shift` + click, or a long press"],
 					[
 						"Pick one Model further in each time",
-						"`Alt` + click, or a long press, with **Settings › Scene view › Alt-click** on",
+						"`Alt` + click, or a long press, with **Settings › Graphics › Alt-click** on",
 					],
 					[
 						"Add to what is picked, or take out",
@@ -218,7 +218,7 @@ export function placeEditorDrawingPage(): DocPage {
 					[
 						"Glass",
 						"See-through Glass hides the see-through parts behind it, as Studio's does. " +
-							"**Settings › Scene view** can let them show",
+							"**Settings › Graphics** can let them show",
 					],
 					[
 						"Decals, Textures, meshes and the sky",
@@ -231,7 +231,7 @@ export function placeEditorDrawingPage(): DocPage {
 						"PointLights, SpotLights and SurfaceLights light the place, and cast no shadows yet",
 					],
 					["The sun and sky", "The sun casts shadows; Ambient lights where the sky cannot reach"],
-					["ColorCorrection and Blur", "Drawn; **Settings › Scene view** can turn them off"],
+					["ColorCorrection and Blur", "Drawn; **Settings › Graphics** can turn them off"],
 					[
 						"Beams and ParticleEmitters",
 						"Moving as they do in Studio; a particle whose image is not downloaded is a soft dot",
@@ -266,7 +266,7 @@ export function placeEditorRenderingPage(): DocPage {
 				text:
 					"The **Rendering** panel, in the **Panels** menu while the place is in front, changes " +
 					"how the view draws the place, never the place. **Picture** holds the quality level and " +
-					"the Scene view settings, **Switches** a switch for each part of the picture, and " +
+					"the Graphics settings, **Switches** a switch for each part of the picture, and " +
 					"**Inspect** the tools for looking into a frame. On a touch screen held upright it comes " +
 					"up from the bottom: drag or tap its grab for **Peek**, which shows the switches changed " +
 					"last, **Half** or **Full**. Inspect's **Start log** lists each step of opening a " +
@@ -522,7 +522,7 @@ export function placeEditorPerformancePage(): DocPage {
 				text:
 					"**Roswaal Benchmark 5** draws seventeen test scenes that Roswaal makes for itself, the same on " +
 					"every device, and times each on the GPU and the CPU, with the GPU kept busy, two frames in " +
-					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Scene view or " +
+					"flight, so a GPU that slows itself when lightly worked runs at full speed. Start it from Settings › Benchmark or " +
 					"the Profile section here: **Current settings** runs the view as it is set, about 2 minutes; " +
 					"**Full sweep** runs every quality level at Native, then every render scale at the level the view was at, about 45 minutes. The editor is hidden while it runs. " +
 					"The Roswaal logo, or Esc, stops it and brings the editor back as it was.",

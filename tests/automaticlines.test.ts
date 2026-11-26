@@ -51,7 +51,7 @@ describe("Automatic's choices", () => {
 			lines({ lamps: { ...base.lamps, setting: "half", mode: "half" } })["Light objects"],
 		).toMatchObject({
 			value: "Half",
-			detail: "Set in Settings › Scene view, not measured.",
+			detail: "Set in Settings › Graphics, not measured.",
 		});
 		expect(lines({})["Light objects"].value).toBe("None in this place");
 		const measured = lines({

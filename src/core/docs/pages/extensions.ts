@@ -45,8 +45,8 @@ export function extensionsPage(): DocPage {
 				text:
 					"**Settings › Place Editor** has its switch, what it adds and its release notes. " +
 					"Off, it is not loaded, which saves memory in the browser, and its settings are kept " +
-					"for when it is back on. The place's tab then says the Place Editor is off. Its page, " +
-					"**Scene view**, is listed under it while it is on.",
+					"for when it is back on. The place's tab then says the Place Editor is off. Its pages, " +
+					"**Graphics** and **Benchmark**, are listed under it while it is on.",
 			},
 			{ t: "h", level: 2, text: "Versions" },
 			{

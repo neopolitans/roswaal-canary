@@ -324,14 +324,23 @@ export interface ShownFrames {
 	refresh: number;
 }
 
-/** What a run of gaps between shown frames comes to; undefined with too few to say. */
-export function shownFrames(gaps: readonly number[]): ShownFrames | undefined {
+/**
+ * What a run of gaps between shown frames comes to, the refresh as measured
+ * with nothing drawn (see the controller's idleRefresh); undefined with too
+ * few to say. Without one, a tenth of the way up the gaps: right where most
+ * frames keep the refresh, but where most are late it takes their gap for
+ * the refresh and counts them on time (an iPad's 100 lights, 42 ms).
+ */
+export function shownFrames(gaps: readonly number[], measured?: number): ShownFrames | undefined {
 	const sorted = gaps.filter((g) => Number.isFinite(g) && g > 0).sort((a, b) => a - b);
 	if (sorted.length < 5) return undefined;
-	// The refresh: a tenth of the way up, so a run of late frames does not set
-	// it; no shorter than a 500 Hz screen's, against a clock's jitter. A floor
-	// of 144 Hz's counted a 240 Hz screen's one late frame as none.
-	const refresh = Math.max(2, sorted[Math.floor(sorted.length / 10)]);
+	// No shorter than a 500 Hz screen's, against a clock's jitter.
+	const refresh = Math.max(
+		2,
+		measured !== undefined && Number.isFinite(measured) && measured > 0
+			? measured
+			: sorted[Math.floor(sorted.length / 10)],
+	);
 	const total = sorted.reduce((a, b) => a + b, 0);
 	const missed = sorted.reduce((n, g) => n + Math.max(0, Math.round(g / refresh) - 1), 0);
 	return { fps: (sorted.length * 1000) / total, worst: sorted[sorted.length - 1], missed, refresh };

@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.122",
+		date: "2026-11-26",
+		headline: "WebGL2 benchmark times as the screen shows them.",
+		fixed: [
+			"**A WebGL2 benchmark times each frame until the GPU is done with it**, one at a time: since canary.117 it took Safari's word that a frame was done before it was, and read an iPad's frames at less than half what they took. Its times from canary.117 to .121 are too low.",
+			"**Smoothness counts the refreshes missed against the display's own refresh**, measured with nothing drawn: where nearly every frame was late, it counted none missed.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.121",
 		date: "2026-11-26",
 		headline: "Smoothness: a benchmark of the frames that reach the screen.",

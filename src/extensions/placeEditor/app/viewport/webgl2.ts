@@ -4976,36 +4976,16 @@ export class WebGl2View implements ViewRenderer {
 	}
 
 	/**
-	 * Once the GPU has done everything drawn so far: a fence, looked at
-	 * between the page's tasks. Waiting there and then (gpuWait, a pixel read
-	 * back) never gave the page a turn, so a busy benchmark's frames were
-	 * never shown (the view leapt from one to one near the end of each
-	 * motion), and it drained the GPU each frame, so no two were ever in
-	 * flight (an iPad's WebGL2, 25 Nov 2026). Looked at by message rather
-	 * than timer: Safari stretches a run of short timers to 4 ms, which
-	 * would round every frame's time. Where a fence cannot be made, as before.
+	 * Once the GPU has done everything drawn so far: a pixel read back, there
+	 * and then. Not a fence: Safari's WebGL2 says a fence is passed before the
+	 * GPU has done the frame, so an iPad's frames timed by one read 8 ms where
+	 * the screen showed 22 (canary.117 to .121; a Smoothness run, 26 Nov 2026).
+	 * Without timers, a benchmark times WebGL2 frame by frame (no busy run),
+	 * the page given its turn between frames, so they are shown as they go.
 	 */
 	finished(): Promise<void> {
-		const gl = this.gl;
-		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-		if (!sync) {
-			this.gpuWait();
-			return Promise.resolve();
-		}
-		gl.flush();
-		const channel = new MessageChannel();
-		return new Promise((resolve) => {
-			channel.port1.onmessage = () => {
-				if (!gl.isContextLost() && gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
-					channel.port2.postMessage(0);
-					return;
-				}
-				if (!gl.isContextLost()) gl.deleteSync(sync);
-				channel.port1.close();
-				resolve();
-			};
-			channel.port2.postMessage(0);
-		});
+		this.gpuWait();
+		return Promise.resolve();
 	}
 
 	/** The off-screen frame's samples: as asked, as far as the GPU goes; 0 is none. */
@@ -5152,7 +5132,10 @@ export class WebGl2View implements ViewRenderer {
 			: String(gl.getParameter(gl.RENDERER));
 		return {
 			gpu,
-			timers: gl.getExtension("EXT_disjoint_timer_query_webgl2") !== null,
+			// Its passes are not timed (stats' gpu is null), offered or not: said
+			// so, or a benchmark ran it busy, two frames in flight, waiting on
+			// fences (see finished) or at every stage, as though it had times.
+			timers: false,
 			// The off-screen frame's, which the place is drawn into: see `resize`.
 			samples: Math.max(1, this.drawnSamples()),
 		};

@@ -48,6 +48,16 @@ describe("frames shown", () => {
 		expect(s?.missed).toBe(10);
 	});
 
+	it("count late frames against the refresh measured with nothing drawn, though most are late", () => {
+		// 100 lights on an iPad: nearly every frame 42 ms. Its own gaps read 42 ms as the refresh.
+		const gaps = [...Array(3).fill(hz60), ...Array(40).fill(42)];
+		expect(shownFrames(gaps)?.missed).toBe(0);
+		const s = shownFrames(gaps, hz60);
+		expect(s?.refresh).toBeCloseTo(hz60, 5);
+		// Each 42 ms gap is two refreshes and a half, rounded to three: two missed.
+		expect(s?.missed).toBe(80);
+	});
+
 	it("say nothing from too few frames", () => {
 		expect(shownFrames([hz60, hz60])).toBeUndefined();
 	});

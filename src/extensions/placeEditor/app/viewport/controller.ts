@@ -2476,7 +2476,10 @@ export class ViewportController {
 			const frames: StageFrame[] = [];
 			const gpuFrames: StageFrame[] = [];
 			const was = view.redraws?.() ?? null;
-			if (!shown)
+			// Stage by stage only where the GPU's timers say it: without them
+			// (WebGL2) each stage is waited for, six waits a frame, which made
+			// the motion it timed several times slower than it is.
+			if (!shown && view.deviceFacts().timers)
 				view.setProfiling(
 					(each) => frames.push(each),
 					(each) => gpuFrames.push(each),
@@ -2512,7 +2515,7 @@ export class ViewportController {
 				label,
 				...spread(times),
 				...(busy ? { median: steady(times) } : {}),
-				...(shown ? { shown: shownFrames(times) } : {}),
+				...(shown ? { shown: shownFrames(times, this.shownRefresh ?? undefined) } : {}),
 				frames: times.length,
 				stages: stageRows(frames),
 				gpu: stageRows(gpuFrames, busy ? steady : undefined),
@@ -2635,8 +2638,15 @@ export class ViewportController {
 		const passes = run.ab || run.kind === "pixels" ? 1 : (run.passes ?? 1);
 		// Smoothness: frames paced by the display, what reached the screen, nothing on the GPU timed.
 		const shown = run.kind === "smooth";
-		const busy = run.measure === "busy" && !shown;
+		// Busy (two frames in flight) only where the GPU's own timers say what a
+		// frame took: without them (WebGL2) each frame is waited for, as
+		// nothing else says when the GPU is done (see WebGl2View.finished).
+		const busy = run.measure === "busy" && !shown && this.view.deviceFacts().timers;
 		this.quietTimers = shown;
+		// The display's own refresh, nothing drawn, for the frames a Smoothness
+		// run's stations miss: taken from their own gaps, a run of late frames
+		// set it, and the late frames read as on time.
+		this.shownRefresh = shown ? await this.idleRefresh() : null;
 		const renderWas = this.state.render;
 		const base = run.features ?? renderWas.features;
 		if (run.features) this.setRender({ ...renderWas, features: run.features });
@@ -3911,7 +3921,23 @@ export class ViewportController {
 		this.view?.setProfiling(null);
 		await this.shownFrameGaps(300);
 		const gaps = await this.shownFrameGaps(SHOWN_MS);
-		return { label, ...spread(gaps), shown: shownFrames(gaps) };
+		return { label, ...spread(gaps), shown: shownFrames(gaps, this.shownRefresh ?? undefined) };
+	}
+
+	/** The display's refresh as a Smoothness run found it, nothing drawn: see idleRefresh. */
+	private shownRefresh: number | null = null;
+
+	/** The gap between the display's frames with nothing drawn: the median of 40 requestAnimationFrame gaps. */
+	private idleRefresh(): Promise<number> {
+		return new Promise((resolve) => {
+			const stamps: number[] = [];
+			const tick = (at: number) => {
+				stamps.push(at);
+				if (stamps.length < 41) requestAnimationFrame(tick);
+				else resolve(spread(stamps.slice(1).map((t, i) => t - stamps[i])).median);
+			};
+			requestAnimationFrame(tick);
+		});
 	}
 
 	/** Performance panel graphs showing: the GPU's passes are timed while any is. */

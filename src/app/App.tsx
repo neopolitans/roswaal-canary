@@ -529,7 +529,11 @@ export function App() {
 						: "off",
 				antialias: antialiasSetting(sceneView.antialiasing),
 				dynamicOptimization: sceneView.dynamicOptimization === true,
-				lampResolution: sceneView.lampResolution ?? "auto",
+				// Automatic until 1.1.0-canary.120, which reads as Full: see lampMode.
+				lampResolution:
+					sceneView.lampResolution === "half" || sceneView.lampResolution === "quarter"
+						? sceneView.lampResolution
+						: "full",
 				lightGrid: sceneView.lightGrid ?? "auto",
 				bloomResolution: sceneView.bloomResolution ?? "auto",
 				shadowMapSize:

@@ -37,7 +37,7 @@ describe("an extension's settings", () => {
 			renderScale: "native",
 			upscale: "off",
 			dynamicOptimization: false,
-			lampResolution: "auto",
+			lampResolution: "full",
 			lightGrid: "auto",
 			bloomResolution: "auto",
 			shadowMapSize: "auto",

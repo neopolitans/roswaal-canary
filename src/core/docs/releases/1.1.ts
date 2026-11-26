@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.120",
+		date: "2026-11-26",
+		headline: "Less measuring while you move: light objects are set, and the depth path is measured once.",
+		changed: [
+			"**Light objects resolution is Full, Half or Quarter**, Full by default; Automatic is gone, and a saved Automatic reads as Full. It measured as the view moved, afresh for every place and size, and cost more than it saved. Dynamic optimization still takes it to half, then a quarter, while frames do not fit.",
+			"**The depth path is measured once on each device and kept**, rather than again for every place, size and benchmark station (WebGPU).",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.119",
 		date: "2026-11-26",
 		headline: "Settings: Graphics, and the benchmark on a page of its own.",

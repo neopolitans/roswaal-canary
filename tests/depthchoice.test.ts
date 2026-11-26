@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 import {
 	CHOICE_SAMPLES,
 	DepthChoice,
+	keepDepth,
+	keptDepth,
+	lampMode,
 } from "../src/extensions/placeEditor/app/viewport/depthChoice.js";
 
 function measure(full: number, lean: number): DepthChoice {
@@ -46,31 +49,48 @@ describe("Automatic's depth path", () => {
 	});
 });
 
-describe("Light objects' resolution", () => {
-	it("keeps half only where it measures clearly faster, as with many lights in one area", async () => {
-		const { LampChoice } = await import(
-			"../src/extensions/placeEditor/app/viewport/depthChoice.js"
-		);
-		const many = new LampChoice();
-		const few = new LampChoice();
-		for (let i = 0; i < CHOICE_SAMPLES * 2; i++) {
-			const a = many.next();
-			many.record(a, a === "full" ? 24 : 19.4);
-			const b = few.next();
-			b === "full" ? few.record(b, 13.8) : few.record(b, 14.4);
-		}
-		expect(many.chosen).toBe("half");
-		expect(few.chosen).toBe("full");
+describe("a depth path kept for a device", () => {
+	const memory = () => {
+		const kept = new Map<string, string>();
+		return {
+			getItem: (k: string) => kept.get(k) ?? null,
+			setItem: (k: string, v: string) => void kept.set(k, v),
+		};
+	};
+
+	it("is none until measured, then kept for that device alone", () => {
+		const storage = memory();
+		expect(keptDepth("WebGPU apple", storage)).toBeNull();
+		keepDepth("WebGPU apple", "lean", storage);
+		keepDepth("WebGPU nvidia", "full", storage);
+		expect(keptDepth("WebGPU apple", storage)).toBe("lean");
+		expect(keptDepth("WebGPU nvidia", storage)).toBe("full");
+		expect(keptDepth("WebGL2 apple", storage)).toBeNull();
 	});
 
-	it("draws as the switch, the setting and the measurement say, in that order", async () => {
-		const { lampMode } = await import("../src/extensions/placeEditor/app/viewport/depthChoice.js");
-		expect(lampMode("auto", true, null)).toBe("full");
-		expect(lampMode("auto", true, "half")).toBe("half");
-		expect(lampMode("full", true, "half")).toBe("full");
-		expect(lampMode("quarter", true, null)).toBe("quarter");
+	it("is taken without measuring, once kept", () => {
+		const choice = new DepthChoice();
+		choice.keep("lean");
+		expect(choice.chosen).toBe("lean");
+		expect(choice.medians()).toBeNull();
+	});
+
+	it("is measured again where the browser keeps nothing, or something unreadable", () => {
+		expect(keptDepth("WebGPU apple", null)).toBeNull();
+		const broken = { getItem: () => "{not json", setItem: () => {} };
+		expect(keptDepth("WebGPU apple", broken)).toBeNull();
+		expect(() => keepDepth("WebGPU apple", "full", broken)).not.toThrow();
+	});
+});
+
+describe("Light objects' resolution", () => {
+	it("draws as the switch and the setting say; a saved Automatic is full", () => {
+		expect(lampMode("auto", true)).toBe("full");
+		expect(lampMode(undefined, true)).toBe("full");
+		expect(lampMode("full", true)).toBe("full");
+		expect(lampMode("quarter", true)).toBe("quarter");
 		// The Rendering panel's switch off: never full.
-		expect(lampMode("full", false, null)).toBe("half");
-		expect(lampMode("quarter", false, null)).toBe("quarter");
+		expect(lampMode("full", false)).toBe("half");
+		expect(lampMode("quarter", false)).toBe("quarter");
 	});
 });

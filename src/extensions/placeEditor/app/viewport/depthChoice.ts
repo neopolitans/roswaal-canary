@@ -76,32 +76,68 @@ export class DepthChoice extends PassChoice<DepthPath> {
 	constructor() {
 		super(["full", "lean"]);
 	}
-}
 
-/** Light objects' resolution, as Automatic measures it: every pixel, or half. */
-export class LampChoice extends PassChoice<"full" | "half"> {
-	constructor() {
-		super(["full", "half"]);
+	/** A path measured before, on this device: kept, nothing measured. */
+	keep(path: DepthPath): void {
+		this.chosen = path;
 	}
 }
 
-/** Light objects' resolution as the view draws it. */
+/**
+ * Where each device's measured depth path is kept, in this browser: by its
+ * renderer and GPU. Measured once, rather than again for every place, size,
+ * profile and benchmark station, which alternated the two paths on moving
+ * frames for most of a benchmark and never finished (1.1.0-canary.120).
+ */
+const DEPTH_KEPT = "roswaal.depthPath";
+
+type Store = Pick<Storage, "getItem" | "setItem">;
+const store = (): Store | null => {
+	try {
+		return typeof localStorage === "undefined" ? null : localStorage;
+	} catch {
+		return null;
+	}
+};
+
+/** The depth path measured on this device before, if any. */
+export function keptDepth(device: string, storage: Store | null = store()): DepthPath | null {
+	try {
+		const kept = JSON.parse(storage?.getItem(DEPTH_KEPT) ?? "{}")[device];
+		return kept === "full" || kept === "lean" ? kept : null;
+	} catch {
+		return null;
+	}
+}
+
+/** A depth path measured on this device, kept for next time. */
+export function keepDepth(device: string, path: DepthPath, storage: Store | null = store()): void {
+	try {
+		const all = JSON.parse(storage?.getItem(DEPTH_KEPT) ?? "{}");
+		storage?.setItem(DEPTH_KEPT, JSON.stringify({ ...all, [device]: path }));
+	} catch {
+		// Not kept: measured again next time.
+	}
+}
+
+/** Light objects' resolution as the view draws it, and as Settings sets it. */
 export type LampMode = "full" | "half" | "quarter";
 
-/** The Light objects resolution setting: measured, or one of the three. */
-export type LampResolution = "auto" | LampMode;
+/**
+ * The Light objects resolution setting. It was measured as well, Automatic,
+ * until 1.1.0-canary.120: that alternated full and half on moving frames,
+ * afresh for every place, size and benchmark station, and cost more than it
+ * saved. Dynamic optimization lowers it while frames do not fit.
+ */
+export type LampResolution = LampMode;
 
 /**
  * The way the view draws light objects: half where the Rendering panel's
  * Full-resolution light is off or Dynamic optimization took it, otherwise
- * the setting, and for Automatic what was measured (full until then).
+ * the setting. A setting saved as Automatic reads as full.
  */
-export function lampMode(
-	setting: LampResolution,
-	fullResSwitch: boolean,
-	measured: "full" | "half" | null,
-): LampMode {
-	if (!fullResSwitch) return setting === "quarter" ? "quarter" : "half";
-	if (setting !== "auto") return setting;
-	return measured ?? "full";
+export function lampMode(setting: string | undefined, fullResSwitch: boolean): LampMode {
+	const set: LampMode = setting === "half" || setting === "quarter" ? setting : "full";
+	if (!fullResSwitch) return set === "quarter" ? "quarter" : "half";
+	return set;
 }

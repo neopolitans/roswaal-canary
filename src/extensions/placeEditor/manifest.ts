@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.78.0",
+	version: "0.79.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.79.0",
+			roswaal: "1.1.0-canary.120",
+			date: "2026-11-26",
+			text: "Light objects resolution has no Automatic (LampChoice gone; a saved auto reads as full; lampMode takes the setting and the switch). Automatic's depth path is measured once a device and kept in this browser (keptDepth, keepDepth by renderer and GPU); a place, size, view or profile takes it rather than measuring again.",
+		},
 		{
 			version: "0.78.0",
 			roswaal: "1.1.0-canary.119",

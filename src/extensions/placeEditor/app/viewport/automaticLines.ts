@@ -4,7 +4,7 @@
  * Today these choices are made out of sight; this is where they are seen.
  */
 
-import type { DepthPath, LampMode, LampResolution } from "./depthChoice.js";
+import type { DepthPath, LampMode } from "./depthChoice.js";
 
 /** The controller's choices, as `ViewportController.automaticChoices` gives them. */
 export interface AutomaticChoices {
@@ -14,15 +14,17 @@ export interface AutomaticChoices {
 	fellBackWhy: string | null;
 	quality: { auto: boolean; level: number };
 	/** The depth path, where the renderer has two; null where it draws one way. */
-	depth: { chosen: DepthPath | null; medians: Record<DepthPath, number> | null } | null;
+	depth: {
+		chosen: DepthPath | null;
+		medians: Record<DepthPath, number> | null;
+		/** Measured on this device before and kept: see keptDepth. */
+		kept: boolean;
+	} | null;
 	lamps: {
-		setting: LampResolution;
 		/** Light objects in the place. */
 		lights: number;
 		/** How the view draws them now. */
 		mode: LampMode;
-		chosen: "full" | "half" | null;
-		medians: Record<"full" | "half", number> | null;
 	};
 	/** Dynamic's render scale and Dynamic optimization's savings, or null with both off. */
 	dynamic: { share: number; savings: string[] } | null;
@@ -74,34 +76,21 @@ export function automaticLines(
 					: "Measured as the view moves",
 			detail: m
 				? `A frame's median: full ${ms(m.full)}, lean ${ms(m.lean)}.`
-				: "Full shades each pixel once after the depth; lean shades and tests depth in one draw.",
+				: depth.kept
+					? "Measured on this device before, and kept."
+					: "Full shades each pixel once after the depth; lean shades and tests depth in one draw.",
 		});
 	}
 
-	if (lamps.setting !== "auto") {
-		lines.push({
-			label: "Light objects",
-			value: cap(lamps.mode),
-			detail: "Set in Settings › Graphics, not measured.",
-		});
-	} else if (lamps.lights === 0) {
-		lines.push({ label: "Light objects", value: "None in this place" });
-	} else {
-		const m = lamps.medians;
-		lines.push({
-			label: "Light objects",
-			value: lamps.chosen
-				? m && lamps.chosen === "half"
-					? `Half · ${ms(m.full - m.half)} faster`
-					: cap(lamps.chosen)
-				: m
-					? "Measuring"
-					: "Measured as the view moves",
-			detail: m
-				? `A frame's median: full ${ms(m.full)}, half ${ms(m.half)}, with ${lamps.lights} lights.`
-				: `${lamps.lights} lights: half pays only where many reach the same pixels.`,
-		});
-	}
+	lines.push(
+		lamps.lights === 0
+			? { label: "Light objects", value: "None in this place" }
+			: {
+					label: "Light objects",
+					value: cap(lamps.mode),
+					detail: "Set in Settings › Graphics, not measured.",
+				},
+	);
 
 	lines.push(
 		dynamic === null

@@ -38,7 +38,8 @@ import type { AutomaticChoices } from "./automaticLines.js";
 import { boxAround } from "./box.js";
 import {
 	DepthChoice,
-	LampChoice,
+	keepDepth,
+	keptDepth,
 	type LampMode,
 	type LampResolution,
 	lampMode,
@@ -585,9 +586,8 @@ export class ViewportController {
 			this.images.set(asset, Promise.resolve(image));
 		// A drag under way was of the place as it was: what is read now stands.
 		this.drag = null;
-		// Another place: Automatic's depth path and light resolution are measured for it afresh.
-		this.depth.reset();
-		this.lamps.reset();
+		// Another place: Automatic's depth path as this device's, or measured for it.
+		this.depthAfresh();
 		// The start log: another place into the view there is, or the view's own start.
 		beginStart(this.view ? "Place opened" : "View starting", `${partCount(place)} parts`);
 		if (this.state.probe.result) this.set({ probe: { ...this.state.probe, result: null } });
@@ -833,7 +833,6 @@ export class ViewportController {
 			this.savings.reset();
 			this.applySavings();
 		}
-		if (was.lampResolution !== options.lampResolution) this.lamps.reset();
 		this.applyLampMode();
 		// Bloom, the shadow maps and the textures, each changed in place.
 		this.view.setQuality(this.viewQualityFor(this.level(), this.pixelRatio()));
@@ -2066,10 +2065,9 @@ export class ViewportController {
 		view.setQuality(this.viewQualityFor(this.level(), this.pixelRatio()));
 		view.setTextureDetail(TEXTURE_STEPS[this.options.textureResolution ?? "full"]);
 		view.setRender(this.withSavings(this.state.render));
-		// A new view starts on the full path: Automatic's is measured for it afresh.
-		this.depth.reset();
-		this.lamps.reset();
 		this.view = view;
+		// A new view: the depth path this device kept, or measured afresh.
+		this.depthAfresh();
 		this.applyLampMode();
 		// A pipeline built for the Rendering panel's switches is ready: draw with it.
 		view.onRedraw = () => {
@@ -2650,7 +2648,6 @@ export class ViewportController {
 				...(this.view.setDepthPath
 					? { "Depth path, measured": this.depth.chosen ?? "full (not yet measured)" }
 					: {}),
-				"Light objects, measured": this.lamps.chosen ?? "not yet measured",
 			},
 			...(run.ab
 				? {
@@ -3045,9 +3042,8 @@ export class ViewportController {
 			// The glow sized for the screen at this scale: see ViewQuality.glowCoarse.
 			view.setQuality(this.viewQualityFor(this.level(), dpr));
 			view.resize(w, h);
-			// Another size: the depth paths and light resolutions compare afresh.
-			this.depth.reset();
-			this.lamps.reset();
+			// Another size: the depth path as this device's, or measured afresh.
+			this.depthAfresh();
 			this.applyLampMode();
 			view.setUpscale?.(out, out ? mode : "off");
 			this.drawn = { width: w, height: h };
@@ -3066,10 +3062,8 @@ export class ViewportController {
 
 	/** Dynamic optimization's savings: see dynamicScale.ts. */
 	private savings = new DynamicSavings();
-	/** Automatic's depth path, measured in use: see depthChoice.ts. */
+	/** Automatic's depth path, measured in use once a device, then kept: see depthChoice.ts. */
 	private depth = new DepthChoice();
-	/** Light objects' resolution, measured in use where Automatic: see depthChoice.ts. */
-	private lamps = new LampChoice();
 
 	/** The view's light objects as the setting, the switch, Dynamic optimization and the measurement say. */
 	private applyLampMode(): void {
@@ -3087,14 +3081,10 @@ export class ViewportController {
 		return set === "full" && this.savingsNow().sky === "half" ? "half" : set;
 	}
 
-	/** How light objects are drawn now: Settings', the switch's, Automatic's, less Dynamic optimization's savings. */
+	/** How light objects are drawn now: Settings', the switch's, less Dynamic optimization's savings. */
 	private lampModeNow(): LampMode {
 		const features = this.withSavings(this.state.render).features;
-		const mode = lampMode(
-			this.options.lampResolution ?? "auto",
-			features.fullResLamps,
-			this.lamps.chosen,
-		);
+		const mode = lampMode(this.options.lampResolution, features.fullResLamps);
 		return this.savingsNow().lamps === "quarter" ? "quarter" : mode;
 	}
 
@@ -3103,16 +3093,24 @@ export class ViewportController {
 		return savingsCome(this.options.dynamicOptimization ? this.savings.off() : []);
 	}
 
-	/** Whether Automatic is still to measure light objects' resolution now. */
-	private measuringLamps(): boolean {
-		return (
-			(this.options.lampResolution ?? "auto") === "auto" &&
-			this.lamps.chosen === null &&
-			this.withSavings(this.state.render).features.fullResLamps &&
-			(this.place?.lights?.length ?? 0) > 0 &&
-			// The depth path first: both alternating at once would always pair lean with half.
-			(this.depth.chosen !== null || !this.view?.setDepthPath)
-		);
+	/** This device's name for keeping its depth path: its renderer and GPU. */
+	private deviceKey(): string | null {
+		const view = this.view;
+		return view ? `${view.backend} ${view.deviceFacts().gpu}` : null;
+	}
+
+	/**
+	 * The depth path afresh, for another place, size, view or profile: the one
+	 * this device measured before, kept; or none, to be measured as the view
+	 * moves (full until then), then kept.
+	 */
+	private depthAfresh(): void {
+		this.depth.reset();
+		const key = this.deviceKey();
+		const kept = key && this.view?.setDepthPath ? keptDepth(key) : null;
+		if (!kept) return;
+		this.depth.keep(kept);
+		this.view?.setDepthPath?.(kept);
 	}
 
 	/** Dynamic and Dynamic optimization back to the start: Native, no savings taken. */
@@ -3218,20 +3216,21 @@ export class ViewportController {
 	 * objects' resolution and Dynamic, with the times behind them.
 	 */
 	automaticChoices(): AutomaticChoices {
-		const setting = this.options.lampResolution ?? "auto";
+		const key = this.deviceKey();
 		return {
 			backend: this.view?.backend ?? null,
 			fellBackWhy: this.fellBackWhy,
 			quality: this.state.quality,
 			depth: this.view?.setDepthPath
-				? { chosen: this.depth.chosen, medians: this.depth.medians() }
+				? {
+						chosen: this.depth.chosen,
+						medians: this.depth.medians(),
+						kept: !!key && keptDepth(key) !== null,
+					}
 				: null,
 			lamps: {
-				setting,
 				lights: this.place?.lights?.length ?? 0,
 				mode: this.lampModeNow(),
-				chosen: this.lamps.chosen,
-				medians: this.lamps.medians(),
 			},
 			dynamic: this.dynamicState(),
 		};
@@ -3367,20 +3366,11 @@ export class ViewportController {
 					? this.depth.next()
 					: null;
 			if (depthPath) this.view.setDepthPath?.(depthPath);
-			// WebGL2 is timed for this alone, by a fence (gpuDone).
-			const lampTimed = timed || this.view.gpuDone !== undefined;
-			const lampWay =
-				lampTimed && moving && !depthPath && this.view.setLampMode && this.measuringLamps()
-					? this.lamps.next()
-					: null;
-			if (lampWay) this.view.setLampMode?.(lampWay);
 			this.drawOnce(now);
-			// A frame drawn while its pipelines were still being built is slow for that alone.
-			const generic = this.view.genericFrame === true;
 			if (rate === "steady") this.steady.drawn(now, timed);
 			const dynamic =
 				this.options.renderScale === "dynamic" || this.options.dynamicOptimization === true;
-			if (timed && (rate === "steady" || (dynamic && moving) || depthPath || lampWay)) {
+			if (timed && (rate === "steady" || (dynamic && moving) || depthPath)) {
 				const steady = this.steady;
 				void this.view.settled().then(() => {
 					const ms = performance.now() - started;
@@ -3388,19 +3378,14 @@ export class ViewportController {
 					if (dynamic && moving) this.dynamicFrame(now, ms, true);
 					if (depthPath) {
 						this.depth.record(depthPath, ms);
-						if (this.depth.chosen) this.view?.setDepthPath?.(this.depth.chosen);
+						const chosen = this.depth.chosen;
+						if (chosen) {
+							this.view?.setDepthPath?.(chosen);
+							// Kept for this device: not measured again for every place and size.
+							const key = this.deviceKey();
+							if (key) keepDepth(key, chosen);
+						}
 					}
-					if (lampWay && !generic) {
-						this.lamps.record(lampWay, ms);
-						if (this.lamps.chosen) this.applyLampMode();
-					}
-				});
-			}
-			if (!timed && lampWay && this.view.gpuDone) {
-				void this.view.gpuDone().then(() => {
-					if (generic) return;
-					this.lamps.record(lampWay, performance.now() - started);
-					if (this.lamps.chosen) this.applyLampMode();
 				});
 			}
 			if (!timed && dynamic && moving) this.dynamicFrame(now, gap, false);
@@ -3717,9 +3702,8 @@ export class ViewportController {
 					depthPath.push(await this.timeWaited(label, 30));
 				}
 				view.setDepthPath("auto");
-				// Automatic measures its own again after the profile's.
-				this.depth.reset();
-				this.lamps.reset();
+				// Automatic's own again after the profile's.
+				this.depthAfresh();
 			}
 			const resolution: Timed[] = [];
 			for (const scale of [1, 0.5, 0.25]) {

@@ -174,7 +174,7 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 				"fullResLamps",
 				"Full-resolution light",
 				4,
-				"On, Light objects resolution decides: Automatic measures whether half the pixels is faster in this place. Off, always at half or a quarter. WebGPU.",
+				"On, Light objects resolution decides. Off, always at half or a quarter. WebGPU.",
 			),
 		],
 	},

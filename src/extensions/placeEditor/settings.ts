@@ -100,7 +100,6 @@ export const VIEWPORT_UPSCALES = [
 ] as const;
 export type ViewportUpscale = (typeof VIEWPORT_UPSCALES)[number]["value"];
 export const VIEWPORT_LAMP_RESOLUTIONS = [
-	{ value: "auto", label: "Automatic" },
 	{ value: "full", label: "Full" },
 	{ value: "half", label: "Half" },
 	{ value: "quarter", label: "Quarter" },
@@ -204,7 +203,7 @@ export interface PlaceEditorSettings {
 	/** Savings taken at any level while frames do not fit: see dynamicScale.ts's DynamicSavings. */
 	dynamicOptimization: boolean;
 	/** Light objects' resolution: see depthChoice.ts's lampMode. */
-	lampResolution: "auto" | "full" | "half" | "quarter";
+	lampResolution: "full" | "half" | "quarter";
 	/** Light objects from a grid round the camera, its finest cell: see view.ts's lightGridCell. */
 	lightGrid: "auto" | "off" | "4" | "8" | "16" | "32";
 	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
@@ -312,9 +311,9 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				title: "Light objects resolution",
 				help: "Pixels the lights are worked out at.",
 				detail:
-					"The light of PointLights, SpotLights and SurfaceLights. Automatic measures, as the view moves, whether half the pixels is faster in this place and keeps it only if so; it pays where many lights reach the same pixels. Full, Half or Quarter set it. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU, and WebGL2 where the light grid is off.",
+					"The light of PointLights, SpotLights and SurfaceLights. Full, the default, Half or Quarter; fewer pixels pay where many lights reach the same pixels. Dynamic optimization takes it to half, then a quarter, while frames do not fit. Above 100% render scale, Half works it out at no fewer pixels than the screen has points, so surfaces stay sharp. WebGPU, and WebGL2 where the light grid is off.",
 				type: "choice",
-				default: "auto",
+				default: "full",
 				choices: VIEWPORT_LAMP_RESOLUTIONS,
 			},
 			{

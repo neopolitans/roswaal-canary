@@ -139,6 +139,13 @@ export const VIEWPORT_SKY_RESOLUTIONS = [
 	{ value: "quarter", label: "Quarter" },
 ] as const;
 
+/** Ambient lighting: the sky's share from the lighting cells, from the maps at every pixel, or the device's. */
+export const VIEWPORT_AMBIENT_LIGHTING = [
+	{ value: "auto", label: "Automatic" },
+	{ value: "realtime", label: "Realtime" },
+	{ value: "grid", label: "Grid" },
+] as const;
+
 /** Particle resolution: beams and particles at the frame's pixels or half across and down. */
 export const VIEWPORT_PARTICLE_RESOLUTIONS = [
 	{ value: "full", label: "Full" },
@@ -214,6 +221,8 @@ export interface PlaceEditorSettings {
 	particleResolution: "full" | "half";
 	/** The sky's share at fewer pixels: see the controller's skyModeNow. */
 	skyResolution: "full" | "half" | "quarter";
+	/** The sky's share from the lighting cells or the maps: see view.ts's ambientGrid. */
+	ambientLighting: "auto" | "realtime" | "grid";
 	/** Neon's glow and BloomEffect: see ViewQuality.glowHalf and glowCoarse. */
 	bloomResolution: "auto" | "full" | "half" | "quarter";
 	/** The sun's shadow maps, texels a side, or the quality level's. */
@@ -327,11 +336,21 @@ export const SCENE_VIEW: readonly SettingGroup[] = [
 				choices: VIEWPORT_LIGHT_GRIDS,
 			},
 			{
+				key: "ambientLighting",
+				title: "Ambient lighting",
+				help: "Where the sky's light reaches, from cells or every pixel.",
+				detail:
+					"How much of the sky each surface sees: OutdoorAmbient and the sky's light reach what the sky does, and rooms closed from it get Ambient alone. Grid reads it from the lighting cells, 4 studs a side round the camera, as Studio holds its own, and past them four of the sky's maps a tap each, far fewer reads a pixel: the saving is largest on a tablet at Native. Realtime works it out at every pixel from eight of the sky's maps, sharper past the cells. Automatic is Grid on a touch screen and Realtime elsewhere.",
+				type: "choice",
+				default: "auto",
+				choices: VIEWPORT_AMBIENT_LIGHTING,
+			},
+			{
 				key: "skyResolution",
 				title: "Sky light resolution",
 				help: "Pixels the sky's light and shadow are worked out at.",
 				detail:
-					"How much of the sky each surface sees, which Sky shadows works out from the sky's maps at every pixel: a tablet's costliest work at a high render scale. Half or Quarter works it out at fewer pixels, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. WebGPU.",
+					"How much of the sky each surface sees, which Ambient lighting works out from the sky's maps at every pixel: a tablet's costliest work at a high render scale. Half or Quarter works it out at fewer pixels, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. WebGPU.",
 				type: "choice",
 				default: "full",
 				choices: VIEWPORT_SKY_RESOLUTIONS,

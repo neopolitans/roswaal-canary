@@ -42,6 +42,7 @@ describe("an extension's settings", () => {
 			bloomResolution: "auto",
 			shadowMapSize: "auto",
 			textureResolution: "full",
+			ambientLighting: "auto",
 			skyResolution: "full",
 			reflectionUpdates: "auto",
 			stillFrames: "auto",

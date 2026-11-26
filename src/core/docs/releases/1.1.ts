@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.129",
+		date: "2026-11-26",
+		headline: "Ambient lighting from the lighting cells, on a tablet.",
+		added: [
+			"**Ambient lighting in Graphics**: Grid reads where the sky's light reaches from the lighting cells round the camera, and past them far fewer of the sky's maps; Realtime works it out at every pixel, as before. Automatic is Grid on a touch screen and Realtime elsewhere.",
+		],
+		changed: [
+			"**Sky shadows is Ambient lighting** in the Rendering panel: rooms closed from the sky get Ambient, not OutdoorAmbient.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.128",
 		date: "2026-11-26",
 		headline: "Open Luau wears the Luau logo.",

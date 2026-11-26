@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.80.5",
+	version: "0.81.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.81.0",
+			roswaal: "1.1.0-canary.129",
+			date: "2026-11-26",
+			text: "Ambient lighting (ambientLighting: Automatic, Realtime, Grid; view.ts ambientGrid): Grid sets FEATURE_BIT.skyGrid, and skyVisibility reads the lighting cells, past them skyVisibilityMapsAt cheap, four directions a tap each (skySeesOne), over a narrower band; the cells are filled in full as before. Automatic is Grid on a touch screen. The Sky shadows switch is Ambient lighting.",
+		},
 		{
 			version: "0.80.5",
 			roswaal: "1.1.0-canary.127",

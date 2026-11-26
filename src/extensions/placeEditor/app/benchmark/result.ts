@@ -247,6 +247,7 @@ const RECORDED: [key: string, name: string][] = [
 	["upscale", "Upscaling"],
 	["lampResolution", "Light objects resolution"],
 	["lightGrid", "Light object grid"],
+	["ambientLighting", "Ambient lighting"],
 	["skyResolution", "Sky light resolution"],
 	["bloomResolution", "Bloom resolution"],
 	["particleResolution", "Particle resolution"],

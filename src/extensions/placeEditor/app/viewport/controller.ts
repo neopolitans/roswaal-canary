@@ -135,6 +135,7 @@ import {
 	DEFAULT_RENDER,
 	type EffectSteps,
 	lightGridCell,
+	ambientGrid,
 	type MeshGeometry,
 	madeGeometry,
 	meshGeometry,
@@ -194,6 +195,8 @@ export interface ViewportOptions {
 	textureResolution?: "full" | "half" | "quarter";
 	/** The sky's share at fewer pixels, in the lights' half-size pass: see skyModeNow. */
 	skyResolution?: "full" | "half" | "quarter";
+	/** The sky's share from the lighting cells or the maps: see view.ts's ambientGrid. */
+	ambientLighting?: "auto" | "realtime" | "grid";
 	/** Scene reflections following the camera, or kept on a grid: see view.ts's reflectionGrid. */
 	reflectionUpdates?: "auto" | "follow" | "32" | "64" | "128";
 	/** Effects' frames with the camera still, every display frame or fewer: see view.ts's stillSkip. */
@@ -3093,6 +3096,7 @@ export class ViewportController {
 		this.view?.setSkyMode?.(this.skyModeNow());
 		const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid, touch));
+		this.view?.setAmbientGrid?.(ambientGrid(this.options.ambientLighting, touch));
 		this.view?.setParticleHalf?.(this.options.particleResolution === "half");
 		this.view?.setReflectionGrid?.(reflectionGrid(this.options.reflectionUpdates, touch));
 	}

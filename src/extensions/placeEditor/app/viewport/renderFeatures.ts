@@ -146,7 +146,12 @@ export const FEATURE_GROUPS: readonly { title: string; features: readonly Featur
 				"sunShadows",
 			),
 			f("softEdges", "Soft edges", 3, "Edges softened by ShadowSoftness.", "sunShadows"),
-			f("skyShadows", "Sky shadows", 3, "Closed rooms keep the sky's light out."),
+			f(
+				"skyShadows",
+				"Ambient lighting",
+				3,
+				"Rooms closed from the sky get Ambient, not OutdoorAmbient.",
+			),
 			f(
 				"nearSkyMaps",
 				"Near sky maps",
@@ -480,6 +485,12 @@ export const FEATURE_BIT = {
 	halfLamps: 262144,
 	/** The sky's share read from the half-size pass too: see skyAt. */
 	halfSky: 524288,
+	/**
+	 * Ambient lighting's Grid (Settings): a pixel reads the lighting cells
+	 * alone, and past them four of the sky's maps, a tap each, not eight of
+	 * five taps. The cells are filled as ever. See skyVisibilityMapsAt.
+	 */
+	skyGrid: 1048576,
 } as const;
 
 export function featureBits(features: RenderFeatures): number {

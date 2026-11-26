@@ -635,6 +635,20 @@ fn skySeesIn(k: i32, p: vec3f, info: vec4f) -> f32 {
 	let within = textureSampleCompareLevel(skyMaps, skyCompare, uv, layer, c.z - along * info.y);
 	return clamp(seen + 1.0 - within, 0.0, 1.0);
 }
+// As skySeesIn with one tap, not four: Ambient lighting's Grid past the cells.
+fn skySeesOne(k: i32, p: vec3f, info: vec4f) -> f32 {
+	let c = skyU.views[k] * vec4f(p, 1.0);
+	let layer = select(k, k + i32(skyU.nearSet.x), k >= ${SKY_NEAR_LAYER});
+	let uv = vec2f(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
+	if (any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) || c.z > 1.0) { return 1.0; }
+	let seen = textureSampleCompareLevel(skyMaps, skyCompare, uv, layer, c.z - info.y * 0.5);
+	if (k == ${SKY_VIEWS}) { return seen; }
+	let rise = select(0.70711, 1.0, k == 0 || k == ${SKY_NEAR_LAYER});
+	let along = (u.camPos.y + ${SKY_REACH}.0 - p.y) / rise;
+	if (along <= 0.0) { return 1.0; }
+	let within = textureSampleCompareLevel(skyMaps, skyCompare, uv, layer, c.z - along * info.y);
+	return clamp(seen + 1.0 - within, 0.0, 1.0);
+}
 // The place's lights: five vec4s each, see sceneLights; and which reach a
 // cell of the world, by its hash, see lightGrid.
 @group(0) @binding(9) var<storage, read> lightData: array<vec4f>;
@@ -955,19 +969,21 @@ fn cellOrigin() -> vec3f { return skyU.nearAt.xyz - vec3f(${(SKY_CELLS[0] * SKY_
 // How much of the sky reaches p: the maps', and at least what the lighting
 // cells round it see, blended between their middles, as Studio's lighting is.
 fn skyVisibility(p: vec3f, n: vec3f) -> f32 {
-	if (!has(${FEATURE_BIT.leak}u) || skyU.near.w < 0.5) { return skyVisibilityMaps(p, n); }
+	let cheap = has(${FEATURE_BIT.skyGrid}u);
+	if (!has(${FEATURE_BIT.leak}u) || skyU.near.w < 0.5) { return skyVisibilityMapsAt(p, n, cheap); }
 	// Read half a cell out from the face, where the light it gathers is.
 	let uvw = (p + n * ${SKY_CELL / 2}.0 - cellOrigin()) / vec3f(${SKY_CELLS[0] * SKY_CELL}.0, ${SKY_CELLS[1] * SKY_CELL}.0, ${SKY_CELLS[2] * SKY_CELL}.0);
-	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) { return skyVisibilityMaps(p, n); }
+	if (any(uvw < vec3f(0.0)) || any(uvw > vec3f(1.0))) { return skyVisibilityMapsAt(p, n, cheap); }
 	let seen = textureSampleLevel(skyCells, skyCellSampler, vec3f(uvw.x, uvw.z, uvw.y), 0.0).r * ${SKY_LEAK.toFixed(3)};
 	// Studio's sky light is its cells', blended between their middles, so a
 	// beam overhead casts no sharp sky shadow: the cells' alone, then, easing
 	// to the maps at the cells' edge. The maps are read only where they show:
 	// sixteen taps a pixel, which inside the cells were read and thrown away.
 	let edge = min(min(uvw.x, 1.0 - uvw.x), min(min(uvw.y, 1.0 - uvw.y), min(uvw.z, 1.0 - uvw.z)));
-	let k = smoothstep(0.0, 0.08, edge);
+	// Grid eases over a narrower band: the maps and the cells both read there.
+	let k = smoothstep(0.0, select(0.08, 0.03, cheap), edge);
 	if (k >= 1.0) { return seen; }
-	return mix(skyVisibilityMaps(p, n), seen, k);
+	return mix(skyVisibilityMapsAt(p, n, cheap), seen, k);
 }
 // A lighting cell: the share of the sky its middle sees, a slice of cells a draw.
 struct CellOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) slice: u32 };
@@ -1044,7 +1060,10 @@ fn cellAround(x: i32, y: i32, z: i32) -> vec4f {
 	o.h = cellAround(x, y + 7, z);
 	return o;
 }
-fn skyVisibilityMaps(p: vec3f, n: vec3f) -> f32 {
+// Every direction, every tap: the lighting cells are filled from this.
+fn skyVisibilityMaps(p: vec3f, n: vec3f) -> f32 { return skyVisibilityMapsAt(p, n, false); }
+// cheap: Ambient lighting's Grid, four directions a tap each (see FEATURE_BIT.skyGrid).
+fn skyVisibilityMapsAt(p: vec3f, n: vec3f, cheap: bool) -> f32 {
 	if (skyU.info.w < 0.5 || !has(${FEATURE_BIT.skyShadows}u)) { return 1.0; }
 	// Near the camera the near maps, a texel well under a wall's width; the
 	// whole place's further off, blended over the box's last quarter.
@@ -1065,11 +1084,17 @@ fn skyVisibilityMaps(p: vec3f, n: vec3f) -> f32 {
 	for (var j = 0; j < 16; j++) {
 		let isNear = j < 8;
 		if ((isNear && !nearOn) || (!isNear && !farOn)) { continue; }
-		let s = skySeesIn(select(j - 8, ${SKY_NEAR_LAYER} + j, isNear), select(q, qn, isNear), select(skyU.info, skyU.near, isNear));
+		if (cheap && (j & 1) == 1) { continue; }
+		let kk = select(j - 8, ${SKY_NEAR_LAYER} + j, isNear);
+		let pp = select(q, qn, isNear);
+		let info = select(skyU.info, skyU.near, isNear);
+		var s: f32;
+		if (cheap) { s = skySeesOne(kk, pp, info); } else { s = skySeesIn(kk, pp, info); }
 		if (isNear) { near = near + s; } else { seen = seen + s; }
 	}
-	near = near / 8.0;
-	seen = seen / 8.0;
+	let ways = select(8.0, 4.0, cheap);
+	near = near / ways;
+	seen = seen / ways;
 	if (edge < 0.75) { return near; }
 	if (edge >= 1.0) { return seen; }
 	return mix(near, seen, smoothstep(0.75, 1.0, edge));
@@ -6204,6 +6229,15 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	/** The sky's share at half or a quarter of the pixels: see skyAt. */
 	private skyModeNow: "full" | "half" | "quarter" = "full";
 
+	/** Ambient lighting's Grid (Settings): see FEATURE_BIT.skyGrid. */
+	private ambientGrid = false;
+
+	setAmbientGrid(on: boolean): void {
+		if (on === this.ambientGrid) return;
+		this.ambientGrid = on;
+		this.onRedraw?.();
+	}
+
 	setSkyMode(mode: "full" | "half" | "quarter"): void {
 		if (mode === this.skyModeNow) return;
 		const was = this.halfShare();
@@ -6240,7 +6274,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	 * place has lights; the sky's as the sky mode says, where Sky shadows is on.
 	 */
 	private lampBit(bits: number): number {
-		let out = bits & ~(FEATURE_BIT.halfLamps | FEATURE_BIT.halfSky);
+		let out = bits & ~(FEATURE_BIT.halfLamps | FEATURE_BIT.halfSky | FEATURE_BIT.skyGrid);
+		if (this.ambientGrid && bits & FEATURE_BIT.skyShadows) out |= FEATURE_BIT.skyGrid;
 		if (this.lampModeNow !== "full" && this.hasLights && this.gridCell === null)
 			out |= FEATURE_BIT.halfLamps;
 		if (this.skyModeNow !== "full" && bits & FEATURE_BIT.skyShadows) out |= FEATURE_BIT.halfSky;

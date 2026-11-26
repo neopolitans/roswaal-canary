@@ -293,8 +293,12 @@ export function settingsPage(): DocPage {
 						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. On a touch screen, Automatic is **8-stud** cells for either, which a tablet keeps up with at Native. **Off** has every pixel work out its own. WebGPU, and WebGL2 where it draws to float textures.",
 					],
 					[
+						"Ambient lighting",
+						"How much of the sky each surface sees: OutdoorAmbient and the sky's light reach what the sky does, and rooms closed from it get Ambient alone. **Grid** reads it from the lighting cells, 4 studs a side round the camera, as Studio holds its own, and past them four of the sky's maps a tap each, far fewer reads a pixel; the saving is largest on a tablet at Native. **Realtime** works it out at every pixel from eight of the sky's maps, sharper past the cells. **Automatic**, the default, is Grid on a touch screen and Realtime elsewhere.",
+					],
+					[
 						"Sky light resolution",
-						"How many pixels the sky's light and shadow, Sky shadows' work, are worked out at. **Full**, the default, is every pixel; **Half** or **Quarter** works it out at fewer, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. It saves most on a tablet at a high render scale. WebGPU.",
+						"How many pixels the sky's light and shadow, Ambient lighting's work, are worked out at. **Full**, the default, is every pixel; **Half** or **Quarter** works it out at fewer, in the same pass as Light objects resolution's, and reads it back where each pixel's distance agrees. It saves most on a tablet at a high render scale. WebGPU.",
 					],
 					[
 						"Bloom resolution",

@@ -376,6 +376,19 @@ float skySeesIn(int k, vec3 p, vec4 info) {
 	float within = texture(skyMaps, vec4(q.xy, float(k), q.z - along * info.y * 0.5));
 	return clamp(seen + 1.0 - within, 0.0, 1.0);
 }
+// As skySeesIn with one tap, not four: Ambient lighting's Grid past the cells.
+float skySeesOne(int k, vec3 p, vec4 info) {
+	vec4 c = skyViews[k] * vec4(p, 1.0);
+	vec3 q = c.xyz * 0.5 + 0.5;
+	if (any(lessThan(q.xy, vec2(0.0))) || any(greaterThan(q, vec3(1.0)))) return 1.0;
+	float seen = texture(skyMaps, vec4(q.xy, float(k), q.z - info.y * 0.25));
+	if (k == ${SKY_VIEWS}) return seen;
+	float rise = (k == 0 || k == ${SKY_NEAR_LAYER}) ? 1.0 : 0.70711;
+	float along = (L[6].y + ${SKY_REACH}.0 - p.y) / rise;
+	if (along <= 0.0) return 1.0;
+	float within = texture(skyMaps, vec4(q.xy, float(k), q.z - along * info.y * 0.5));
+	return clamp(seen + 1.0 - within, 0.0, 1.0);
+}
 // The place's lights, as WebGpuView's partLights: five texels a light, a row
 // each; and which reach a cell, 256 hashes a row, see lightGrid.
 uniform highp sampler2D lightData;
@@ -493,8 +506,11 @@ float testedSmooth(vec3 p) {
 	}
 	return sum;
 }
-float skyVisibilityMaps(vec3 p, vec3 n) {
+// cheap: Ambient lighting's Grid, four directions a tap each (see FEATURE_BIT.skyGrid).
+float skyVisibilityMapsAt(vec3 p, vec3 n, bool cheap) {
 	if (skyInfo.w < 0.5 || !has(${FEATURE_BIT.skyShadows})) return 1.0;
+	int step = cheap ? 2 : 1;
+	float ways = cheap ? 4.0 : 8.0;
 	// The near maps near the camera, as WebGpuView's skyVisibility.
 	float edge = 2.0;
 	if (skyNear.w > 0.5 && has(${FEATURE_BIT.nearSky})) {
@@ -504,31 +520,36 @@ float skyVisibilityMaps(vec3 p, vec3 n) {
 	float near = 0.0;
 	if (edge < 1.0) {
 		vec3 qn = p + n * skyNear.x * 1.5;
-		for (int k = 0; k < 8; k++) near += skySeesIn(${SKY_NEAR_LAYER} + k, qn, skyNear);
-		near /= 8.0;
+		for (int k = 0; k < 8; k += step)
+			near += cheap ? skySeesOne(${SKY_NEAR_LAYER} + k, qn, skyNear) : skySeesIn(${SKY_NEAR_LAYER} + k, qn, skyNear);
+		near /= ways;
 		if (edge < 0.75) return near;
 	}
 	vec3 q = p + n * skyInfo.x * 1.5;
 	float seen = 0.0;
-	for (int k = 0; k < 8; k++) seen += skySees(k, q);
-	seen /= 8.0;
+	for (int k = 0; k < 8; k += step) seen += cheap ? skySeesOne(k, q, skyInfo) : skySees(k, q);
+	seen /= ways;
 	if (edge >= 1.0) return seen;
 	return mix(near, seen, smoothstep(0.75, 1.0, edge));
 }
+// Every direction, every tap: the lighting cells are filled from this.
+float skyVisibilityMaps(vec3 p, vec3 n) { return skyVisibilityMapsAt(p, n, false); }
 // The lighting cells round the near maps' centre, as WebGpuView's skyVisibility reads them.
 uniform highp sampler3D skyCells;
 vec3 cellOrigin() { return skyNearAt.xyz - vec3(${(SKY_CELLS[0] * SKY_CELL) / 2}.0, ${(SKY_CELLS[1] * SKY_CELL) / 2}.0, ${(SKY_CELLS[2] * SKY_CELL) / 2}.0); }
 float skyVisibility(vec3 p, vec3 n) {
-	if (!has(${FEATURE_BIT.leak}) || skyNear.w < 0.5) return skyVisibilityMaps(p, n);
+	bool cheap = has(${FEATURE_BIT.skyGrid});
+	if (!has(${FEATURE_BIT.leak}) || skyNear.w < 0.5) return skyVisibilityMapsAt(p, n, cheap);
 	vec3 uvw = (p + n * ${SKY_CELL / 2}.0 - cellOrigin()) / vec3(${SKY_CELLS[0] * SKY_CELL}.0, ${SKY_CELLS[1] * SKY_CELL}.0, ${SKY_CELLS[2] * SKY_CELL}.0);
-	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return skyVisibilityMaps(p, n);
+	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return skyVisibilityMapsAt(p, n, cheap);
 	float seen = texture(skyCells, vec3(uvw.x, uvw.z, uvw.y)).r * ${SKY_LEAK.toFixed(3)};
 	// As WebGpuView's: the cells' alone, easing to the maps at their edge,
 	// which are read only where they show.
 	float edge = min(min(uvw.x, 1.0 - uvw.x), min(min(uvw.y, 1.0 - uvw.y), min(uvw.z, 1.0 - uvw.z)));
-	float k = smoothstep(0.0, 0.08, edge);
+	// Grid eases over a narrower band: the maps and the cells both read there.
+	float k = smoothstep(0.0, cheap ? 0.03 : 0.08, edge);
 	if (k >= 1.0) return seen;
-	return mix(skyVisibilityMaps(p, n), seen, k);
+	return mix(skyVisibilityMapsAt(p, n, cheap), seen, k);
 }
 // The sun's shadow near the camera, as WebGpuView's cascadeSees.
 uniform highp sampler2DArrayShadow sunMaps;
@@ -5092,10 +5113,20 @@ export class WebGl2View implements ViewRenderer {
 
 	/** The half-size pass's bit: as the lamp mode says, where the place has lights and the grid is off. */
 	private lampBit(bits: number): number {
-		const out = bits & ~FEATURE_BIT.halfLamps;
+		let out = bits & ~(FEATURE_BIT.halfLamps | FEATURE_BIT.skyGrid);
+		if (this.ambientGrid && bits & FEATURE_BIT.skyShadows) out |= FEATURE_BIT.skyGrid;
 		return this.lampAble && this.lampModeNow !== "full" && this.hasLights && this.gridCell === null
 			? out | FEATURE_BIT.halfLamps
 			: out;
+	}
+
+	/** Ambient lighting's Grid (Settings): see FEATURE_BIT.skyGrid. */
+	private ambientGrid = false;
+
+	setAmbientGrid(on: boolean): void {
+		if (on === this.ambientGrid) return;
+		this.ambientGrid = on;
+		this.onRedraw?.();
 	}
 
 	/** The half-size pass's step across the render: see halfPassStep. */

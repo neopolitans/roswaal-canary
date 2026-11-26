@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	ambientGrid,
 	autoLightGrid,
 	LIGHT_CELL,
 	LIGHT_GRID_CELLS,
@@ -93,5 +94,15 @@ describe("the light grid", () => {
 		expect(lightGridSamples(16)).toBe(1);
 		expect(lightGridSamples(32)).toBe(2);
 		expect(lightGridSamples(128)).toBe(128 / LIGHT_CELL);
+	});
+});
+
+describe("Ambient lighting (1.1.0-canary.129)", () => {
+	it("is Grid on a touch screen and Realtime elsewhere, unless set", () => {
+		expect(ambientGrid(undefined)).toBe(false);
+		expect(ambientGrid("auto")).toBe(false);
+		expect(ambientGrid("auto", true)).toBe(true);
+		expect(ambientGrid("grid")).toBe(true);
+		expect(ambientGrid("realtime", true)).toBe(false);
 	});
 });

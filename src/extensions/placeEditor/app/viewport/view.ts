@@ -142,6 +142,8 @@ export interface ViewRenderer {
 	setLightGrid?(cell: number | null | "auto"): void;
 	/** Beams and particles at half size, where the frame has a glow pass: see Particle resolution. */
 	setParticleHalf?(on: boolean): void;
+	/** Ambient lighting's Grid: see FEATURE_BIT.skyGrid. */
+	setAmbientGrid?(on: boolean): void;
 	/** Whether the last frame was drawn with pipelines still being built for its switches: a slow frame, not a measure. */
 	readonly genericFrame?: boolean;
 	/**
@@ -928,6 +930,19 @@ export function lightGridCell(setting: string | undefined, touch = false): numbe
 		return Number(setting);
 	if (setting === "off") return null;
 	return touch ? TOUCH_LIGHT_CELL : "auto";
+}
+
+/**
+ * Ambient lighting as set: Grid reads the lighting cells and, past them, the
+ * sky's maps a tap each (FEATURE_BIT.skyGrid); Realtime the maps in full.
+ * Automatic is Grid on a touch screen: with the maps' taps, an iPad Mini's
+ * frames at Native were about ten milliseconds longer than with Ambient
+ * lighting off (26 Nov 2026).
+ */
+export function ambientGrid(setting: string | undefined, touch = false): boolean {
+	if (setting === "grid") return true;
+	if (setting === "realtime") return false;
+	return touch;
 }
 
 /** Soft's cells: as Studio's own Soft lights in, 4 studs a side (25 Nov 2026 captures). */

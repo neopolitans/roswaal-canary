@@ -44,7 +44,9 @@ async function saveResults(result: BenchmarkResult): Promise<void> {
 	const touch = typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1;
 	if (touch && navigator.canShare?.({ files: [file] })) {
 		try {
-			await navigator.share({ files: [file], title: name });
+			// The file alone: with a title or text beside it, Save to Files
+			// saves that too, as a text file of its own (an iPad, 26 Nov 2026).
+			await navigator.share({ files: [file] });
 			return;
 		} catch {
 			// Dismissed, or refused: the download below.

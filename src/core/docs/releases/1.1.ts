@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.127",
+		date: "2026-11-26",
+		headline: "Benchmark results save as one file on an iPad.",
+		fixed: [
+			"**Benchmark results saved to Files on an iPad or iPhone** are the results file alone, without a text file of its name beside it.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.126",
 		date: "2026-11-26",
 		headline: "Compile mode in a list, and a deprecation that says what to use.",

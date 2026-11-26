@@ -1111,8 +1111,15 @@ void main() {
 	vec2 q = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
 	gl_Position = vec4(q * 2.0 - 1.0, 0.0, 1.0);
 }`;
-/** A lighting cell: the share of the sky round its middle, as WebGpuView's fsCell. */
-const FS_CELL = `#version 300 es
+/**
+ * The lighting cells in two steps, as WebGpuView's fsCellOwn and
+ * fsCellAround: each cell's own share of the sky, once, with a cell's border
+ * round them; then each cell the average of its own and its 26 neighbours'.
+ * A 27th of the samples of the maps of each cell sampling all 27 itself,
+ * which took an iPad's WebGL2 85 ms each time the near maps moved (26 Nov 2026).
+ * Texel (x, z, y) of the own cells holds cell (x - 1, y - 1, z - 1).
+ */
+const FS_CELL_OWN = `#version 300 es
 precision highp float;
 precision highp int;
 ${COMMON}
@@ -1120,12 +1127,22 @@ ${SKY_VIS}
 uniform float cellSlice;
 out vec4 o;
 void main() {
-	vec3 cell = vec3(floor(gl_FragCoord.x), cellSlice, floor(gl_FragCoord.y));
+	vec3 cell = vec3(floor(gl_FragCoord.x) - 1.0, cellSlice - 1.0, floor(gl_FragCoord.y) - 1.0);
 	vec3 p = cellOrigin() + (cell + 0.5) * ${SKY_CELL}.0;
+	o = vec4(skyVisibilityMaps(p, vec3(0.0, 1.0, 0.0)), 0.0, 0.0, 1.0);
+}`;
+const FS_CELL_AROUND = `#version 300 es
+precision highp float;
+precision highp int;
+uniform highp sampler3D cellsOwn;
+uniform float cellSlice;
+out vec4 o;
+void main() {
+	ivec3 c = ivec3(int(gl_FragCoord.x), int(cellSlice), int(gl_FragCoord.y));
 	float sum = 0.0;
-	for (int x = -1; x <= 1; x++)
-		for (int y = -1; y <= 1; y++)
-			for (int z = -1; z <= 1; z++) sum += skyVisibilityMaps(p + vec3(float(x), float(y), float(z)) * ${SKY_CELL}.0, vec3(0.0, 1.0, 0.0));
+	for (int dx = 0; dx <= 2; dx++)
+		for (int dy = 0; dy <= 2; dy++)
+			for (int dz = 0; dz <= 2; dz++) sum += texelFetch(cellsOwn, ivec3(c.x + dx, c.z + dz, c.y + dy), 0).r;
 	o = vec4(sum / 27.0, 0.0, 0.0, 1.0);
 }`;
 const FS = `#version 300 es
@@ -1704,6 +1721,7 @@ export class WebGl2View implements ViewRenderer {
 
 	/** What the cube shows changed: drawn again; every kept cube spare but the one read now. */
 	private reflStale(): void {
+		this.reflDropFill();
 		this.reflAt = null;
 		for (const e of this.reflCache.values())
 			if (e.cube !== this.reflCube) this.reflSpare.push(e.cube);
@@ -1781,10 +1799,15 @@ export class WebGl2View implements ViewRenderer {
 	}
 
 	/**
-	 * The cube's six faces, as WebGpuView's drawReflections: when scene
+	 * The cube's faces, as WebGpuView's drawReflections: when scene
 	 * reflections are on and the camera is PROBE_STEP studs from where it was
-	 * last drawn, or what it shows changed. Every part, culled for no face;
-	 * then its smaller levels, for a metal's blur.
+	 * last drawn (or, on the grid, enters a cell with no cube kept), or what
+	 * it shows changed. The first cube whole, so the place never reflects an
+	 * empty one; after it, a face a frame into a cube of its own, the one
+	 * read until then shown until all six are drawn. Drawn whole in one frame,
+	 * every part into every face, an iPad's WebGL2 took 145 ms a frame while
+	 * the camera crossed cells (25 Nov 2026). Each face draws the chunks in
+	 * its own view; then the cube's smaller levels, for a metal's blur.
 	 */
 	private drawReflections(camera: Camera): void {
 		const gl = this.gl;
@@ -1792,38 +1815,42 @@ export class WebGl2View implements ViewRenderer {
 		if (!shown || !this.reflFbo || !featureOn(this.render.features, "sceneReflections")) return;
 		const grid = this.reflGrid;
 		const key = grid === null ? null : reflectionCell(camera.eye, grid);
-		if (key === null) {
-			const at = this.reflAt;
-			if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
-		} else {
-			// The grid, as WebGpuView's: the cell's own cube, kept once drawn,
-			// from where the camera entered the cell, not its middle, which may
-			// be inside a wall and reflect only darkness.
-			if (this.reflAt && this.reflShown === key) return;
-			const kept = this.reflCache.get(key);
-			if (kept) {
-				kept.used = ++this.reflUses;
-				// The cube read until now, where no cell keeps it, goes spare.
-				if (![...this.reflCache.values()].some((e) => e.cube === shown)) this.reflSpare.push(shown);
-				this.showCube(kept.cube, kept.at);
-				this.reflAt = kept.at;
-				this.reflShown = key;
-				return;
+		// Another cell before the cube for the last was done: that one is left.
+		if (this.reflFill && key !== null && this.reflFill.key !== key) this.reflDropFill();
+		if (!this.reflFill) {
+			if (key === null) {
+				const at = this.reflAt;
+				if (at && Math.hypot(...camera.eye.map((v, a) => v - at[a])) < PROBE_STEP) return;
+			} else {
+				// The grid, as WebGpuView's: the cell's own cube, kept once drawn,
+				// from where the camera entered the cell, not its middle, which may
+				// be inside a wall and reflect only darkness.
+				if (this.reflAt && this.reflShown === key) return;
+				const kept = this.reflCache.get(key);
+				if (kept) {
+					kept.used = ++this.reflUses;
+					// The cube read until now, where no cell keeps it, goes spare.
+					if (![...this.reflCache.values()].some((e) => e.cube === shown))
+						this.reflSpare.push(shown);
+					this.showCube(kept.cube, kept.at);
+					this.reflAt = kept.at;
+					this.reflShown = key;
+					return;
+				}
 			}
+			// The first cube into the one read; after it, a cube of its own.
+			const cube = this.reflEver ? (this.reflSpare.pop() ?? this.newCube()) : shown;
+			this.reflFill = { key, at: [...camera.eye], cube, face: 0 };
 		}
-		// Into the cube read now, unless a cell keeps it: then a spare, or a new one.
-		const cube =
-			key !== null && [...this.reflCache.values()].some((e) => e.cube === shown)
-				? (this.reflSpare.pop() ?? this.newCube())
-				: shown;
-		this.reflAt = [...camera.eye];
-		const faces = probeFaces(camera.eye, true);
-		this.redrawn.probeFaces += faces.length;
+		const fill = this.reflFill;
+		const until = this.reflEver ? fill.face + 1 : 6;
+		const faces = probeFaces(fill.at, true);
+		this.redrawn.probeFaces += until - fill.face;
 		// The solid parts' Decals and Textures go on each face too: the image
 		// program's lighting set for this camera, its view swapped per face.
 		const images =
 			this.imageVao && passesOf(this.render.features).images
-				? imageOrder(this.imageList, "solid", camera.eye, (asset) => this.imageTextures.has(asset))
+				? imageOrder(this.imageList, "solid", fill.at, (asset) => this.imageTextures.has(asset))
 				: [];
 		if (images.length > 0) this.use(this.imageProgram, camera, false);
 		this.use(this.reflProgram, camera, false);
@@ -1838,21 +1865,31 @@ export class WebGl2View implements ViewRenderer {
 		gl.clearColor(0, 0, 0, 0);
 		gl.clearDepth(1);
 		const culled = this.runs;
-		this.runs = new Map();
-		faces.forEach((face, k) => {
+		for (let k = fill.face; k < until; k++) {
+			const face = faces[k];
 			gl.framebufferTexture2D(
 				gl.FRAMEBUFFER,
 				gl.COLOR_ATTACHMENT0,
 				gl.TEXTURE_CUBE_MAP_POSITIVE_X + k,
-				cube,
+				fill.cube,
 				0,
 			);
 			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 			gl.uniformMatrix4fv(this.reflProgram.viewProj, false, face);
+			// The chunks this face sees, of every part: as mapSolids, its four sides.
+			const planes = sidePlanes(face);
+			this.runs = new Map();
+			for (const d of this.draws)
+				if (d.chunks)
+					this.runs.set(
+						d,
+						visibleRuns(d.chunks, (c) => boxInView(planes, c.min, c.max)),
+					);
 			this.solids();
 			if (images.length > 0) this.reflectImages(images, face);
-		});
+		}
 		this.runs = culled;
+		fill.face = until;
 		gl.framebufferTexture2D(
 			gl.FRAMEBUFFER,
 			gl.COLOR_ATTACHMENT0,
@@ -1861,17 +1898,42 @@ export class WebGl2View implements ViewRenderer {
 			0,
 		);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-		this.showCube(cube, this.reflAt);
-		if (key !== null) {
-			this.reflShown = key;
-			this.keepCube(key, cube, this.reflAt);
-		}
-		gl.activeTexture(gl.TEXTURE14);
-		gl.bindTexture(gl.TEXTURE_CUBE_MAP, cube);
-		gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
-		gl.activeTexture(gl.TEXTURE0);
 		gl.enable(gl.CULL_FACE);
 		gl.viewport(0, 0, this.width, this.height);
+		// Faces still to draw: the next frame, the cube read until now shown meanwhile.
+		if (fill.face < 6) {
+			this.onRedraw?.();
+			return;
+		}
+		this.reflFill = null;
+		this.reflEver = true;
+		gl.activeTexture(gl.TEXTURE14);
+		gl.bindTexture(gl.TEXTURE_CUBE_MAP, fill.cube);
+		gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+		gl.activeTexture(gl.TEXTURE0);
+		// The cube read until now, where no cell keeps it, goes spare.
+		if (fill.cube !== shown && ![...this.reflCache.values()].some((e) => e.cube === shown))
+			this.reflSpare.push(shown);
+		this.showCube(fill.cube, fill.at);
+		this.reflAt = fill.at;
+		if (fill.key !== null) {
+			this.reflShown = fill.key;
+			this.keepCube(fill.key, fill.cube, fill.at);
+		}
+	}
+
+	/** A cube being drawn a face a frame: see drawReflections. */
+	private reflFill: { key: string | null; at: number[]; cube: WebGLTexture; face: number } | null =
+		null;
+	/** Whether a whole cube has been drawn yet: until then, one is drawn whole. */
+	private reflEver = false;
+
+	/** The cube being drawn left part way: spare again, unless it is the one read. */
+	private reflDropFill(): void {
+		const fill = this.reflFill;
+		if (!fill) return;
+		if (fill.cube !== this.reflCube) this.reflSpare.push(fill.cube);
+		this.reflFill = null;
 	}
 	private ids!: Program;
 	private over!: Program;
@@ -2430,12 +2492,30 @@ export class WebGl2View implements ViewRenderer {
 	private cellFbo: WebGLFramebuffer | null = null;
 	private cellVao: WebGLVertexArrayObject | null = null;
 	private cellProg?: Program;
+	/** The cells' second step, and their own shares with a cell's border: see FS_CELL_OWN. */
+	private cellAround?: Program;
+	private cellOwn: WebGLTexture | null = null;
 
 	/** Each lighting cell from the maps just drawn, into the cells not read; then read, on unit 13. */
 	private fillCells(camera: Camera): void {
 		const gl = this.gl;
 		if (!this.cellProg) {
-			this.cellProg = this.link(VS_CELL, FS_CELL);
+			this.cellProg = this.link(VS_CELL, FS_CELL_OWN);
+			this.cellAround = this.link(VS_CELL, FS_CELL_AROUND);
+			this.cellOwn = gl.createTexture()!;
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_3D, this.cellOwn);
+			gl.texStorage3D(
+				gl.TEXTURE_3D,
+				1,
+				gl.R8,
+				SKY_CELLS[0] + 2,
+				SKY_CELLS[2] + 2,
+				SKY_CELLS[1] + 2,
+			);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.bindTexture(gl.TEXTURE_3D, null);
 			this.cellFbo = gl.createFramebuffer();
 			this.cellVao = gl.createVertexArray();
 			for (let k = 0; k < 2; k++) {
@@ -2456,17 +2536,32 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindTexture(gl.TEXTURE_3D, this.cellTex[this.cellsRead]);
 		gl.activeTexture(gl.TEXTURE0);
 		this.use(this.cellProg, camera, false);
-		const slice = gl.getUniformLocation(this.cellProg.program, "cellSlice");
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.cellFbo);
-		gl.viewport(0, 0, SKY_CELLS[0], SKY_CELLS[2]);
 		gl.disable(gl.DEPTH_TEST);
 		gl.disable(gl.BLEND);
 		gl.bindVertexArray(this.cellVao);
-		for (let y = 0; y < SKY_CELLS[1]; y++) {
-			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, target, 0, y);
-			gl.uniform1f(slice, y);
+		// Each cell's own share, a cell's border round them, a slice a draw.
+		const ownSlice = gl.getUniformLocation(this.cellProg.program, "cellSlice");
+		gl.viewport(0, 0, SKY_CELLS[0] + 2, SKY_CELLS[2] + 2);
+		for (let y = 0; y < SKY_CELLS[1] + 2; y++) {
+			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.cellOwn, 0, y);
+			gl.uniform1f(ownSlice, y);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
 		}
+		// Then each the average round it, read from unit 0 for these draws alone.
+		const around = this.cellAround!;
+		gl.useProgram(around.program);
+		gl.uniform1i(this.loc(around.program, "cellsOwn"), 0);
+		const aroundSlice = this.loc(around.program, "cellSlice");
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_3D, this.cellOwn);
+		gl.viewport(0, 0, SKY_CELLS[0], SKY_CELLS[2]);
+		for (let y = 0; y < SKY_CELLS[1]; y++) {
+			gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, target, 0, y);
+			gl.uniform1f(aroundSlice, y);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+		}
+		gl.bindTexture(gl.TEXTURE_3D, null);
 		gl.bindVertexArray(null);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.viewport(0, 0, this.width, this.height);

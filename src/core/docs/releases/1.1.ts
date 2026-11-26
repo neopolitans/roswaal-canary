@@ -9,6 +9,17 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.118",
+		date: "2026-11-26",
+		headline: "Moving through a busy place hitches far less: reflections and the sky's light are spread out and cheaper.",
+		changed: [
+			"**Each face of the reflection cube draws only what it sees**, not the whole place six times over.",
+			"**WebGL2 draws a new reflection cube a face a frame**, as WebGPU does, the last one shown until it is done, rather than all six in one frame.",
+			"**WebGL2 works out the sky's light through thin walls in two steps**, as WebGPU does, with a 27th of the work it took each time the camera moved on.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.117",
 		date: "2026-11-25",
 		headline: "A WebGL2 benchmark shows its frames as it times them.",

@@ -6591,7 +6591,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 			pass.setPipeline(this.reflPipe);
 			pass.setBindGroup(0, this.reflBind);
 			pass.setBindGroup(1, group);
-			this.solids(pass, this.draws, true);
+			// The chunks this face sees, by its four sides: every part, unculled, before.
+			this.mapSolids(pass, faces[k]);
 			this.reflectImages(pass, group, fill.at);
 			pass.end();
 			this.redrawn.probeFaces++;

@@ -585,9 +585,32 @@ function pixelsLevel(level: BenchmarkLevelResult, gpu: boolean): string[] {
 	return lines;
 }
 
-/** The run as a file's name: roswaal-benchmark-1-2026-11-22T10-30.json. */
+/**
+ * The run as a file's name, its kind and renderer told apart at a glance:
+ * roswaal-benchmark-5-smoothness-webgl2-2026-11-26T08-09.json, or for an A/B,
+ * roswaal-benchmark-5-ab-sun-shadows-webgpu-…; "-warm" with a warm pass.
+ */
 export function benchmarkFileName(result: BenchmarkResult): string {
-	return `roswaal-benchmark-${result.benchmark}-${result.date.slice(0, 16).replace(/:/g, "-")}.json`;
+	const kebab = (s: string) =>
+		s
+			.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+			.replace(/[^A-Za-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "")
+			.toLowerCase();
+	const kind = result.ab
+		? `ab-${kebab(result.ab.feature)}`
+		: result.kind === "sweep"
+			? "full-sweep"
+			: result.kind === "pixels"
+				? "pixel-cost"
+				: result.kind === "smooth"
+					? "smoothness"
+					: "current";
+	const warm = (result.passes ?? 1) > 1 ? "-warm" : "";
+	const renderer = result.renderer
+		? `-${result.renderer.replace(/[^A-Za-z0-9]+/g, "").toLowerCase()}`
+		: "";
+	return `roswaal-benchmark-${result.benchmark}-${kind}${warm}${renderer}-${result.date.slice(0, 16).replace(/:/g, "-")}.json`;
 }
 
 /** The run as JSON, every number in it, to load again for comparison. */

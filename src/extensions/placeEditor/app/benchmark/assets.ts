@@ -51,15 +51,35 @@ const TEXTURE_FILES: Record<string, string> = {
 
 export const TEXTURE_NAMES = Object.keys(TEXTURE_FILES);
 
-async function bytesAt(url: string): Promise<Uint8Array> {
+/** A file of the benchmark's own, as bytes. */
+export async function bytesAt(url: string): Promise<Uint8Array> {
 	// A small file the build inlined: read from its URL, since the page's
 	// policy (connect-src 'self') refuses a fetch of a data: URL.
 	const inline = /^data:[^,]*;base64,(.*)$/s.exec(url);
 	if (inline) return Uint8Array.from(atob(inline[1]), (c) => c.charCodeAt(0));
-	const answer = await fetch(url);
-	if (!answer.ok) throw new Error(`${url}: ${answer.status}`);
-	return new Uint8Array(await answer.arrayBuffer());
+	// Asked for again after a moment where the host fails for a moment (a
+	// 503 from the site's edge stopped an iPad's run, 26 Nov 2026), or the
+	// connection drops; a missing file fails at once.
+	for (let attempt = 0; ; attempt++) {
+		const last = attempt >= FETCH_TRIES - 1;
+		let answer: Response;
+		try {
+			answer = await fetch(url);
+		} catch (error) {
+			if (last) throw error;
+			await new Promise((r) => setTimeout(r, FETCH_WAIT_MS * (attempt + 1)));
+			continue;
+		}
+		if (answer.ok) return new Uint8Array(await answer.arrayBuffer());
+		if (last || !(answer.status >= 500 || answer.status === 408 || answer.status === 429))
+			throw new Error(`${url}: ${answer.status}`);
+		await new Promise((r) => setTimeout(r, FETCH_WAIT_MS * (attempt + 1)));
+	}
 }
+
+/** Tries at a file the host fails to give, and the wait before the next, longer each time. */
+const FETCH_TRIES = 4;
+const FETCH_WAIT_MS = 750;
 
 let tanks: Promise<Map<string, GlbPart[]>> | null = null;
 

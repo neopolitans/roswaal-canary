@@ -9,6 +9,18 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.125",
+		date: "2026-11-26",
+		headline: "Benchmark files named for what they measured.",
+		changed: [
+			"**A benchmark's results file says what kind of run it was** and the renderer: roswaal-benchmark-5-smoothness-webgl2-2026-11-26T08-09.json, or pixel-cost, full-sweep, current, and ab with the switch's name.",
+		],
+		fixed: [
+			"**A benchmark no longer stops when the site fails to send a model for a moment**: it asks again.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.124",
 		date: "2026-11-26",
 		headline: "Highlights on WebGL2.",

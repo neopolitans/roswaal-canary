@@ -7,17 +7,24 @@
 
 import { useState } from "react";
 
+import { useExtension, writeExtension } from "../../../app/extensionSettings.js";
 import { Group, Row } from "../../../app/settingsParts.jsx";
+import { RELEASES } from "../../../core/docs/releases.js";
 import { CompareView, readResultFiles } from "../app/benchmark/CompareView.jsx";
 import type { BenchmarkResult } from "../app/benchmark/result.js";
+import { saveFile } from "../app/saveFile.js";
 import { FEATURES } from "../app/viewport/renderFeatures.js";
 import { setTwiceWanted, startBenchmark, twiceWanted } from "../benchmarkEvent.js";
+import { PLACE_EDITOR } from "../manifest.js";
+import { applyProfile, profileFileName, profileOf } from "../settingsProfile.js";
 
 export function BenchmarkSection() {
 	const [twice, setTwice] = useState(twiceWanted);
 	const [abKey, setAbKey] = useState("occlusionCulling");
 	const [pair, setPair] = useState<[BenchmarkResult, BenchmarkResult] | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const ext = useExtension(PLACE_EDITOR);
+	const [profileSaid, setProfileSaid] = useState<string | null>(null);
 	return (
 		<>
 			<Group title="Run">
@@ -120,6 +127,56 @@ export function BenchmarkSection() {
 				</Row>
 				{error && <p className="settings-note">{error}</p>}
 				{pair && <CompareView before={pair[0]} after={pair[1]} />}
+			</Group>
+			<Group title="Settings profile">
+				<Row
+					label="Import a profile"
+					help="Graphics set from a profile file, as a test asks."
+					detail="A profile file, such as one sent for a test, sets the Graphics settings it names; the rest stay as they are. A setting this version does not have, or a value it does not offer, is left out and said."
+				>
+					<label className="tb benchmark-file">
+						Choose a file…
+						<input
+							type="file"
+							accept=".json,application/json"
+							onChange={async (e) => {
+								const input = e.currentTarget;
+								const file = input.files?.[0];
+								input.value = "";
+								if (!file) return;
+								const read = applyProfile(PLACE_EDITOR, ext, await file.text());
+								if (!read.ok) {
+									setProfileSaid(read.error);
+									return;
+								}
+								writeExtension(PLACE_EDITOR, read.state);
+								const named = read.name ? `“${read.name}”` : "the profile";
+								const count = `${read.applied.length} setting${read.applied.length === 1 ? "" : "s"}`;
+								setProfileSaid(
+									`Imported ${named}: ${count}.${read.left.length > 0 ? ` Left out, as this version does not offer them: ${read.left.join(", ")}.` : ""}`,
+								);
+							}}
+						/>
+					</label>
+				</Row>
+				<Row label="Export a profile" help="These Graphics settings, as a file to keep or send.">
+					<button
+						type="button"
+						className="tb"
+						onClick={() => {
+							const profile = profileOf(
+								PLACE_EDITOR,
+								ext,
+								RELEASES[0]?.version ?? "",
+								new Date().toISOString(),
+							);
+							void saveFile(profileFileName(profile), `${JSON.stringify(profile, null, "\t")}\n`);
+						}}
+					>
+						Export
+					</button>
+				</Row>
+				{profileSaid && <p className="settings-note">{profileSaid}</p>}
 			</Group>
 		</>
 	);

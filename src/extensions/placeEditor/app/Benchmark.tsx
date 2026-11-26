@@ -27,6 +27,7 @@ import {
 	BENCHMARK_VERSION,
 	STATIONS,
 } from "./benchmark/stations.js";
+import { saveFile } from "./saveFile.js";
 import {
 	type BenchmarkProgress,
 	ViewportController,
@@ -37,29 +38,9 @@ import { isFeatureKey, type RenderFeatures } from "./viewport/renderFeatures.js"
 
 const score = (v: number) => (Number.isFinite(v) ? Math.round(v).toLocaleString("en") : "–");
 
-/** The run's JSON to the downloads; where a download is not offered (iPad, iPhone), the share sheet. */
-async function saveResults(result: BenchmarkResult): Promise<void> {
-	const name = benchmarkFileName(result);
-	const file = new File([benchmarkJson(result)], name, { type: "application/json" });
-	const touch = typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1;
-	if (touch && navigator.canShare?.({ files: [file] })) {
-		try {
-			// The file alone: with a title or text beside it, Save to Files
-			// saves that too, as a text file of its own (an iPad, 26 Nov 2026).
-			await navigator.share({ files: [file] });
-			return;
-		} catch {
-			// Dismissed, or refused: the download below.
-		}
-	}
-	const url = URL.createObjectURL(file);
-	const a = document.createElement("a");
-	a.href = url;
-	a.download = name;
-	document.body.append(a);
-	a.click();
-	a.remove();
-	setTimeout(() => URL.revokeObjectURL(url), 10000);
+/** The run's JSON to the downloads, or the share sheet: see saveFile. */
+function saveResults(result: BenchmarkResult): Promise<void> {
+	return saveFile(benchmarkFileName(result), benchmarkJson(result));
 }
 
 export function Benchmark({

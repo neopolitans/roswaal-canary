@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.131",
+		date: "2026-11-26",
+		headline: "Graphics settings as a file, to send or import.",
+		added: [
+			"**Settings profile, on the Benchmark page**: Export saves the Graphics settings as a file; Import sets them from one, such as a profile sent for a test, and says anything this version does not offer.",
+		],
+		affects: ["editor", "docs"],
+	},
+	{
 		version: "1.1.0-canary.130",
 		date: "2026-11-26",
 		headline: "Ambient lighting's Grid reaches 768 studs.",

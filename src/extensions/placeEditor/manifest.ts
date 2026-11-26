@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.82.0",
+	version: "0.83.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.83.0",
+			roswaal: "1.1.0-canary.131",
+			date: "2026-11-26",
+			text: "Settings profile on the Benchmark page (settingsProfile.ts): Export writes every Graphics setting (kind roswaal-settings-profile); Import sets those a file names through validValue, and says what it left out. saveFile, the share sheet on a touch screen, for results and profiles alike.",
+		},
 		{
 			version: "0.82.0",
 			roswaal: "1.1.0-canary.130",

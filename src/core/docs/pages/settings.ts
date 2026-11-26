@@ -83,7 +83,7 @@ export function settingsPage(): DocPage {
 					[
 						"**Benchmark**",
 						"This browser",
-						"Under Place Editor. Roswaal Benchmark 5 at the view's settings, every quality level, a switch on and off or each render scale; Smoothness, the frames that reach the screen; and two results files compared",
+						"Under Place Editor. Roswaal Benchmark 5 at the view's settings, every quality level, a switch on and off or each render scale; Smoothness, the frames that reach the screen; two results files compared; and a settings profile, the Graphics settings as a file, exported or imported",
 					],
 				],
 			},

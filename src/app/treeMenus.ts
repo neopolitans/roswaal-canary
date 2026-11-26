@@ -145,7 +145,7 @@ export function fileMenu(
 			ctx.luau !== undefined && {
 				action: "openLuau",
 				label: "Open Luau",
-				icon: "codeFile",
+				icon: "luauScript",
 				title: ctx.luau,
 			},
 			{

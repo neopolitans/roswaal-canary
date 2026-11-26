@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.128",
+		date: "2026-11-26",
+		headline: "Open Luau wears the Luau logo.",
+		changed: [
+			"**Open Luau** on a graph's menu shows the Luau logo, as a Luau file does in the Project panel.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.127",
 		date: "2026-11-26",
 		headline: "Benchmark results save as one file on an iPad.",

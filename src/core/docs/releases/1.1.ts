@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.134",
+		date: "2026-11-26",
+		headline: "Ambient lighting's Grid shaders leave Realtime out.",
+		fixed: [
+			"**Ambient lighting on Grid** draws with shaders that hold only Grid's work, not Realtime's as well, which a tablet's GPU paid for though it never ran.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.133",
 		date: "2026-11-26",
 		headline: "A benchmark says the GPU errors it met.",

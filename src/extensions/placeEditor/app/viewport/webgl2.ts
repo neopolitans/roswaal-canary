@@ -557,7 +557,11 @@ float skyFar(vec3 p, vec3 n) {
 uniform highp sampler3D skyCells;
 vec3 cellOrigin() { return skyNearAt.xyz - vec3(${(SKY_CELLS[0] * SKY_CELL) / 2}.0, ${(SKY_CELLS[1] * SKY_CELL) / 2}.0, ${(SKY_CELLS[2] * SKY_CELL) / 2}.0); }
 float skyVisibility(vec3 p, vec3 n) {
-	bool cheap = has(${FEATURE_BIT.skyGrid});
+	// Fixed when the program is built for its switches (mainFor), so Grid's
+	// program holds none of Realtime's taps: carried and never run, they cost
+	// an iPad's WebGL2 about 8 ms a frame at Native (26 Nov 2026). The program
+	// for every switch asks each frame.
+	bool cheap = FEATURES != 0x7fffffff ? (FEATURES & ${FEATURE_BIT.skyGrid}) != 0 : has(${FEATURE_BIT.skyGrid});
 	// Thin walls block sky: the maps, a tap each in Grid; the cells let it through.
 	if (!has(${FEATURE_BIT.leak})) return skyVisibilityMapsAt(p, n, cheap);
 	if (skyNear.w < 0.5) return cheap ? skyFar(p, n) : skyVisibilityMapsAt(p, n, false);

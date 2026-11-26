@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.84.0",
+	version: "0.84.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.84.1",
+			roswaal: "1.1.0-canary.134",
+			date: "2026-11-26",
+			text: "skyVisibility's Grid is fixed when a program or pipeline is built for its switches (FEATURES not every bit): Grid's holds none of Realtime's taps. The one for every switch still asks each frame.",
+		},
 		{
 			version: "0.84.0",
 			roswaal: "1.1.0-canary.133",

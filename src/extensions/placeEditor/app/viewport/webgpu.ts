@@ -988,7 +988,9 @@ fn skyFar(p: vec3f, n: vec3f) -> f32 {
 // How much of the sky reaches p: the maps', and at least what the lighting
 // cells round it see, blended between their middles, as Studio's lighting is.
 fn skyVisibility(p: vec3f, n: vec3f) -> f32 {
-	let cheap = has(${FEATURE_BIT.skyGrid}u);
+	// Fixed when the pipeline is built for its switches (litFor), so Grid's
+	// holds none of Realtime's taps; the pipeline for every switch asks each frame.
+	let cheap = select(has(${FEATURE_BIT.skyGrid}u), (FEATURES & ${FEATURE_BIT.skyGrid}u) != 0u, FEATURES != 0xffffffffu);
 	// Thin walls block sky: the maps, a tap each in Grid; the cells let it through.
 	if (!has(${FEATURE_BIT.leak}u)) { return skyVisibilityMapsAt(p, n, cheap); }
 	if (skyU.near.w < 0.5) {

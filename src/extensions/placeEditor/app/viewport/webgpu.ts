@@ -56,6 +56,7 @@ import { EFFECT_SHADER, GpuEffects, HALF_LAYER } from "./effectsGpu.js";
 import { boxEdges, featureEdges, meshFor, sceneGlows, sceneGrainy } from "./geometry.js";
 import { canvasBytes, GpuMemory, trackWebGpu } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
+import { type BoxRows, highlightBoxes, meshReach, screenRect } from "./highlightRect.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import {
 	OCC_CELL,
@@ -3530,12 +3531,19 @@ export class WebGpuView implements ViewRenderer {
 		for (const h of scene.highlights ?? [])
 			for (const id of [...h.parts, ...h.seeThrough]) lit.add(id);
 		type Rows = { data: Float32Array; count: number };
+		// The highlighted parts' rows, each with its mesh's reach: see highlightRect.ts.
+		const hlSets: BoxRows[] = [];
 		const add = (
 			mesh: { vertices: Float32Array; indices: Uint16Array | Uint32Array },
 			solid: Rows,
 			seen: Rows,
 			glass: Rows,
 		) => {
+			if (lit.size > 0) {
+				const reach = meshReach(mesh.vertices);
+				for (const rows of [solid, seen, glass])
+					if (rows.count > 0) hlSets.push({ ...rows, reach });
+			}
 			const shape = () => ({
 				mesh,
 				vertices: this.make(mesh.vertices, BUFFER.VERTEX),
@@ -3600,6 +3608,7 @@ export class WebGpuView implements ViewRenderer {
 			rows: { data: Float32Array; count: number },
 		) => {
 			if (rows.count === 0) return;
+			if (lit.size > 0) hlSets.push({ ...rows, reach: meshReach(mesh.vertices) });
 			this.ghosts.push({
 				mesh,
 				vertices: this.make(mesh.vertices, BUFFER.VERTEX),
@@ -3625,6 +3634,7 @@ export class WebGpuView implements ViewRenderer {
 					if (rows) ghost(mesh, rows);
 				}
 			}
+		this.hlBoxes = highlightBoxes(hlSets, lit);
 		this.setHighlights(scene.highlights);
 	}
 
@@ -3662,6 +3672,11 @@ export class WebGpuView implements ViewRenderer {
 	/** The parts' shader module and vertex buffers, for pipelines made later. */
 	private partModule?: GPUShaderModule;
 	private partBuffers?: GPUVertexBufferLayout[];
+
+	/** The highlighted parts' boxes, for the screen rectangle their passes keep to. */
+	private hlBoxes: Float32Array = new Float32Array(0);
+	/** This frame's view and projection, as the parts are drawn with it. */
+	private frameVp: Float32Array | null = null;
 
 	private setHighlights(list: readonly SceneHighlight[] | undefined): void {
 		this.hl?.rows.destroy();
@@ -3911,6 +3926,14 @@ fn at(c: vec2i) -> u32 {
 		// The outline 2 of the page's pixels wide, as Studio's at 100%: more of the canvas's on a Retina screen.
 		const css = this.canvas?.clientWidth || this.width;
 		const wide = Math.max(1, Math.min(4, (2 * this.width) / Math.max(1, css)));
+		// Only where the highlighted parts are on the screen, the outline's
+		// width round them: none of the three passes where none is in view.
+		const rect = this.frameVp
+			? screenRect(this.hlBoxes, this.frameVp, this.width, this.height, Math.ceil(wide) + 2)
+			: { x0: 0, y0: 0, x1: this.width, y1: this.height };
+		if (!rect) return;
+		const scissor = (p: GPURenderPassEncoder) =>
+			p.setScissorRect(rect.x0, rect.y0, rect.x1 - rect.x0, rect.y1 - rect.y0);
 		hl.data.set([seeThrough ? 1 : 0, wide, 0, 0], 32 * 8);
 		d.queue.writeBuffer(hl.params, 0, hl.data);
 		const pass = encoder.beginRenderPass({
@@ -3924,6 +3947,7 @@ fn at(c: vec2i) -> u32 {
 				depthStoreOp: "discard",
 			},
 		});
+		scissor(pass);
 		pass.setBindGroup(0, this.bind);
 		pass.setBindGroup(1, this.hlGroups.mask);
 		const lists = [this.draws, this.glass, this.clear, ...(seeThrough ? [this.ghosts] : [])].map(
@@ -3949,6 +3973,7 @@ fn at(c: vec2i) -> u32 {
 				},
 			],
 		});
+		scissor(along);
 		along.setPipeline(pipes.rows);
 		along.setBindGroup(0, this.hlGroups.rows);
 		along.draw(3);
@@ -3957,6 +3982,7 @@ fn at(c: vec2i) -> u32 {
 			timestampWrites: this.stamp(null),
 			colorAttachments: [{ view: target, loadOp: "load", storeOp: "store" }],
 		});
+		scissor(over);
 		over.setPipeline(pipes.overlay);
 		over.setBindGroup(0, this.hlGroups.overlay);
 		over.draw(3);
@@ -4286,6 +4312,7 @@ fn at(c: vec2i) -> u32 {
 			this.width,
 			this.height,
 		);
+		this.frameVp = vp;
 		const u = new Float32Array(UNIFORM_MATERIALS / 4);
 		u.set(vp, 0);
 		u.set(invert(vp), 16);

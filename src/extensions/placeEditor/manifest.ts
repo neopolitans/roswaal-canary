@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.87.4",
+	version: "0.88.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.88.0",
+			roswaal: "1.1.0-canary.144",
+			date: "2026-11-28",
+			text: "Highlights' mask, rows and overlay passes keep to the highlighted parts' rectangle on the screen (highlightRect.ts: their boxes from the scene rows, each mesh's reach, projected with the frame's own matrix), the outline's width round it, in both renderers; none of them where no highlighted part is in view. WebGL2 clears the rows whole first. The WebGL2 self-test also reads back a cleared mask and draws the parts into an 8-bit target.",
+		},
 		{
 			version: "0.87.4",
 			roswaal: "1.1.0-canary.143",

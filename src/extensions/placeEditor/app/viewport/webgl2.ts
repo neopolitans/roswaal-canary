@@ -48,6 +48,13 @@ import { GlEffects } from "./effectsGl.js";
 import { boxEdges, featureEdges, meshFor, sceneGlows } from "./geometry.js";
 import { canvasBytes, GpuMemory, trackWebGl2 } from "./gpuMemory.js";
 import { HANDLE_KINDS, type Handles, handleMesh } from "./handles.js";
+import {
+	type BoxRows,
+	highlightBoxes,
+	meshReach,
+	type PixelRect,
+	screenRect,
+} from "./highlightRect.js";
 import { invert, lookAt, multiply, perspective } from "./math.js";
 import {
 	OCC_CELL,
@@ -3992,7 +3999,14 @@ export class WebGl2View implements ViewRenderer {
 					},
 				});
 		}
+		// The highlighted parts' rows, each with its mesh's reach: see highlightRect.ts.
+		const hlSets: BoxRows[] = [];
 		for (const { mesh, rows } of groups) {
+			if (lit.size > 0) {
+				const reach = meshReach(mesh.vertices);
+				for (const set of ["solid", "clear", "glass"] as const)
+					if (rows[set].count > 0) hlSets.push({ ...rows[set], reach });
+			}
 			const type = mesh.indices instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
 			for (const set of ["solid", "clear", "glass"] as const) {
 				const { data, count } = rows[set];
@@ -4028,6 +4042,7 @@ export class WebGl2View implements ViewRenderer {
 			rows: Rows,
 		) => {
 			if (rows.count === 0) return;
+			if (lit.size > 0) hlSets.push({ ...rows, reach: meshReach(mesh.vertices) });
 			const vb = this.buffer(gl.ARRAY_BUFFER, mesh.vertices);
 			const eb = this.buffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indices);
 			const ib = this.buffer(gl.ARRAY_BUFFER, rows.data);
@@ -4054,7 +4069,20 @@ export class WebGl2View implements ViewRenderer {
 					if (rows) ghost(mesh, rows);
 				}
 			}
+		this.hlBoxes = highlightBoxes(hlSets, lit);
 		this.setHighlights(scene.highlights);
+	}
+
+	/** The highlighted parts' boxes, for the screen rectangle their passes keep to. */
+	private hlBoxes: Float32Array = new Float32Array(0);
+	/** This frame's: where the Highlights' passes draw, or null, none in view. */
+	private hlRect: PixelRect | null = null;
+
+	/** The rectangle as the scissor takes it, from the canvas's bottom left. */
+	private scissorTo(rect: PixelRect): void {
+		const gl = this.gl;
+		gl.enable(gl.SCISSOR_TEST);
+		gl.scissor(rect.x0, this.height - rect.y1, rect.x1 - rect.x0, rect.y1 - rect.y0);
 	}
 
 	// -- Highlight instances: a mask of the parts each covers, then its fill and outline --
@@ -4185,6 +4213,13 @@ export class WebGl2View implements ViewRenderer {
 		}
 		const prog = this.hlPrograms.mask;
 		const { width: w, height: h } = this;
+		// Only where the highlighted parts are on the screen, the outline's
+		// width round them: none of the three passes where none is in view.
+		const css = this.canvas?.clientWidth || this.width;
+		const wide = Math.max(1, Math.min(4, (2 * this.width) / Math.max(1, css)));
+		this.hlRect = screenRect(this.hlBoxes, this.viewProj(camera), w, h, Math.ceil(wide) + 2);
+		const rect = this.hlRect;
+		if (!rect) return;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
 		gl.viewport(0, 0, w, h);
 		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
@@ -4202,7 +4237,9 @@ export class WebGl2View implements ViewRenderer {
 				gl.depthFunc(this.nearer);
 				// The place's program writes colour, which the mask's whole numbers cannot take.
 				gl.drawBuffers([gl.NONE]);
+				this.scissorTo(rect);
 				this.depthOnly(camera, [...this.draws, ...this.glass]);
+				gl.disable(gl.SCISSOR_TEST);
 				gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
 			}
 		}
@@ -4215,6 +4252,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.disable(gl.BLEND);
 		gl.enable(gl.CULL_FACE);
 		const lists = [...this.hlDraws, ...(seeThrough ? this.ghosts : [])];
+		this.scissorTo(rect);
 		if (lists.length === 0) this.noteHighlightCheck("no parts to draw into the mask");
 		for (const onTop of [false, true]) {
 			if (!(onTop ? hl.onTop : hl.occluded)) continue;
@@ -4240,6 +4278,7 @@ export class WebGl2View implements ViewRenderer {
 			gl.bindVertexArray(null);
 		}
 		gl.bindTexture(gl.TEXTURE_2D, null);
+		gl.disable(gl.SCISSOR_TEST);
 		if (this.hlChecked === "mask") {
 			const n = this.countedPixels(w, h).count;
 			if (n === 0) {
@@ -4264,7 +4303,8 @@ export class WebGl2View implements ViewRenderer {
 		const hl = this.hl;
 		const t = this.hlTargets;
 		const progs = this.hlPrograms;
-		if (!hl || !t || !progs) return;
+		const rect = this.hlRect;
+		if (!hl || !t || !progs || !rect) return;
 		const gl = this.gl;
 		const css = this.canvas?.clientWidth || this.width;
 		const wide = Math.max(1, Math.min(4, (2 * this.width) / Math.max(1, css)));
@@ -4276,6 +4316,9 @@ export class WebGl2View implements ViewRenderer {
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, t.mask);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, t.rowsFbo);
+		// Cleared whole: the overlay reads rows a few pixels past the rectangle.
+		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
+		this.scissorTo(rect);
 		gl.useProgram(progs.rows);
 		gl.uniform1i(this.loc(progs.rows, "mask"), 0);
 		gl.uniform1f(this.loc(progs.rows, "wide"), wide);
@@ -4298,6 +4341,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 		gl.disable(gl.BLEND);
+		gl.disable(gl.SCISSOR_TEST);
 		gl.bindTexture(gl.TEXTURE_2D, null);
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, null);
@@ -5307,23 +5351,37 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.skyFbo);
 	}
 
+	/** The camera's view and projection, reversed or not. */
+	private projection(camera: Camera, reverse: boolean): Float32Array {
+		return multiply(
+			perspective(
+				camera.fovY ?? FOV,
+				this.width / this.height,
+				camera.near,
+				camera.far,
+				reverse,
+				reverse,
+			),
+			lookAt(camera.eye, camera.at),
+		);
+	}
+
+	/** The parts' view and projection, as this view draws them. */
+	private viewProj(camera: Camera): Float32Array {
+		return jitterClip(
+			this.projection(camera, this.clipControl !== null),
+			this.jitter,
+			this.width,
+			this.height,
+		);
+	}
+
 	private use(prog: Program, camera: Camera, outline: boolean): void {
 		const gl = this.gl;
 		gl.useProgram(prog.program);
 		const reversed = this.clipControl !== null;
-		const projection = (reverse: boolean) =>
-			multiply(
-				perspective(
-					camera.fovY ?? FOV,
-					this.width / this.height,
-					camera.near,
-					camera.far,
-					reverse,
-					reverse,
-				),
-				lookAt(camera.eye, camera.at),
-			);
-		const vp = jitterClip(projection(reversed), this.jitter, this.width, this.height);
+		const projection = (reverse: boolean) => this.projection(camera, reverse);
+		const vp = this.viewProj(camera);
 		gl.uniformMatrix4fv(prog.viewProj, false, vp);
 		const debug = renderDebug(this.render);
 		debug[1] = this.lampBit(debug[1]);
@@ -5540,6 +5598,59 @@ export class WebGl2View implements ViewRenderer {
 	 * id plus one; and the row read for it plus 100 (its slot in the low
 	 * byte). Which one first writes nothing is where the mask pass fails.
 	 */
+	/**
+	 * The self-test's last: the parts drawn into a plain 8-bit target, not a
+	 * whole-number one, and read back as bytes. Where this writes and the
+	 * whole-number mask does not, the mask's format is what fails.
+	 */
+	private unormSelfTest(camera: Camera, lists: readonly Draw[]): string {
+		const gl = this.gl;
+		const { width: w, height: h } = this;
+		const tex = gl.createTexture()!;
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		const fb = gl.createFramebuffer()!;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+		let out = "8-bit target";
+		try {
+			const prog = this.link(
+				VS,
+				`#version 300 es
+precision highp float; precision highp int; flat in uint vId;
+out vec4 o;
+void main() { o = vec4(7.0 / 255.0, 0.0, 0.0, 1.0); }`,
+			);
+			gl.viewport(0, 0, w, h);
+			gl.clearColor(0, 0, 0, 0);
+			gl.clear(gl.COLOR_BUFFER_BIT);
+			this.use(prog, camera, false);
+			gl.disable(gl.DEPTH_TEST);
+			gl.disable(gl.CULL_FACE);
+			gl.disable(gl.BLEND);
+			for (const d of lists) {
+				gl.bindVertexArray(d.vao);
+				gl.drawElementsInstanced(gl.TRIANGLES, d.indexCount, d.type, 0, d.count);
+			}
+			gl.bindVertexArray(null);
+			const row = new Uint8Array(w * 4);
+			let n = 0;
+			for (let y = 0; y < h; y += 8) {
+				gl.readPixels(0, y, w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
+				for (let x = 0; x < w; x++) if (row[x * 4] !== 0) n++;
+			}
+			out += ` ${n}`;
+			gl.deleteProgram(prog.program);
+		} catch (err) {
+			out += ` did not build (${String(err).slice(0, 80)})`;
+		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.deleteFramebuffer(fb);
+		gl.deleteTexture(tex);
+		return out;
+	}
+
 	private highlightSelfTest(camera: Camera, lists: readonly Draw[], fbo: WebGLFramebuffer): void {
 		const gl = this.gl;
 		const hl = this.hl;
@@ -5559,6 +5670,12 @@ void main() {
 			],
 		];
 		const said: string[] = [];
+		gl.disable(gl.SCISSOR_TEST);
+		// Reading back: the mask cleared to 9 and read, so an empty mask is the mask's, not the read's.
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([9, 0, 0, 0]));
+		const cleared = this.countedPixels(this.width, this.height);
+		said.push(`read back ${cleared.count}${cleared.values.has(9) ? " (9)" : ""}`);
 		for (const [name, body] of tests) {
 			let prog: Program;
 			try {
@@ -5593,6 +5710,8 @@ void main() {
 			said.push(`${name} ${count}${top ? ` (${top})` : ""}`);
 			gl.deleteProgram(prog.program);
 		}
+		said.push(this.unormSelfTest(camera, lists));
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
 		gl.bindTexture(gl.TEXTURE_2D, null);
 		gl.enable(gl.CULL_FACE);
 		gl.enable(gl.DEPTH_TEST);

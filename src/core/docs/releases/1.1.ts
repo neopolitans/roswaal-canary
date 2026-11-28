@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.144",
+		date: "2026-11-28",
+		headline: "Highlights draw only where their parts are on the screen.",
+		changed: [
+			"**Highlights' fill and outline are worked out only where their parts are on the screen**, not across the whole frame, and not at all when none is in view.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.143",
 		date: "2026-11-26",
 		headline: "A self-test where WebGL2's Highlights draw nothing.",

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.145",
+		date: "2026-11-28",
+		headline: "Highlights on WebGL2 on iPad.",
+		fixed: [
+			"**Highlights draw on iPad with WebGL2.** Their fill and outline never showed there.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.144",
 		date: "2026-11-28",
 		headline: "Highlights draw only where their parts are on the screen.",

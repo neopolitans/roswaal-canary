@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.88.0",
+	version: "0.88.1",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.88.1",
+			roswaal: "1.1.0-canary.145",
+			date: "2026-11-28",
+			text: "WebGL2 Highlights' mask and rows are RGBA8 textures read as bytes (HL_BYTE), not R8UI and RG8UI: an A12X iPad's WebGL2 neither drew into an R8UI target nor read one back, where RGBA8 took the same draws (canary.144's self-test). The self-test's 8-bit target check is gone with it.",
+		},
 		{
 			version: "0.88.0",
 			roswaal: "1.1.0-canary.144",

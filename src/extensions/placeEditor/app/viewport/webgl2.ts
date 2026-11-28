@@ -1676,7 +1676,7 @@ precision highp float; precision highp int; flat in uint vId;
 uniform highp usampler2D hlRows;
 uniform vec4 hlPass;
 ${LOG_DEPTH}
-out uint o;
+out vec4 o;
 void main() {
 #ifdef LOG_DEPTH
 	gl_FragDepth = logDepth() - 1e-6;
@@ -1685,18 +1685,26 @@ void main() {
 	uint r = texelFetch(hlRows, ivec2(int(vId & 4095u), int(vId >> 12u)), 0).r;
 	uint slot = r & 255u;
 	if (slot == 0u || ((r & 256u) != 0u && hlPass.y < 0.5) || ((r & 512u) != 0u) != (hlPass.x > 0.5)) discard;
-	o = slot;
+	o = vec4(float(slot) / 255.0, 0.0, 0.0, 1.0);
 }`;
+/**
+ * A byte of Highlights' mask or rows, as the whole number it holds. They are
+ * RGBA8, not whole-number textures: an iPad's WebGL2 (A12X, Safari 26)
+ * neither drew into an R8UI target nor read one back (1.1.0-canary.144's
+ * self-test), where an RGBA8 one took the same draws.
+ */
+const HL_BYTE = `uint hlByte(float v) { return uint(v * 255.0 + 0.5); }`;
 /** Along each row the nearest highlighted pixel within the outline's width, as WebGpuView's fsRows. */
 const FS_HL_ROWS = `#version 300 es
 precision highp float; precision highp int;
-uniform highp usampler2D mask;
+uniform highp sampler2D mask;
 uniform float wide;
-out uvec4 o;
+out vec4 o;
+${HL_BYTE}
 uint at(ivec2 c) {
 	ivec2 size = textureSize(mask, 0);
 	if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, size))) return 0u;
-	return texelFetch(mask, c, 0).r;
+	return hlByte(texelFetch(mask, c, 0).r);
 }
 void main() {
 	ivec2 c = ivec2(gl_FragCoord.xy);
@@ -1708,7 +1716,7 @@ void main() {
 		uint t = at(c + ivec2(dx, 0));
 		if (t != 0u && abs(dx) < far) { best = t; far = abs(dx); }
 	}
-	o = uvec4(best, best != 0u ? uint(far) + 1u : 0u, 0u, 0u);
+	o = vec4(float(best) / 255.0, best != 0u ? float(far + 1) / 255.0 : 0.0, 0.0, 1.0);
 }`;
 /**
  * Over the finished picture, as WebGpuView's: a Highlight's fill where its
@@ -1717,15 +1725,16 @@ void main() {
  */
 const FS_HL_OVER = `#version 300 es
 precision highp float; precision highp int;
-uniform highp usampler2D mask;
-uniform highp usampler2D rows;
+uniform highp sampler2D mask;
+uniform highp sampler2D rows;
 uniform vec4 fill[32];
 uniform vec4 outline[32];
 uniform float wide;
 out vec4 o;
+${HL_BYTE}
 void main() {
 	ivec2 c = ivec2(gl_FragCoord.xy);
-	uint s = texelFetch(mask, c, 0).r;
+	uint s = hlByte(texelFetch(mask, c, 0).r);
 	if (s != 0u) {
 		vec4 f = fill[int(s)];
 		if (f.a <= 0.0) discard;
@@ -1741,12 +1750,13 @@ void main() {
 		if (abs(dy) > n) continue;
 		ivec2 q = c + ivec2(0, dy);
 		if (q.y < 0 || q.y >= size.y) continue;
-		uvec4 row = texelFetch(rows, q, 0);
-		if (row.g == 0u) continue;
-		float dx = float(row.g - 1u);
+		vec4 rowf = texelFetch(rows, q, 0);
+		uint far = hlByte(rowf.g);
+		if (far == 0u) continue;
+		float dx = float(far - 1u);
 		float d = dx * dx + float(dy * dy);
 		if (d > r * r + 0.5 || d >= near) continue;
-		best = row.r;
+		best = hlByte(rowf.r);
 		near = d;
 	}
 	if (best == 0u) discard;
@@ -4157,8 +4167,9 @@ export class WebGl2View implements ViewRenderer {
 			gl.bindTexture(gl.TEXTURE_2D, null);
 			return tex;
 		};
-		const mask = texture(gl.R8UI);
-		const rows = texture(gl.RG8UI);
+		// RGBA8, not R8UI and RG8UI: see HL_BYTE.
+		const mask = texture(gl.RGBA8);
+		const rows = texture(gl.RGBA8);
 		// The place's depth format, for its depth to be copied in.
 		const depth = gl.createRenderbuffer()!;
 		gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
@@ -4222,7 +4233,7 @@ export class WebGl2View implements ViewRenderer {
 		if (!rect) return;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
 		gl.viewport(0, 0, w, h);
-		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
+		gl.clearBufferfv(gl.COLOR, 0, new Float32Array([0, 0, 0, 0]));
 		if (hl.occluded) {
 			if (from) {
 				gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
@@ -4235,7 +4246,7 @@ export class WebGl2View implements ViewRenderer {
 				gl.clear(gl.DEPTH_BUFFER_BIT);
 				gl.enable(gl.DEPTH_TEST);
 				gl.depthFunc(this.nearer);
-				// The place's program writes colour, which the mask's whole numbers cannot take.
+				// Depth alone: the place's program's colour is not the mask's.
 				gl.drawBuffers([gl.NONE]);
 				this.scissorTo(rect);
 				this.depthOnly(camera, [...this.draws, ...this.glass]);
@@ -4317,7 +4328,7 @@ export class WebGl2View implements ViewRenderer {
 		gl.bindTexture(gl.TEXTURE_2D, t.mask);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, t.rowsFbo);
 		// Cleared whole: the overlay reads rows a few pixels past the rectangle.
-		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
+		gl.clearBufferfv(gl.COLOR, 0, new Float32Array([0, 0, 0, 0]));
 		this.scissorTo(rect);
 		gl.useProgram(progs.rows);
 		gl.uniform1i(this.loc(progs.rows, "mask"), 0);
@@ -5567,17 +5578,16 @@ export class WebGl2View implements ViewRenderer {
 	}
 
 	/**
-	 * The bound target's pixels not 0, of every 8th row, and how many of each
-	 * value: integer targets are read as RGBA_INTEGER, a row at a time to
-	 * keep the copy small.
+	 * The bound RGBA8 target's pixels whose red byte is not 0, of every 8th
+	 * row, and how many of each byte: a row at a time, to keep the copy small.
 	 */
 	private countedPixels(w: number, h: number): { count: number; values: Map<number, number> } {
 		const gl = this.gl;
-		const row = new Uint32Array(w * 4);
+		const row = new Uint8Array(w * 4);
 		const values = new Map<number, number>();
 		let count = 0;
 		for (let y = 0; y < h; y += 8) {
-			gl.readPixels(0, y, w, 1, gl.RGBA_INTEGER, gl.UNSIGNED_INT, row);
+			gl.readPixels(0, y, w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
 			for (let x = 0; x < w; x++) {
 				const v = row[x * 4];
 				if (v === 0) continue;
@@ -5598,59 +5608,6 @@ export class WebGl2View implements ViewRenderer {
 	 * id plus one; and the row read for it plus 100 (its slot in the low
 	 * byte). Which one first writes nothing is where the mask pass fails.
 	 */
-	/**
-	 * The self-test's last: the parts drawn into a plain 8-bit target, not a
-	 * whole-number one, and read back as bytes. Where this writes and the
-	 * whole-number mask does not, the mask's format is what fails.
-	 */
-	private unormSelfTest(camera: Camera, lists: readonly Draw[]): string {
-		const gl = this.gl;
-		const { width: w, height: h } = this;
-		const tex = gl.createTexture()!;
-		gl.bindTexture(gl.TEXTURE_2D, tex);
-		gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
-		gl.bindTexture(gl.TEXTURE_2D, null);
-		const fb = gl.createFramebuffer()!;
-		gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-		let out = "8-bit target";
-		try {
-			const prog = this.link(
-				VS,
-				`#version 300 es
-precision highp float; precision highp int; flat in uint vId;
-out vec4 o;
-void main() { o = vec4(7.0 / 255.0, 0.0, 0.0, 1.0); }`,
-			);
-			gl.viewport(0, 0, w, h);
-			gl.clearColor(0, 0, 0, 0);
-			gl.clear(gl.COLOR_BUFFER_BIT);
-			this.use(prog, camera, false);
-			gl.disable(gl.DEPTH_TEST);
-			gl.disable(gl.CULL_FACE);
-			gl.disable(gl.BLEND);
-			for (const d of lists) {
-				gl.bindVertexArray(d.vao);
-				gl.drawElementsInstanced(gl.TRIANGLES, d.indexCount, d.type, 0, d.count);
-			}
-			gl.bindVertexArray(null);
-			const row = new Uint8Array(w * 4);
-			let n = 0;
-			for (let y = 0; y < h; y += 8) {
-				gl.readPixels(0, y, w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
-				for (let x = 0; x < w; x++) if (row[x * 4] !== 0) n++;
-			}
-			out += ` ${n}`;
-			gl.deleteProgram(prog.program);
-		} catch (err) {
-			out += ` did not build (${String(err).slice(0, 80)})`;
-		}
-		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-		gl.deleteFramebuffer(fb);
-		gl.deleteTexture(tex);
-		return out;
-	}
-
 	private highlightSelfTest(camera: Camera, lists: readonly Draw[], fbo: WebGLFramebuffer): void {
 		const gl = this.gl;
 		const hl = this.hl;
@@ -5658,22 +5615,23 @@ void main() { o = vec4(7.0 / 255.0, 0.0, 0.0, 1.0); }`,
 		const head = `#version 300 es
 precision highp float; precision highp int; flat in uint vId;
 uniform highp usampler2D hlRows;
-out uint o;
+out vec4 o;
 void main() {
 `;
+		const byte = (v: string) => `o = vec4(float(${v}) / 255.0, 0.0, 0.0, 1.0); }`;
 		const tests: [string, string][] = [
-			["constant", "o = 7u; }"],
-			["ids", "o = min(vId + 1u, 255u); }"],
+			["constant", byte("7u")],
+			["ids", byte("min(vId + 1u, 255u)")],
 			[
 				"rows",
-				"uint r = texelFetch(hlRows, ivec2(int(vId & 4095u), int(vId >> 12u)), 0).r; o = (r & 255u) + 100u; }",
+				`uint r = texelFetch(hlRows, ivec2(int(vId & 4095u), int(vId >> 12u)), 0).r; ${byte("(r & 255u) + 100u")}`,
 			],
 		];
 		const said: string[] = [];
 		gl.disable(gl.SCISSOR_TEST);
 		// Reading back: the mask cleared to 9 and read, so an empty mask is the mask's, not the read's.
 		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-		gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([9, 0, 0, 0]));
+		gl.clearBufferfv(gl.COLOR, 0, new Float32Array([9 / 255, 0, 0, 0]));
 		const cleared = this.countedPixels(this.width, this.height);
 		said.push(`read back ${cleared.count}${cleared.values.has(9) ? " (9)" : ""}`);
 		for (const [name, body] of tests) {
@@ -5686,7 +5644,7 @@ void main() {
 			}
 			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
 			gl.viewport(0, 0, this.width, this.height);
-			gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
+			gl.clearBufferfv(gl.COLOR, 0, new Float32Array([0, 0, 0, 0]));
 			this.use(prog, camera, false);
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, hl.rows);
@@ -5710,8 +5668,6 @@ void main() {
 			said.push(`${name} ${count}${top ? ` (${top})` : ""}`);
 			gl.deleteProgram(prog.program);
 		}
-		said.push(this.unormSelfTest(camera, lists));
-		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
 		gl.bindTexture(gl.TEXTURE_2D, null);
 		gl.enable(gl.CULL_FACE);
 		gl.enable(gl.DEPTH_TEST);

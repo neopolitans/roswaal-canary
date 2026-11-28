@@ -60,7 +60,7 @@ export function automaticLines(
 		value: quality.auto ? `Automatic · Level ${quality.level}` : `Level ${quality.level}`,
 		detail: quality.auto
 			? "Moves a level down or up with how fast frames are drawn."
-			: "Chosen in Settings or the View menu.",
+			: "Chosen in Settings or Picture's Quality.",
 	});
 
 	if (depth) {

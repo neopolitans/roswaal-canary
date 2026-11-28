@@ -269,22 +269,30 @@ export function placeEditorRenderingPage(): DocPage {
 					"the Graphics settings, **Switches** a switch for each part of the picture, and " +
 					"**Inspect** the tools for looking into a frame. On a touch screen held upright it comes " +
 					"up from the bottom: drag or tap its grab for **Peek**, which shows the switches changed " +
-					"last, **Half** or **Full**. Inspect's **Start log** lists each step of opening a " +
-					"place with its time; if the page froze or was closed before a start finished, the next " +
-					"start says which step it stopped after. **Automatic's choices** shows what the view " +
-					"measured and chose in this place, with the times behind each; **This frame** its time " +
-					"stage by stage; **Compare**, held, turns back the switch changed last until it is let go; " +
-					"**Views** shows the wireframe and heatmaps as tiles; **Probe**, armed, says what a tap " +
-					"on the view finds (the part, its material, the light objects reaching it, the sun, the " +
-					"sky it sees and what it costs) and marks the spot; **What's costly here** turns each " +
-					"switch off alone at this view and names the three that save most; and **Copy report** copies the " +
-					"version, the browser, the choices and the start log for an issue.",
+					"last, **Half** or **Full**.",
+			},
+			{
+				t: "p",
+				text:
+					"Inspect has two halves. **Your place** holds the tools for your own place: **Probe**, " +
+					"armed, says what a tap on the view finds (the part, its material, the light objects " +
+					"reaching it, the sun, the sky it sees and what it costs) and marks the spot; **What's " +
+					"costly here** turns each switch off alone at this view and names the three that save " +
+					"most; **Compare**, held, turns back the switch changed last until it is let go; " +
+					"**Views** shows the wireframe, overdraw, triangle density and heatmaps as tiles; and " +
+					"**Gizmos** and **Light ranges**. **Renderer** holds the tools for Roswaal's own " +
+					"renderer: **This frame**, its time stage by stage; **Automatic's choices**, what the " +
+					"view measured and chose in this place, with the times behind each; the **Shadow maps** " +
+					"view and **Freeze shadows**; the **Start log**, each step of opening a place with its " +
+					"time (if the page froze or was closed before a start finished, the next start says " +
+					"which step it stopped after); and **Copy report**, the version, the browser, the " +
+					"choices and the start log for an issue.",
 			},
 			{ t: "h", level: 2, text: "Quality levels" },
 			{
 				t: "p",
 				text:
-					"Settings' **Quality**, and the top of **View**, draws at one of Studio's 21 levels, or at " +
+					"Settings' **Quality**, and Picture's **Quality**, draws at one of Studio's 21 levels, or at " +
 					"one of four past them. How far each draws parts, and where glow and sharp shadows begin, " +
 					"were measured in Studio. Levels 22 to 25 draw as 21 and each adds one of Roswaal's own; " +
 					"Automatic never picks them.",
@@ -318,23 +326,24 @@ export function placeEditorRenderingPage(): DocPage {
 					"The search finds a switch by its name or what it does, and a group's count turns the " +
 					"whole group on or off.",
 			},
-			{ t: "h", level: 2, text: "View" },
+			{ t: "h", level: 2, text: "Quality and Show" },
 			{
 				t: "p",
 				text:
-					"**Antialiasing** under it is Settings' own: the quality level's, or a mode this renderer draws. " +
-					"**View** chooses what is shown. Its **Quality** levels set the switches as Settings' " +
-					"Quality does: **Level 21** is everything, as Studio draws it, and each level down takes " +
-					"away what costs most; **Beyond Studio** holds Levels 22 to 25. A switch changed by hand " +
-					"shows **Custom (from Level N)**. The " +
-					"**Final output, one feature** presets show one feature alone. Under them, the arrows " +
-					"step through the ten steps a frame is built in. " +
-					"The other views show the place as the switches leave it, so the wireframe shows what " +
-					"culling left.",
+					"Picture's **Quality** sets the switches as Settings' Quality does: **Level 21** is " +
+					"everything, as Studio draws it, and each level down takes away what costs most; " +
+					"**Beyond Studio** holds Levels 22 to 25. A switch changed by hand shows **Custom (from " +
+					"Level N)**. **Show** chooses what is shown, and stays as the level changes: **Final " +
+					"output**; **For your place**, the wireframe, overdraw, triangle density and the " +
+					"heatmaps, the place as the switches leave it, so the wireframe shows what culling left; " +
+					"and **Roswaal's renderer**, the sun's shadow maps and one feature of the picture alone. " +
+					"Under one feature alone, the arrows step through the ten steps a frame is built in. " +
+					"**Antialiasing** under them is Settings' own: the quality level's, or a mode this " +
+					"renderer draws.",
 			},
 			{
 				t: "table",
-				head: ["View", "Shows"],
+				head: ["Show", "Shows"],
 				rows: [
 					["Final output", "The place as the switches leave it"],
 					["Wireframe", "Every part's edges, those behind others too"],

@@ -451,7 +451,10 @@ export const RENDER_PRESETS: readonly RenderPreset[] = [...QUALITY_PRESETS, ...D
 
 /** The preset by its id; Level 21, As Studio, for one that is gone. */
 export function presetById(id: string): RenderPreset {
-	const p = RENDER_PRESETS.find((r) => r.id === id) ?? QUALITY_PRESETS[0];
+	const p =
+		RENDER_PRESETS.find((r) => r.id === id) ??
+		QUALITY_PRESETS.find((r) => r.id === "level-21") ??
+		QUALITY_PRESETS[0];
 	// A quality level's switches as this device has them; the debug views' as they are.
 	return p.id.startsWith("level-") ? { ...p, features: onThisDevice(p.features) } : p;
 }

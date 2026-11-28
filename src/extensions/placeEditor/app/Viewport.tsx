@@ -833,14 +833,28 @@ const SCENE_WORDS = new Map(
 	SCENE_VIEW.flatMap((group) => group.settings).map((decl) => [decl.key, decl] as const),
 );
 
-/** What View is, which is the panel's own and not a setting. */
-const VIEW_WORDS = {
-	help: "A quality level, one feature alone, or what the frame costs.",
+/** What Quality is here, as Settings' Quality. */
+const QUALITY_WORDS = {
+	help: "Studio's 21 levels, four past them, or Automatic.",
 	detail:
-		"A quality level sets the switches as Settings' Quality does; Automatic moves with how fast " +
-		"frames are drawn. Final output, one feature shows one part of the picture alone. The views " +
-		"under Inspect show the place as the switches leave it: its wireframe, heatmaps and overdraw.",
+		"A quality level sets the switches as Settings' Quality does. Levels 1 to 21 draw as " +
+		"Studio does; Beyond Studio's 22 to 25 each add one of Roswaal's own. Automatic moves " +
+		"with how fast frames are drawn, never past 21.",
 };
+
+/** What Show is, which is the panel's own and not a setting. */
+const SHOW_WORDS = {
+	help: "The finished picture, or a view to look into it.",
+	detail:
+		"For your place: the wireframe, overdraw, triangle density and the heatmaps, the place as " +
+		"the switches leave it. Roswaal's renderer: the sun's shadow maps, and one feature of the " +
+		"picture alone. Final output goes back to the picture.",
+};
+
+/** Show's views for your place, and the renderer's own: see Inspect's tabs too. */
+const PLACE_MODES: readonly RenderMode[] = ["wireframe", "overdraw", "density", "cost", "lights"];
+const RENDERER_MODES: readonly RenderMode[] = ["sunMaps"];
+const MODE_LABEL = new Map(RENDER_MODES);
 
 /**
  * A setting in the panel: its name with an "i" for the rest, its one line, and
@@ -1758,6 +1772,13 @@ const RENDER_TABS = [
 ] as const;
 type RenderTab = (typeof RENDER_TABS)[number][0];
 
+/** Inspect's two halves: tools for a developer's place, and for Roswaal's renderer. */
+const INSPECT_TABS = [
+	["place", "Your place"],
+	["renderer", "Renderer"],
+] as const;
+type InspectTab = (typeof INSPECT_TABS)[number][0];
+
 /**
  * How far the panel is pulled up where it is a sheet from the bottom, on a
  * touch screen held upright: enough for what changed last, half the screen,
@@ -1770,19 +1791,20 @@ const DETENT_NAMES: Record<Detent, string> = { peek: "Peek", half: "Half", full:
 const PANEL_PLACE_KEY = "roswaal.renderPanel";
 
 /** The tab and the sheet's height this viewer left the panel at, where the browser keeps them. */
-function readPanelPlace(): { tab: RenderTab; detent: Detent } {
+function readPanelPlace(): { tab: RenderTab; detent: Detent; inspect: InspectTab } {
 	try {
 		const saved = JSON.parse(localStorage.getItem(PANEL_PLACE_KEY) ?? "{}");
 		return {
 			tab: RENDER_TABS.some(([id]) => id === saved.tab) ? saved.tab : "picture",
 			detent: DETENTS.includes(saved.detent) ? saved.detent : "half",
+			inspect: INSPECT_TABS.some(([id]) => id === saved.inspect) ? saved.inspect : "place",
 		};
 	} catch {
-		return { tab: "picture", detent: "half" };
+		return { tab: "picture", detent: "half", inspect: "place" };
 	}
 }
 
-function keepPanelPlace(place: { tab: RenderTab; detent: Detent }): void {
+function keepPanelPlace(place: { tab: RenderTab; detent: Detent; inspect: InspectTab }): void {
 	try {
 		localStorage.setItem(PANEL_PLACE_KEY, JSON.stringify(place));
 	} catch {
@@ -1937,9 +1959,17 @@ export function RenderPanel({
 	const pick = (value: string) => {
 		const [kind, id] = value.split(":");
 		if (kind === "quality") {
+			// The view shown stays: a level's switches under Overdraw, say.
 			controller.chooseQuality(id === "auto" ? "auto" : Number(id));
-			apply({ ...controller.renderSettings(), mode: "lit" });
+			apply({ ...controller.renderSettings(), mode: render.mode });
 			onQuality(id);
+		} else if (kind === "final") {
+			// From one feature alone, back to the level's picture.
+			if (presetLevel(base.id) === null) {
+				const level = quality.auto ? "auto" : String(quality.level);
+				controller.chooseQuality(level === "auto" ? "auto" : Number(level));
+				apply({ ...controller.renderSettings(), mode: "lit" });
+			} else apply({ ...render, mode: "lit" });
 		} else if (kind === "preset") {
 			const p = presetById(id);
 			apply({ ...render, mode: "lit", preset: p.id, features: p.features });
@@ -2072,43 +2102,26 @@ export function RenderPanel({
 				<div className="place-groups">
 					{place.tab === "picture" && (
 						<div className="place-group">
-							<PanelSetting label="View" words={VIEW_WORDS}>
+							<PanelSetting label="Quality" words={QUALITY_WORDS}>
 								<FitSelect
-									label="View"
-									value={
-										render.mode !== "lit"
-											? `mode:${render.mode}`
-											: presetLevel(base.id) === null
-												? `preset:${base.id}`
-												: quality.auto
-													? "quality:auto"
-													: `quality:${presetLevel(base.id)}`
-									}
+									label="Quality"
+									value={quality.auto ? "quality:auto" : `quality:${quality.level}`}
 									words={`${quality.auto}${quality.level}`}
 									onChoose={pick}
 								>
 									{(tight) => (
 										<>
-											<optgroup label="Quality">
-												<option
-													value="quality:auto"
-													data-full={
-														quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"
-													}
-												>
-													{shortAuto(
-														quality.auto ? `Automatic · Level ${quality.level}` : "Automatic",
-														tight,
-													)}
-												</option>
-												{QUALITY_PRESETS.filter((p) => (presetLevel(p.id) ?? 0) <= STUDIO_TOP).map(
-													(p) => (
-														<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
-															{p.label}
-														</option>
-													),
+											<option
+												value="quality:auto"
+												data-full={
+													quality.auto ? `Automatic · Level ${quality.level}` : "Automatic"
+												}
+											>
+												{shortAuto(
+													quality.auto ? `Automatic · Level ${quality.level}` : "Automatic",
+													tight,
 												)}
-											</optgroup>
+											</option>
 											<optgroup label="Beyond Studio">
 												{QUALITY_PRESETS.filter((p) => (presetLevel(p.id) ?? 0) > STUDIO_TOP).map(
 													(p) => (
@@ -2118,17 +2131,51 @@ export function RenderPanel({
 													),
 												)}
 											</optgroup>
-											<optgroup label="Final output, one feature">
-												{DEBUG_PRESETS.map((p) => (
-													<option key={p.id} value={`preset:${p.id}`}>
-														{p.label}
+											<optgroup label="As Studio">
+												{QUALITY_PRESETS.filter((p) => (presetLevel(p.id) ?? 0) <= STUDIO_TOP).map(
+													(p) => (
+														<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
+															{p.label}
+														</option>
+													),
+												)}
+											</optgroup>
+										</>
+									)}
+								</FitSelect>
+							</PanelSetting>
+							<PanelSetting label="Show" words={SHOW_WORDS}>
+								<FitSelect
+									label="Show"
+									value={
+										render.mode !== "lit"
+											? `mode:${render.mode}`
+											: presetLevel(base.id) === null
+												? `preset:${base.id}`
+												: "final:"
+									}
+									words={`${render.mode}${base.id}`}
+									onChoose={pick}
+								>
+									{() => (
+										<>
+											<option value="final:">Final output</option>
+											<optgroup label="For your place">
+												{PLACE_MODES.map((mode) => (
+													<option key={mode} value={`mode:${mode}`}>
+														{MODE_LABEL.get(mode)}
 													</option>
 												))}
 											</optgroup>
-											<optgroup label="Inspect, as the switches leave it">
-												{RENDER_MODES.filter(([mode]) => mode !== "lit").map(([mode, label]) => (
+											<optgroup label="Roswaal's renderer">
+												{RENDERER_MODES.map((mode) => (
 													<option key={mode} value={`mode:${mode}`}>
-														{label}
+														{MODE_LABEL.get(mode)}
+													</option>
+												))}
+												{DEBUG_PRESETS.map((p) => (
+													<option key={p.id} value={`preset:${p.id}`}>
+														{p.label}
 													</option>
 												))}
 											</optgroup>
@@ -2256,12 +2303,45 @@ export function RenderPanel({
 						</>
 					)}
 					{place.tab === "inspect" && (
+						<div className="segmented render-subtabs" role="tablist" aria-label="Inspect">
+							{INSPECT_TABS.map(([id, label]) => (
+								<button
+									key={id}
+									type="button"
+									role="tab"
+									aria-selected={place.inspect === id}
+									tabIndex={place.inspect === id ? 0 : -1}
+									className={place.inspect === id ? "on" : ""}
+									onClick={() => movePlace({ inspect: id })}
+								>
+									{label}
+								</button>
+							))}
+						</div>
+					)}
+					{place.tab === "inspect" && place.inspect === "renderer" && (
 						<>
+							<FrameSection controller={controller} />
+							<AutomaticSection controller={controller} />
+							<ViewTiles render={render} apply={apply} modes={["lit", ...RENDERER_MODES]} />
+							<div className="place-group">
+								<SectionHead title="Tools" open={toolsOpen} onToggle={toggleTools} />
+								{toolsOpen && (
+									<RenderToolSwitch
+										label="Freeze shadows"
+										on={render.freezeShadows}
+										onChange={(freezeShadows) => apply({ ...render, freezeShadows })}
+									/>
+								)}
+							</div>
 							<StartLogSection />
+							<CopyReport controller={controller} />
+						</>
+					)}
+					{place.tab === "inspect" && place.inspect === "place" && (
+						<>
 							<ProbeSection controller={controller} />
 							<CostlySection controller={controller} onTurnOff={(key) => flip(key, false)} />
-							<AutomaticSection controller={controller} />
-							<FrameSection controller={controller} />
 							<div className="place-group">
 								<SectionHead title="Compare" />
 								<button
@@ -2289,26 +2369,18 @@ export function RenderPanel({
 										: "Change a switch first: holding turns it back while held."}
 								</span>
 							</div>
-							<ViewTiles render={render} apply={apply} />
+							<ViewTiles render={render} apply={apply} modes={["lit", ...PLACE_MODES]} />
 							<GizmoSection controller={controller} />
 							<div className="place-group">
 								<SectionHead title="Tools" open={toolsOpen} onToggle={toggleTools} />
 								{toolsOpen && (
-									<>
-										<RenderToolSwitch
-											label="Light ranges"
-											on={render.lightRanges}
-											onChange={(lightRanges) => apply({ ...render, lightRanges })}
-										/>
-										<RenderToolSwitch
-											label="Freeze shadows"
-											on={render.freezeShadows}
-											onChange={(freezeShadows) => apply({ ...render, freezeShadows })}
-										/>
-									</>
+									<RenderToolSwitch
+										label="Light ranges"
+										on={render.lightRanges}
+										onChange={(lightRanges) => apply({ ...render, lightRanges })}
+									/>
 								)}
 							</div>
-							<CopyReport controller={controller} />
 						</>
 					)}
 				</div>
@@ -2374,9 +2446,12 @@ function ModeLegends({
 function ViewTiles({
 	render,
 	apply,
+	modes,
 }: {
 	render: RenderSettings;
 	apply: (next: RenderSettings) => void;
+	/** The views offered here: Inspect's tabs have theirs. */
+	modes: readonly RenderMode[];
 }) {
 	const [open, toggle] = useFold(true);
 	return (
@@ -2385,7 +2460,7 @@ function ViewTiles({
 			{open && (
 				<>
 					<div className="view-tiles">
-						{RENDER_MODES.map(([mode, label]) => (
+						{RENDER_MODES.filter(([mode]) => modes.includes(mode)).map(([mode, label]) => (
 							<button
 								key={mode}
 								type="button"

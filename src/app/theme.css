@@ -24189,6 +24189,7 @@ textarea.tb:where(:disabled) {
 	.render-panel select.place-edit-field,
 	.render-panel .render-segmented button,
 	.render-panel .render-tabs button,
+	.render-panel .render-subtabs button,
 	.render-panel .render-search,
 	.render-panel .render-foot .tb {
 		min-height: 44px;
@@ -24443,6 +24444,23 @@ textarea.tb:where(:disabled) {
 }
 
 .render-tabs button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+/* Inspect's two halves: Your place and Renderer, across the panel. */
+.render-subtabs {
+	display: flex;
+	margin: 0 0 10px;
+}
+
+.render-subtabs button {
+	flex: 1;
+	min-width: 0;
+	padding: 4px 6px;
+}
+
+.render-subtabs button:focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: 1px;
 }

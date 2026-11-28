@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.90.0",
+	version: "0.91.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.91.0",
+			roswaal: "1.1.0-canary.148",
+			date: "2026-11-28",
+			text: "The Rendering panel's View becomes Quality (Automatic, Beyond Studio 25 to 22, As Studio 21 to 1) and Show (Final output; For your place: wireframe, overdraw, triangle density, heatmaps; Roswaal's renderer: shadow maps and the one-feature presets). A quality chosen keeps the view shown. Inspect has two tabs, Your place and Renderer, its sections and view tiles split between them, kept with the panel's place. presetById falls back to Level 21, not the first preset (25 since 0.90.0).",
+		},
 		{
 			version: "0.90.0",
 			roswaal: "1.1.0-canary.147",

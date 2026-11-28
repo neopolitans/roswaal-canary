@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.148",
+		date: "2026-11-28",
+		headline: "The Rendering panel's Quality, Show and Inspect, sorted by who they are for.",
+		changed: [
+			"**The Rendering panel's View is now Quality and Show.** Show holds the views for your place, and those for Roswaal's renderer, apart.",
+			"**Inspect has two tabs, Your place and Renderer.**",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.147",
 		date: "2026-11-28",
 		headline: "Quality Levels 22 to 25, past Studio's.",

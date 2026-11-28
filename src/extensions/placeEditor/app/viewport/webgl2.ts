@@ -28,7 +28,14 @@ import {
 	jitterClip,
 	StillFrames,
 } from "./antialias.js";
-import { boxesOf, CELL_PAD, COARSE_PAD, cellBlock, innerSpans } from "./cellSpans.js";
+import {
+	boxesOf,
+	CELL_PAD,
+	COARSE_PAD,
+	cellBlock,
+	innerSpans,
+	lightKeepLayers,
+} from "./cellSpans.js";
 import {
 	boxHidden,
 	boxInView,
@@ -97,6 +104,8 @@ import {
 	GLOW_WIDE,
 	type GlowShape,
 	GRID_FILL_BUDGET,
+	GRID_HIDDEN_AT,
+	GRID_WHOLE_BUDGET,
 	GridFillPlan,
 	glowShape,
 	glowSpread,
@@ -1054,7 +1063,8 @@ vec3 gridLamps(vec3 surface, vec3 n, vec3 v, float gloss, out vec3 shine) {
 		vec3 hereShine;
 		vec3 here = gridLight(k, p, n, v, gloss, hereShine);
 		float ease = clamp(1.0 - (edge - g.w) / (2.0 * g.w), 0.0, 1.0);
-		if (ease <= 0.0 || k + 1 >= ${LIGHT_GRID_CASCADES}) {
+		// Not into a cascade hidden while it is filled again: see GRID_HIDDEN_AT.
+		if (ease <= 0.0 || k + 1 >= ${LIGHT_GRID_CASCADES} || gridC[k + 1].x > ${GRID_HIDDEN_AT / 10}.0) {
 			shine = hereShine;
 			return here;
 		}
@@ -1082,6 +1092,9 @@ uniform vec4 gSize;
 uniform vec4 gLo;
 uniform vec4 gCount;
 uniform vec4 gOcc;
+// The layer's cells to fill, a word a wrapped z and a bit a wrapped x
+// (lightKeepLayers): the rest are given no light.
+uniform highp uvec4 gKeep[${LIGHT_GRID_CELLS / 4}];
 uniform highp sampler3D occ;
 // Its coarse level, as WebGpuView's GRID_FILL's: see OccupancyCoarse.
 uniform highp sampler3D occCoarse;
@@ -1113,7 +1126,10 @@ void main() {
 	// one wholly inside, none, so none is worked out for it.
 	float airK = 1.0;
 	if (gOcc.w > 0.5) airK = 1.0 - filled(corner + vec3(size * 0.5));
-	int samplesDone = airK <= 0.0 ? 0 : m * m * m;
+	int sx = int(gl_FragCoord.x);
+	int sz = int(gl_FragCoord.y);
+	bool kept = ((gKeep[sz >> 2][sz & 3] >> uint(sx)) & 1u) != 0u;
+	int samplesDone = (airK <= 0.0 || !kept) ? 0 : m * m * m;
 	vec3 light = vec3(0.0);
 	vec3 weighted = vec3(0.0);
 	float weight = 0.0;
@@ -3568,11 +3584,21 @@ export class WebGl2View implements ViewRenderer {
 	private gridVao: WebGLVertexArrayObject | null = null;
 	private gridProg: Program | null = null;
 	private gridFill: Record<
-		"size" | "lo" | "count" | "occ" | "occTex" | "occCoarse",
+		"size" | "lo" | "count" | "occ" | "occTex" | "occCoarse" | "keep",
 		WebGLUniformLocation | null
 	> | null = null;
-	/** Where each cascade stands, its lowest cell in whole cells; null, not yet filled. */
+	/** Where each cascade stands now, its lowest cell in whole cells; null, not yet filled. */
 	private gridOrigins: (number[] | null)[] = [];
+	/** Cascades filled again whole after a jump, not read until they are: see GRID_WHOLE_BUDGET. */
+	private gridHidden: boolean[] = [];
+	/** Cascades to fill again where they stand, the parts having changed. */
+	private gridRefill: boolean[] = [];
+
+	/** Whether a cascade is part way through a whole cascade's fill. */
+	private gridWholeBusy(): boolean {
+		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) if (this.gridPlan.whole(k)) return true;
+		return false;
+	}
 	/** The lights or their switches changed: every cascade filled again. */
 	private gridStale = true;
 	/** The light grid's steps as the eye moves, filled a budget a frame: see GridFillPlan. */
@@ -3641,6 +3667,8 @@ export class WebGl2View implements ViewRenderer {
 		}
 		this.gridCell = cell;
 		this.gridOrigins = [];
+		this.gridHidden = [];
+		this.gridRefill = [];
 		this.gridStale = true;
 		if (cell !== null && !this.gridTex) {
 			const make = (unit: number) => {
@@ -3706,15 +3734,21 @@ export class WebGl2View implements ViewRenderer {
 		block.fill(0);
 		const cell = this.gridCell;
 		let filled = cell !== null && this.hasLights && this.gridTex !== null;
+		// A cascade hidden or not yet filled stands where no pixel is inside it:
+		// the shaders read the next coarser past it, as past its edge.
+		let ready = false;
 		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			if (cell === null) continue;
 			const at = this.gridOrigins[k];
-			if (!at || cell === null) {
-				filled = false;
+			const size = cell * 2 ** k;
+			if (!at || this.gridHidden[k]) {
+				block.set([GRID_HIDDEN_AT, GRID_HIDDEN_AT, GRID_HIDDEN_AT, size], k * 4);
 				continue;
 			}
-			const size = cell * 2 ** k;
+			ready = true;
 			block.set([...at.map((c) => c * size), size], k * 4);
 		}
+		filled = filled && ready;
 		block[LIGHT_GRID_CASCADES * 4] = filled ? 1 : 0;
 		block[LIGHT_GRID_CASCADES * 4 + 1] = this.lighting?.soft ? 1 : 0;
 	}
@@ -3754,7 +3788,7 @@ export class WebGl2View implements ViewRenderer {
 					if (this.scene !== scene) return;
 					this.occ = Occupancy.fromScene(scene);
 					this.occAt = null;
-					this.gridOrigins[0] = null;
+					this.gridRefill[0] = true;
 					this.onRedraw?.();
 				}, 0);
 			}
@@ -3815,49 +3849,80 @@ export class WebGl2View implements ViewRenderer {
 		if (stale) this.gridPlan.reset();
 		const jobs: { k: number; region: LightGridRegion }[] = [];
 		let whole = 0;
-		// A step's cells a budget a frame, the finest cascade's first: see GridFillPlan.
+		// A step's cells a budget a frame, the finest cascade's first; a whole
+		// cascade's, a larger one: see GridFillPlan.
 		let budget = GRID_FILL_BUDGET;
+		let wholeBudget = GRID_WHOLE_BUDGET;
+		const n = LIGHT_GRID_CELLS;
 		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
-			// Filled whole instead (the parts changed): its step is forgotten.
-			if (!this.gridOrigins[k]) this.gridPlan.drop(k);
-			if (this.gridPlan.busy(k)) {
-				const part = this.gridPlan.take(k, budget);
-				budget -= part.cells;
-				for (const region of part.jobs) jobs.push({ k, region });
-				if (part.done) this.gridOrigins[k] = part.done;
-				else this.onRedraw?.();
-				continue;
+			// Not filled yet: filled whole, its step forgotten.
+			if (!this.gridOrigins[k]) {
+				this.gridPlan.drop(k);
+				this.gridHidden[k] = false;
 			}
 			const was = stale ? null : (this.gridOrigins[k] ?? null);
-			const move = lightGridMove(camera.eye, cell * 2 ** k, was);
-			if (move.fill.length === 0) continue;
-			const all = move.fill[0].count.every((c) => c === LIGHT_GRID_CELLS);
-			// Once filled, one whole cascade a frame, and only in a frame with no
-			// other whole-place work (see the frame's catching up): the rest after.
-			if (all && was && (whole > 0 || !wholeAllowed)) {
+			// The parts changed: filled again where it stands, read as it was meanwhile.
+			if (was && this.gridRefill[k] && !this.gridPlan.busy(k)) {
+				this.gridRefill[k] = false;
+				this.gridPlan.start(k, was, [{ min: [...was], count: [n, n, n] }], true);
+			}
+			if (!this.gridPlan.busy(k)) {
+				const move = lightGridMove(camera.eye, cell * 2 ** k, was);
+				if (move.fill.length === 0) continue;
+				if (!was) {
+					// First filled, or the lights changed: whole, now.
+					this.gridOrigins[k] = move.origin;
+					this.gridHidden[k] = false;
+					this.gridRefill[k] = false;
+					for (const region of move.fill) jobs.push({ k, region });
+					continue;
+				}
+				const all = move.fill[0].count.every((c) => c === n);
+				if (all) {
+					// A jump past it: one cascade at a time, the finest first, so the
+					// others are read meanwhile where they stood, their cells still
+					// right there.
+					if (this.gridWholeBusy()) {
+						this.onRedraw?.();
+						continue;
+					}
+					// Hidden, the next coarser read in its place, while it is filled
+					// where it now stands, a budget a frame.
+					this.gridHidden[k] = true;
+					this.gridRefill[k] = false;
+				}
+				// A step: the cells it takes in over this frame and the next few, the
+				// cascade read where it was until they are all filled.
+				this.gridPlan.start(k, move.origin, move.fill, all);
+			}
+			const isWhole = this.gridPlan.whole(k);
+			// A whole cascade's cells not in a frame with other whole-place work
+			// (see the frame's catching up): the frames after.
+			if (isWhole && !wholeAllowed) {
 				this.onRedraw?.();
 				continue;
 			}
-			if (all || !was) {
-				if (all) whole++;
-				this.gridOrigins[k] = move.origin;
-				for (const region of move.fill) jobs.push({ k, region });
-				continue;
-			}
-			// A step: the cells it takes in over this frame and the next few, the
-			// cascade read where it was until they are all filled.
-			this.gridPlan.start(k, move.origin, move.fill);
-			const part = this.gridPlan.take(k, budget);
-			budget -= part.cells;
+			const part = this.gridPlan.take(k, isWhole ? wholeBudget : budget);
+			if (isWhole) {
+				wholeBudget -= part.cells;
+				if (part.cells > 0) whole++;
+			} else budget -= part.cells;
 			for (const region of part.jobs) jobs.push({ k, region });
-			if (part.done) this.gridOrigins[k] = part.done;
-			else this.onRedraw?.();
+			if (part.done) {
+				this.gridOrigins[k] = part.done;
+				this.gridHidden[k] = false;
+			} else this.onRedraw?.();
 		}
 		// What changed lights reach, in the cascades as they now stand.
 		const dirty = stale ? [] : this.gridDirty;
 		this.gridDirty = [];
 		for (const box of dirty)
 			for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+				// Hidden while it fills where it now stands: filled again whole after.
+				if (this.gridHidden[k]) {
+					this.gridRefill[k] = true;
+					continue;
+				}
 				const at = this.gridOrigins[k];
 				const region = at ? lightGridDirty(at, cell * 2 ** k, box) : null;
 				if (region) jobs.push({ k, region });
@@ -3881,6 +3946,7 @@ export class WebGl2View implements ViewRenderer {
 				count: at("gCount"),
 				occ: at("gOcc"),
 				occTex: at("occ"),
+				keep: at("gKeep"),
 				occCoarse: at("occCoarse"),
 			};
 		}
@@ -3905,9 +3971,10 @@ export class WebGl2View implements ViewRenderer {
 		gl.disable(gl.BLEND);
 		gl.bindVertexArray(this.gridVao);
 		const soft = this.lighting?.soft ? 1 : 0;
-		const n = LIGHT_GRID_CELLS;
+		const boxes = this.scene ? boxesOf(this.scene) : null;
 		for (const { k, region } of jobs) {
 			const size = cell * 2 ** k;
+			const keep = lightKeepLayers(boxes, region.min, region.count, size, n);
 			gl.uniform4f(u.lo, region.min[0], region.min[1], region.min[2], 0);
 			gl.uniform4f(u.count, region.count[0], region.count[1], region.count[2], 0);
 			// Blocking and what each cell keeps: the finest cascade alone.
@@ -3919,6 +3986,7 @@ export class WebGl2View implements ViewRenderer {
 				gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.gridTex[0], 0, layer);
 				gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, this.gridTex[1], 0, layer);
 				gl.uniform4f(u.size, size, k, soft, up);
+				gl.uniform4uiv(u.keep, keep[y]);
 				gl.drawArrays(gl.TRIANGLES, 0, 3);
 			}
 			this.redrawn.lightGrid += region.count[0] * region.count[1] * region.count[2];
@@ -3957,10 +4025,11 @@ export class WebGl2View implements ViewRenderer {
 			this.skyKey = key;
 			this.skyDirty = true;
 			this.box = sceneBox(scene);
-			// What parts fill, again, and the finest cascade with it: not while a drag moves them.
+			// What parts fill, again, and every cascade with it, as which of their
+			// cells are filled follows the parts: not while a drag moves them.
 			this.occ = null;
 			this.occAt = null;
-			this.gridOrigins[0] = null;
+			this.gridRefill = Array(LIGHT_GRID_CASCADES).fill(true);
 		}
 		this.setLights(scene.lights);
 		this.setImages(scene);

@@ -215,3 +215,81 @@ export function innerSpans(
 export const CELL_PAD = 3;
 /** The coarse cells': read two cells out, with no second step. */
 export const COARSE_PAD = 2;
+
+/**
+ * The light grid's: a pixel reads its cascade half a finest cell out from
+ * the surface, the cells round that point blended, so one cell from a part
+ * is the furthest read; two, to spare (1.1.0-canary.146).
+ */
+export const LIGHT_PAD = 2;
+
+/**
+ * A light grid region's cells worth filling, `min` its lowest cell and
+ * `count` its cells along x, y and z, each `size` studs: a bit a cell, in
+ * the order WebGpuView's GRID_FILL counts them (x, then y, then z). Every
+ * bit set where there is no scene to go by.
+ */
+export function lightKeepBits(
+	index: BoxIndex | null,
+	min: readonly number[],
+	count: readonly number[],
+	size: number,
+): Uint32Array {
+	const [nx, ny, nz] = count;
+	const bits = new Uint32Array(Math.ceil((nx * ny * nz) / 32));
+	if (!index) return bits.fill(0xffffffff);
+	const block = cellBlock(
+		index,
+		min.map((c) => c * size),
+		[nx, ny, nz],
+		size,
+		LIGHT_PAD,
+	);
+	if (block.marked === 0) return bits;
+	for (let y = 0; y < ny; y++)
+		for (let z = 0; z < nz; z++) {
+			const row = (y * nz + z) * nx;
+			for (let x = 0; x < nx; x++) {
+				if (block.mask[row + x] === 0) continue;
+				const i = x + nx * (y + ny * z);
+				bits[i >> 5] |= 1 << (i & 31);
+			}
+		}
+	return bits;
+}
+
+/**
+ * The same for WebGl2View's fill, which draws a region a layer at a time
+ * over the whole wrapped layer: for each of the region's layers, a word per
+ * wrapped z and a bit per wrapped x, `cells` a side (a power of two, at most
+ * 32). Every bit set where there is no scene to go by.
+ */
+export function lightKeepLayers(
+	index: BoxIndex | null,
+	min: readonly number[],
+	count: readonly number[],
+	size: number,
+	cells: number,
+): Uint32Array[] {
+	const [nx, ny, nz] = count;
+	const wrap = cells - 1;
+	if (!index) return Array.from({ length: ny }, () => new Uint32Array(cells).fill(0xffffffff));
+	const block = cellBlock(
+		index,
+		min.map((c) => c * size),
+		[nx, ny, nz],
+		size,
+		LIGHT_PAD,
+	);
+	return Array.from({ length: ny }, (_, y) => {
+		const words = new Uint32Array(cells);
+		if (!block.spans[y]) return words;
+		for (let z = 0; z < nz; z++) {
+			const row = (y * nz + z) * nx;
+			const sz = (min[2] + z) & wrap;
+			for (let x = 0; x < nx; x++)
+				if (block.mask[row + x] !== 0) words[sz] |= 1 << ((min[0] + x) & wrap);
+		}
+		return words;
+	});
+}

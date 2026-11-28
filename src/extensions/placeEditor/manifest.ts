@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.88.1",
+	version: "0.89.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.89.0",
+			roswaal: "1.1.0-canary.146",
+			date: "2026-11-28",
+			text: "The light grid works out only cells within LIGHT_PAD (2) cells of a part (lightKeepBits for WebGPU's fill, a bit a cell in a storage buffer; lightKeepLayers for WebGL2's, a word a wrapped row in a uniform); the rest are given no light. A whole cascade is filled GRID_WHOLE_BUDGET (8,192) cells a frame: after a jump past it, hidden meanwhile (GRID_HIDDEN_AT), the next coarser read in its place, one cascade at a time; after the parts change, every cascade, read as it was meanwhile.",
+		},
 		{
 			version: "0.88.1",
 			roswaal: "1.1.0-canary.145",

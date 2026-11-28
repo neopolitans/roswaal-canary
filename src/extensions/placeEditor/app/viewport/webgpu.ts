@@ -35,6 +35,7 @@ import {
 	COARSE_PAD,
 	cellBlock,
 	innerSpans,
+	lightKeepBits,
 	unionSpan,
 } from "./cellSpans.js";
 import {
@@ -115,6 +116,8 @@ import {
 	GLOW_WIDE,
 	type GlowShape,
 	GRID_FILL_BUDGET,
+	GRID_HIDDEN_AT,
+	GRID_WHOLE_BUDGET,
 	GridFillPlan,
 	glowShape,
 	glowSpread,
@@ -417,6 +420,9 @@ struct GridP { origin: vec4f, info: vec4f, region: vec4f, occ: vec4f };
 // Its coarse level: each 2 x 2 x 2 cells' most, so a path steps past an
 // empty block unread (see OccupancyCoarse).
 @group(0) @binding(7) var occCoarse: texture_3d<f32>;
+// A bit a cell of the region, as it counts them: set where a part is near
+// enough for a pixel to read it (lightKeepBits). The rest are given no light.
+@group(0) @binding(8) var<storage, read> keep: array<u32>;
 fn blockEmpty(b: vec3i) -> bool {
 	return textureLoad(occCoarse, b & vec3i(${OCC_COARSE_SIZE - 1}), 0).r == 0.0;
 }
@@ -453,7 +459,8 @@ fn lightCell(p: vec3f) -> u32 {
 	// one wholly inside, none, so none is worked out for it.
 	var air = 1.0;
 	if (gp.occ.w > 0.5) { air = 1.0 - filled(corner + vec3f(size * 0.5)); }
-	let samples = select(m * m * m, 0u, air <= 0.0);
+	let kept = (keep[gid.x >> 5u] & (1u << (gid.x & 31u))) != 0u;
+	let samples = select(m * m * m, 0u, air <= 0.0 || !kept);
 	var light = vec3f(0.0);
 	var weighted = vec3f(0.0);
 	var weight = 0.0;
@@ -829,7 +836,8 @@ fn gridLamps(surface: vec3f, n: vec3f, v: vec3f, gloss: f32) -> Lamps {
 		if (edge <= g.w) { continue; }
 		let here = gridLight(k, p, n, v, gloss);
 		let ease = clamp(1.0 - (edge - g.w) / (2.0 * g.w), 0.0, 1.0);
-		if (ease <= 0.0 || k + 1u >= ${LIGHT_GRID_CASCADES}u) { return here; }
+		// Not into a cascade hidden while it is filled again: see GRID_HIDDEN_AT.
+		if (ease <= 0.0 || k + 1u >= ${LIGHT_GRID_CASCADES}u || gridU.cascades[k + 1u].x > ${GRID_HIDDEN_AT / 10}) { return here; }
 		let next = gridLight(k + 1u, p, n, v, gloss);
 		return Lamps(mix(here.diffuse, next.diffuse, ease), mix(here.spec, next.spec, ease));
 	}
@@ -3511,10 +3519,11 @@ export class WebGpuView implements ViewRenderer {
 			this.skyKey = key;
 			this.skyDirty = true;
 			this.box = sceneBox(scene);
-			// What parts fill, again, and the finest cascade with it: not while a drag moves them.
+			// What parts fill, again, and every cascade with it, as which of their
+			// cells are filled follows the parts: not while a drag moves them.
 			this.occ = null;
 			this.occAt = null;
-			this.gridOrigins[0] = null;
+			this.gridRefill = Array(LIGHT_GRID_CASCADES).fill(true);
 		}
 		this.setLights(scene.lights);
 		if (this.skyImages && this.sunTexture) this.rebind();
@@ -6076,7 +6085,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					if (this.scene !== scene) return;
 					this.occ = Occupancy.fromScene(scene);
 					this.occAt = null;
-					this.gridOrigins[0] = null;
+					this.gridRefill[0] = true;
 				}, 0);
 			}
 			return;
@@ -6104,9 +6113,21 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 	private gridSampler!: GPUSampler;
 	private gridUniform: GPUBuffer | null = null;
 	private gridParams: GPUBuffer[] = [];
+	/** Each fill job's cells to fill, a bit each: see lightKeepBits. */
+	private gridKeep: GPUBuffer[] = [];
 	private gridPipe: GPUComputePipeline | null = null;
 	/** Where each cascade stands now, its lowest cell in whole cells; null, not yet filled. */
 	private gridOrigins: (number[] | null)[] = [];
+	/** Cascades filled again whole after a jump, not read until they are: see GRID_WHOLE_BUDGET. */
+	private gridHidden: boolean[] = [];
+	/** Cascades to fill again where they stand, the parts having changed. */
+	private gridRefill: boolean[] = [];
+
+	/** Whether a cascade is part way through a whole cascade's fill. */
+	private gridWholeBusy(): boolean {
+		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) if (this.gridPlan.whole(k)) return true;
+		return false;
+	}
 	/** The lights or their switches changed: every cascade filled again. */
 	private gridStale = true;
 	/** The light grid's steps as the eye moves, filled a budget a frame: see GridFillPlan. */
@@ -6131,6 +6152,8 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		}
 		this.gridCell = cell;
 		this.gridOrigins = [];
+		this.gridHidden = [];
+		this.gridRefill = [];
 		this.gridStale = true;
 		if (cell !== null && !this.gridA) {
 			const size = [LIGHT_GRID_CELLS, LIGHT_GRID_CELLS, LIGHT_GRID_CELLS * LIGHT_GRID_CASCADES];
@@ -6185,15 +6208,21 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		const block = new Float32Array(4 * (LIGHT_GRID_CASCADES + 1));
 		const cell = this.gridCell;
 		let filled = cell !== null && this.hasLights;
+		// A cascade hidden or not yet filled stands where no pixel is inside it:
+		// the shaders read the next coarser past it, as past its edge.
+		let ready = false;
 		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+			if (cell === null) continue;
 			const at = this.gridOrigins[k];
-			if (!at || cell === null) {
-				filled = false;
+			const size = cell * 2 ** k;
+			if (!at || this.gridHidden[k]) {
+				block.set([GRID_HIDDEN_AT, GRID_HIDDEN_AT, GRID_HIDDEN_AT, size], k * 4);
 				continue;
 			}
-			const size = cell * 2 ** k;
+			ready = true;
 			block.set([...at.map((c) => c * size), size], k * 4);
 		}
+		filled = filled && ready;
 		block[LIGHT_GRID_CASCADES * 4] = filled ? 1 : 0;
 		block[LIGHT_GRID_CASCADES * 4 + 1] = this.lighting?.soft ? 1 : 0;
 		this.device.queue.writeBuffer(this.gridUniform, 0, block);
@@ -6213,49 +6242,80 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		if (stale) this.gridPlan.reset();
 		const jobs: { k: number; region: LightGridRegion }[] = [];
 		let whole = 0;
-		// A step's cells a budget a frame, the finest cascade's first: see GridFillPlan.
+		// A step's cells a budget a frame, the finest cascade's first; a whole
+		// cascade's, a larger one: see GridFillPlan.
 		let budget = GRID_FILL_BUDGET;
+		let wholeBudget = GRID_WHOLE_BUDGET;
+		const n = LIGHT_GRID_CELLS;
 		for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
-			// Filled whole instead (the parts changed): its step is forgotten.
-			if (!this.gridOrigins[k]) this.gridPlan.drop(k);
-			if (this.gridPlan.busy(k)) {
-				const part = this.gridPlan.take(k, budget);
-				budget -= part.cells;
-				for (const region of part.jobs) jobs.push({ k, region });
-				if (part.done) this.gridOrigins[k] = part.done;
-				else this.onRedraw?.();
-				continue;
+			// Not filled yet: filled whole, its step forgotten.
+			if (!this.gridOrigins[k]) {
+				this.gridPlan.drop(k);
+				this.gridHidden[k] = false;
 			}
 			const was = stale ? null : (this.gridOrigins[k] ?? null);
-			const move = lightGridMove(eye, cell * 2 ** k, was);
-			if (move.fill.length === 0) continue;
-			const all = move.fill[0].count.every((c) => c === LIGHT_GRID_CELLS);
-			// Once filled, one whole cascade a frame, and only in a frame with no
-			// other whole-place work (see the frame's catching up): the rest after.
-			if (all && was && (whole > 0 || !wholeAllowed)) {
+			// The parts changed: filled again where it stands, read as it was meanwhile.
+			if (was && this.gridRefill[k] && !this.gridPlan.busy(k)) {
+				this.gridRefill[k] = false;
+				this.gridPlan.start(k, was, [{ min: [...was], count: [n, n, n] }], true);
+			}
+			if (!this.gridPlan.busy(k)) {
+				const move = lightGridMove(eye, cell * 2 ** k, was);
+				if (move.fill.length === 0) continue;
+				if (!was) {
+					// First filled, or the lights changed: whole, now.
+					this.gridOrigins[k] = move.origin;
+					this.gridHidden[k] = false;
+					this.gridRefill[k] = false;
+					for (const region of move.fill) jobs.push({ k, region });
+					continue;
+				}
+				const all = move.fill[0].count.every((c) => c === n);
+				if (all) {
+					// A jump past it: one cascade at a time, the finest first, so the
+					// others are read meanwhile where they stood, their cells still
+					// right there.
+					if (this.gridWholeBusy()) {
+						this.onRedraw?.();
+						continue;
+					}
+					// Hidden, the next coarser read in its place, while it is filled
+					// where it now stands, a budget a frame.
+					this.gridHidden[k] = true;
+					this.gridRefill[k] = false;
+				}
+				// A step: the cells it takes in over this frame and the next few, the
+				// cascade read where it was until they are all filled.
+				this.gridPlan.start(k, move.origin, move.fill, all);
+			}
+			const isWhole = this.gridPlan.whole(k);
+			// A whole cascade's cells not in a frame with other whole-place work
+			// (see the frame's catching up): the frames after.
+			if (isWhole && !wholeAllowed) {
 				this.onRedraw?.();
 				continue;
 			}
-			if (all || !was) {
-				if (all) whole++;
-				this.gridOrigins[k] = move.origin;
-				for (const region of move.fill) jobs.push({ k, region });
-				continue;
-			}
-			// A step: the cells it takes in over this frame and the next few, the
-			// cascade read where it was until they are all filled.
-			this.gridPlan.start(k, move.origin, move.fill);
-			const part = this.gridPlan.take(k, budget);
-			budget -= part.cells;
+			const part = this.gridPlan.take(k, isWhole ? wholeBudget : budget);
+			if (isWhole) {
+				wholeBudget -= part.cells;
+				if (part.cells > 0) whole++;
+			} else budget -= part.cells;
 			for (const region of part.jobs) jobs.push({ k, region });
-			if (part.done) this.gridOrigins[k] = part.done;
-			else this.onRedraw?.();
+			if (part.done) {
+				this.gridOrigins[k] = part.done;
+				this.gridHidden[k] = false;
+			} else this.onRedraw?.();
 		}
 		// What changed lights reach, in the cascades as they now stand.
 		const dirty = stale ? [] : this.gridDirty;
 		this.gridDirty = [];
 		for (const box of dirty)
 			for (let k = 0; k < LIGHT_GRID_CASCADES; k++) {
+				// Hidden while it fills where it now stands: filled again whole after.
+				if (this.gridHidden[k]) {
+					this.gridRefill[k] = true;
+					continue;
+				}
 				const at = this.gridOrigins[k];
 				const region = at ? lightGridDirty(at, cell * 2 ** k, box) : null;
 				if (region) jobs.push({ k, region });
@@ -6278,6 +6338,15 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 		// A block each: all are written before the pass runs.
 		while (this.gridParams.length < jobs.length)
 			this.gridParams.push(d.createBuffer({ size: 64, usage: BUFFER.UNIFORM | BUFFER.COPY_DST }));
+		// And a bit a cell of which to fill, a whole cascade's at most.
+		while (this.gridKeep.length < jobs.length)
+			this.gridKeep.push(
+				d.createBuffer({
+					size: LIGHT_GRID_CELLS ** 3 / 8,
+					usage: BUFFER.STORAGE | BUFFER.COPY_DST,
+				}),
+			);
+		const boxes = this.scene ? boxesOf(this.scene) : null;
 		const bits = this.render ? renderDebug(this.render)[1] : 0;
 		const soft = this.lighting?.soft ? 1 : 0;
 		const pass = encoder.beginComputePass();
@@ -6301,6 +6370,11 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 					k === 0 && occAt && this.occ ? 1 : 0,
 				]),
 			);
+			d.queue.writeBuffer(
+				this.gridKeep[j],
+				0,
+				lightKeepBits(boxes, region.min, region.count, size),
+			);
 			pass.setBindGroup(
 				0,
 				d.createBindGroup({
@@ -6314,6 +6388,7 @@ struct O { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 						{ binding: 5, resource: this.gridB!.createView({ dimension: "3d" }) },
 						{ binding: 6, resource: this.occTex!.createView({ dimension: "3d" }) },
 						{ binding: 7, resource: this.occCoarseTex!.createView({ dimension: "3d" }) },
+						{ binding: 8, resource: { buffer: this.gridKeep[j] } },
 					],
 				}),
 			);

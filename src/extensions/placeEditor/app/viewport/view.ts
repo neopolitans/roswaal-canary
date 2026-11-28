@@ -1072,6 +1072,21 @@ export function lightGridMove(
  */
 export const GRID_FILL_BUDGET = 2048;
 
+/**
+ * Cells of a whole cascade filled again in a frame: when the eye jumps past
+ * it (the cascade hidden meanwhile, the next coarser read in its place), or
+ * when the parts changed (the cascade read as it was meanwhile, as it has
+ * not moved). A quarter of a cascade: four frames each, not one frame of
+ * 32,768 cells (1.1.0-canary.146).
+ */
+export const GRID_WHOLE_BUDGET = 8192;
+
+/**
+ * Where a hidden or unfilled cascade is said to stand: so far off that no
+ * pixel is inside it, so the shaders read past it as they do past its edge.
+ */
+export const GRID_HIDDEN_AT = 1e9;
+
 /** A region cut across its longest side into pieces of at most `most` cells. */
 export function splitRegion(region: LightGridRegion, most: number): LightGridRegion[] {
 	const { min, count } = region;
@@ -1096,7 +1111,7 @@ export function splitRegion(region: LightGridRegion, most: number): LightGridReg
  * (behind the camera as it goes on), are filled over before it lets go.
  */
 export class GridFillPlan {
-	private pending: ({ origin: number[]; jobs: LightGridRegion[] } | null)[] = [];
+	private pending: ({ origin: number[]; jobs: LightGridRegion[]; whole: boolean } | null)[] = [];
 
 	/** Nothing pending: the grid is filled again whole. */
 	reset(): void {
@@ -1118,9 +1133,21 @@ export class GridFillPlan {
 		return this.pending[k]?.origin ?? null;
 	}
 
-	/** Cascade `k` steps to `origin`, these regions to fill first. */
-	start(k: number, origin: number[], regions: readonly LightGridRegion[]): void {
-		this.pending[k] = { origin, jobs: regions.flatMap((r) => splitRegion(r, GRID_FILL_BUDGET)) };
+	/**
+	 * Cascade `k` steps to `origin`, these regions to fill first; `whole`, a
+	 * whole cascade's, filled at GRID_WHOLE_BUDGET a frame, not a step's.
+	 */
+	start(k: number, origin: number[], regions: readonly LightGridRegion[], whole = false): void {
+		this.pending[k] = {
+			origin,
+			jobs: regions.flatMap((r) => splitRegion(r, GRID_FILL_BUDGET)),
+			whole,
+		};
+	}
+
+	/** Whether cascade `k` is part way through a whole cascade's fill. */
+	whole(k: number): boolean {
+		return this.pending[k]?.whole === true;
 	}
 
 	/**

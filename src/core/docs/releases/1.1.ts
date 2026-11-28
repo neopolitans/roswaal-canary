@@ -9,6 +9,16 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.146",
+		date: "2026-11-28",
+		headline: "The light grid works out only cells near parts.",
+		changed: [
+			"**The light grid works out light only in cells near parts**, the ones a surface reads, not in the open air.",
+			"**The light grid fills again over a few frames**, not one, after the camera jumps or parts change.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.145",
 		date: "2026-11-28",
 		headline: "Highlights on WebGL2 on iPad.",

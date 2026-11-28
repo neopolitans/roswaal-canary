@@ -149,15 +149,18 @@ describe("the Rendering panel's switches", () => {
 	});
 
 	it("come in presets: quality levels that only take away, debugging ones each with a purpose", () => {
-		expect(QUALITY_PRESETS).toHaveLength(21);
-		expect(QUALITY_PRESETS[0].id).toBe("level-21");
-		expect(QUALITY_PRESETS[0].features).toEqual(STUDIO_FEATURES);
-		for (const p of QUALITY_PRESETS)
-			expect(changedFrom(p.features).every((k) => !p.features[k])).toBe(true);
+		expect(QUALITY_PRESETS).toHaveLength(25);
+		expect(QUALITY_PRESETS[0].id).toBe("level-25");
+		expect(QUALITY_PRESETS[0].label).toBe("Level 25 · Roswaal fixes");
+		// Studio's levels, from 21 down: they only take away.
+		const studio = QUALITY_PRESETS.slice(4);
+		expect(studio[0].id).toBe("level-21");
+		expect(studio[0].features).toEqual(STUDIO_FEATURES);
+		for (const p of studio) expect(changedFrom(p.features).every((k) => !p.features[k])).toBe(true);
 		// Each level down takes away at least what the one above it did.
-		for (let i = 1; i < QUALITY_PRESETS.length; i++) {
-			const before = changedFrom(QUALITY_PRESETS[i - 1].features);
-			const now = changedFrom(QUALITY_PRESETS[i].features);
+		for (let i = 1; i < studio.length; i++) {
+			const before = changedFrom(studio[i - 1].features);
+			const now = changedFrom(studio[i].features);
 			expect(before.every((k) => now.includes(k))).toBe(true);
 		}
 		for (const p of DEBUG_PRESETS) expect(changedFrom(p.features).length).toBeGreaterThan(0);

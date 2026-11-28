@@ -266,7 +266,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Quality",
-						"As Studio's quality levels: **Automatic**, the default, or **Level 1** to **Level 21**. A level sets how far parts are drawn, how far the sun's shadows reach, which effects are on, and the render scale and antialiasing where those are Automatic. Automatic starts from the device (a phone at 5, a tablet at 10, a laptop's built-in GPU at 15, other computers at 21) and moves a level down or up with how fast frames are drawn. The Rendering panel has it too.",
+						"As Studio's quality levels: **Automatic**, the default, or **Level 1** to **Level 21**; or **Level 22** to **Level 25**, past Studio's, each adding one of Roswaal's own: realtime reflections, realtime light objects, realtime ambient lighting, then Roswaal's fixes. A level sets how far parts are drawn, how far the sun's shadows reach, which effects are on, and the render scale and antialiasing where those are Automatic. Automatic starts from the device (a phone at 5, a tablet at 10, a laptop's built-in GPU at 15, other computers at 21) and moves a level down or up with how fast frames are drawn, never past 21. The Rendering panel has it too.",
 					],
 					[
 						"Frame rate",
@@ -290,11 +290,11 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Light object grid",
-						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. On a touch screen, Automatic is **4-stud** cells for either, which a tablet keeps up with at Native with Ambient lighting on Grid. **Off** has every pixel work out its own. WebGPU, and WebGL2 where it draws to float textures.",
+						"Light objects worked out once into three grids round the camera, of cells **8**, **16** or **32 studs** and twice and four times that, again only when the lights change or the camera moves on, rather than by each pixel each frame. Each pixel blends the cells round it and turns the light to its own face, so edges stay sharp; the light's fall softens to the cells' size, and it costs the same however many lights there are. **Automatic**, the default, follows the place's LightingStyle: **Soft**, 4-stud cells with the light flat, a face lit whichever way it turns, as Studio draws it; **Realistic**, every pixel works out its own. On a touch screen, Automatic is **4-stud** cells for either, which a tablet keeps up with at Native with Ambient lighting on Grid. From quality Level 23, Automatic is Off on every screen. **Off** has every pixel work out its own. WebGPU, and WebGL2 where it draws to float textures.",
 					],
 					[
 						"Ambient lighting",
-						"How much of the sky each surface sees: OutdoorAmbient and the sky's light reach what the sky does, and rooms closed from it get Ambient alone. **Grid** reads it from the lighting cells, 4 studs a side round the camera, as Studio holds its own, then from cells 16 studs a side out to 768 studs, and past those four of the sky's maps a tap each: far fewer reads a pixel, the saving largest on a tablet at Native. **Realtime** works it out at every pixel from eight of the sky's maps, sharper past the cells. **Automatic**, the default, is Grid on a touch screen and Realtime elsewhere.",
+						"How much of the sky each surface sees: OutdoorAmbient and the sky's light reach what the sky does, and rooms closed from it get Ambient alone. **Grid** reads it from the lighting cells, 4 studs a side round the camera, as Studio holds its own, then from cells 16 studs a side out to 768 studs, and past those four of the sky's maps a tap each: far fewer reads a pixel, the saving largest on a tablet at Native. **Realtime** works it out at every pixel from eight of the sky's maps, sharper past the cells. **Automatic**, the default, is Grid on a touch screen and Realtime elsewhere, and Realtime everywhere from quality Level 24.",
 					],
 					[
 						"Sky light resolution",
@@ -318,7 +318,7 @@ export function settingsPage(): DocPage {
 					],
 					[
 						"Surface reflection accuracy",
-						"How closely reflections follow the camera. **Exact** draws the place round the camera again each 8 studs it moves, a cost while it moves; a **32**, **64** or **128-stud grid** draws one the first time the camera enters each cell, keeps the last eight and reads the one for where the camera is, which costs nothing once drawn and is less exact. **Automatic**, the default, is Exact on a computer and a 64-stud grid on a touch screen.",
+						"How closely reflections follow the camera. **Exact** draws the place round the camera again each 8 studs it moves, a cost while it moves; a **32**, **64** or **128-stud grid** draws one the first time the camera enters each cell, keeps the last eight and reads the one for where the camera is, which costs nothing once drawn and is less exact. **Automatic**, the default, is Exact on a computer and a 64-stud grid on a touch screen, and Exact everywhere from quality Level 22.",
 					],
 					[
 						"Texture resolution",

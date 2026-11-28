@@ -33,6 +33,7 @@ import {
 	type PlaceEditorSettings,
 	renderScaleLabels,
 	SCENE_VIEW,
+	VIEWPORT_AMBIENT_LIGHTING,
 	VIEWPORT_ANTIALIAS,
 	VIEWPORT_BLOOM_RESOLUTIONS,
 	VIEWPORT_FRAME_RATES,
@@ -44,7 +45,6 @@ import {
 	VIEWPORT_RENDERERS,
 	VIEWPORT_SHADOW_MAPS,
 	VIEWPORT_SKY_RESOLUTIONS,
-	VIEWPORT_AMBIENT_LIGHTING,
 	VIEWPORT_STILL_FRAMES,
 	VIEWPORT_TEXTURE_RESOLUTIONS,
 	VIEWPORT_UPSCALES,
@@ -79,6 +79,7 @@ import {
 import { memoryRows } from "./viewport/gpuMemory.js";
 import { type HeavyMesh, shortCount } from "./viewport/heaviest.js";
 import { downloadFailures, onDownloadFailures } from "./viewport/images.js";
+import { STUDIO_TOP } from "./viewport/levels.js";
 import { prepareScene } from "./viewport/prepare.js";
 import { probeCost } from "./viewport/probe.js";
 import {
@@ -2100,11 +2101,22 @@ export function RenderPanel({
 														tight,
 													)}
 												</option>
-												{QUALITY_PRESETS.map((p) => (
-													<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
-														{p.label}
-													</option>
-												))}
+												{QUALITY_PRESETS.filter((p) => (presetLevel(p.id) ?? 0) <= STUDIO_TOP).map(
+													(p) => (
+														<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
+															{p.label}
+														</option>
+													),
+												)}
+											</optgroup>
+											<optgroup label="Beyond Studio">
+												{QUALITY_PRESETS.filter((p) => (presetLevel(p.id) ?? 0) > STUDIO_TOP).map(
+													(p) => (
+														<option key={p.id} value={`quality:${presetLevel(p.id)}`}>
+															{p.label}
+														</option>
+													),
+												)}
 											</optgroup>
 											<optgroup label="Final output, one feature">
 												{DEBUG_PRESETS.map((p) => (

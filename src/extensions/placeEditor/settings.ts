@@ -8,6 +8,7 @@
 
 import type { SettingGroup } from "../manifest.js";
 import type { AntialiasMode } from "./app/viewport/antialias.js";
+import { levelLabel, ROSWAAL_TOP } from "./app/viewport/levels.js";
 
 /** The place's selection outline, by name, in CSS pixels. */
 export const OUTLINE_WIDTHS = { thin: 2, medium: 3.5, thick: 5 } as const;
@@ -48,9 +49,9 @@ export type ViewportFrameRate = (typeof VIEWPORT_FRAME_RATES)[number]["value"];
  */
 export const VIEWPORT_QUALITIES = [
 	{ value: "auto", label: "Automatic" },
-	...Array.from({ length: 21 }, (_, i) => {
-		const level = 21 - i;
-		return { value: String(level), label: `Level ${level}` };
+	...Array.from({ length: ROSWAAL_TOP }, (_, i) => {
+		const level = ROSWAAL_TOP - i;
+		return { value: String(level), label: levelLabel(level) };
 	}),
 ] as const;
 export type ViewportQuality = "auto" | `${number}`;

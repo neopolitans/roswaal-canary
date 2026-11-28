@@ -11,6 +11,7 @@
  */
 
 import type { AntialiasMode } from "./antialias.js";
+import { ROSWAAL_TOP, STUDIO_TOP } from "./levels.js";
 import { featuresAtLevel, type RenderFeatures } from "./renderFeatures.js";
 import { GLOW_COARSE_RATIO, type ViewQuality } from "./view.js";
 
@@ -35,8 +36,8 @@ export interface QualityLevel {
 	features: RenderFeatures;
 }
 
-/** The highest level: everything, As Studio. */
-export const TOP_LEVEL = 21;
+/** Studio's highest level: everything, As Studio. Automatic climbs no higher (see levels.ts). */
+export const TOP_LEVEL = STUDIO_TOP;
 
 /** Studio's render distance at each level, by its lowest level; null from 17, none. */
 const DISTANCE: [number, number | null][] = [
@@ -93,14 +94,15 @@ function makeLevel(level: number): QualityLevel {
 	};
 }
 
-export const QUALITY_LEVELS: readonly QualityLevel[] = Array.from({ length: TOP_LEVEL }, (_, i) =>
+/** Levels 1 to 25: those past 21 draw as 21 does, with Roswaal's own on top (see levels.ts). */
+export const QUALITY_LEVELS: readonly QualityLevel[] = Array.from({ length: ROSWAAL_TOP }, (_, i) =>
 	makeLevel(i + 1),
 );
 
-/** The level by number, held within 1–21. */
+/** The level by number, held within 1–25. */
 export function qualityLevel(level: number): QualityLevel {
 	const n = Number.isFinite(level)
-		? Math.max(1, Math.min(TOP_LEVEL, Math.round(level)))
+		? Math.max(1, Math.min(ROSWAAL_TOP, Math.round(level)))
 		: TOP_LEVEL;
 	return QUALITY_LEVELS[n - 1];
 }
@@ -166,7 +168,8 @@ export class AutoQuality {
 	private fastFor = 0;
 
 	constructor(start: number) {
-		this.level = qualityLevel(start).level;
+		// Studio's levels alone: from one of Roswaal's, Level 21.
+		this.level = Math.min(TOP_LEVEL, qualityLevel(start).level);
 	}
 
 	/**

@@ -9,6 +9,15 @@ import type { Release } from "../releases.js";
 
 export const RELEASES_1_1: Release[] = [
 	{
+		version: "1.1.0-canary.147",
+		date: "2026-11-28",
+		headline: "Quality Levels 22 to 25, past Studio's.",
+		added: [
+			"**Quality Levels 22 to 25**, past Studio's 21, each adding one of Roswaal's own: realtime reflections, realtime light objects, realtime ambient lighting, then Roswaal's fixes. Automatic never picks them.",
+		],
+		affects: ["editor"],
+	},
+	{
 		version: "1.1.0-canary.146",
 		date: "2026-11-28",
 		headline: "The light grid works out only cells near parts.",

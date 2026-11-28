@@ -11,6 +11,7 @@
  */
 
 import type { LightingParams } from "../../core/lighting.js";
+import { FIXES_LEVEL, levelLabel, ROSWAAL_TOP } from "./levels.js";
 
 export interface RenderFeatures {
 	matTextures: boolean;
@@ -386,24 +387,26 @@ export const LEVEL_ADDS: Partial<Record<FeatureKey, number>> = {
 	blur: 20,
 };
 
-/** The switches at a quality level, 1 to 21. */
+/** The switches at a quality level, 1 to 25: Roswaal's fixes from Level 25 (FIXES_LEVEL). */
 export function featuresAtLevel(level: number): RenderFeatures {
 	return Object.fromEntries(
-		FEATURES.map((i) => [i.key, !i.fix && !i.optIn && level >= (LEVEL_ADDS[i.key] ?? 1)]),
+		FEATURES.map((i) => [
+			i.key,
+			(!i.fix || level >= FIXES_LEVEL) && !i.optIn && level >= (LEVEL_ADDS[i.key] ?? 1),
+		]),
 	) as unknown as RenderFeatures;
 }
 
-/** A quality level's name, Level 21's with its other. */
-export function levelLabel(level: number): string {
-	if (level === 21) return "Level 21 · As Studio";
-	return `Level ${level}`;
-}
+export { levelLabel };
 
-/** The quality levels as presets, highest first: `level-21` to `level-1`. */
-export const QUALITY_PRESETS: readonly RenderPreset[] = Array.from({ length: 21 }, (_, i) => {
-	const level = 21 - i;
-	return { id: `level-${level}`, label: levelLabel(level), features: featuresAtLevel(level) };
-});
+/** The quality levels as presets, highest first: `level-25` to `level-1`. */
+export const QUALITY_PRESETS: readonly RenderPreset[] = Array.from(
+	{ length: ROSWAAL_TOP },
+	(_, i) => {
+		const level = ROSWAAL_TOP - i;
+		return { id: `level-${level}`, label: levelLabel(level), features: featuresAtLevel(level) };
+	},
+);
 
 /** Render debugging presets: one feature at a time; See shows it lit, as wires or as its cost. */
 export const DEBUG_PRESETS: readonly RenderPreset[] = [

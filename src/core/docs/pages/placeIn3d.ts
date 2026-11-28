@@ -284,8 +284,10 @@ export function placeEditorRenderingPage(): DocPage {
 			{
 				t: "p",
 				text:
-					"Settings' **Quality**, and the top of **View**, draws at one of 21 levels, as Studio's " +
-					"do. How far each draws parts, and where glow and sharp shadows begin, were measured in Studio.",
+					"Settings' **Quality**, and the top of **View**, draws at one of Studio's 21 levels, or at " +
+					"one of four past them. How far each draws parts, and where glow and sharp shadows begin, " +
+					"were measured in Studio. Levels 22 to 25 draw as 21 and each adds one of Roswaal's own; " +
+					"Automatic never picks them.",
 			},
 			{
 				t: "table",
@@ -299,6 +301,10 @@ export function placeEditorRenderingPage(): DocPage {
 						"17–21",
 						"Every part, far shadows, soft edges, sky and scene reflections, blur; 150% at 18 and the screen's native resolution from 19; 21 is As Studio. No level turns on MSAA: Settings' Antialiasing does",
 					],
+					["22", "Realtime reflections: Exact on every screen"],
+					["23", "Realtime light objects: every pixel lit by each light, in any LightingStyle"],
+					["24", "Realtime ambient lighting: Realtime on every screen"],
+					["25", "Roswaal fixes: Thin walls block sky, and Transparent parts show Highlight"],
 				],
 			},
 			{ t: "h", level: 2, text: "Switches" },
@@ -319,7 +325,8 @@ export function placeEditorRenderingPage(): DocPage {
 					"**Antialiasing** under it is Settings' own: the quality level's, or a mode this renderer draws. " +
 					"**View** chooses what is shown. Its **Quality** levels set the switches as Settings' " +
 					"Quality does: **Level 21** is everything, as Studio draws it, and each level down takes " +
-					"away what costs most. A switch changed by hand shows **Custom (from Level N)**. The " +
+					"away what costs most; **Beyond Studio** holds Levels 22 to 25. A switch changed by hand " +
+					"shows **Custom (from Level N)**. The " +
 					"**Final output, one feature** presets show one feature alone. Under them, the arrows " +
 					"step through the ten steps a frame is built in. " +
 					"The other views show the place as the switches leave it, so the wireframe shows what " +

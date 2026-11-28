@@ -20,6 +20,7 @@ import {
 import type { AntialiasMode } from "./antialias.js";
 import type { MemoryUse } from "./gpuMemory.js";
 import type { Handles } from "./handles.js";
+import { REALTIME_AMBIENT, REALTIME_LIGHTS, REALTIME_REFLECTIONS, STUDIO_TOP } from "./levels.js";
 import { lookAt, type Mat4, multiply } from "./math.js";
 import type { Probe, StageSink } from "./profile.js";
 import { featureBits, type RenderFeatures, STUDIO_FEATURES } from "./renderFeatures.js";
@@ -966,12 +967,18 @@ export const TOUCH_LIGHT_CELL = 4;
 /**
  * The Light object grid setting's finest cell, in studs; null, off;
  * "auto", as the place's LightingStyle says (see autoLightGrid); on a touch
- * screen, Automatic is TOUCH_LIGHT_CELL.
+ * screen, Automatic is TOUCH_LIGHT_CELL. From Level 23 (REALTIME_LIGHTS)
+ * Automatic is off: every pixel lit by each light, on any screen.
  */
-export function lightGridCell(setting: string | undefined, touch = false): number | null | "auto" {
+export function lightGridCell(
+	setting: string | undefined,
+	touch = false,
+	level = STUDIO_TOP,
+): number | null | "auto" {
 	if (setting === "4" || setting === "8" || setting === "16" || setting === "32")
 		return Number(setting);
 	if (setting === "off") return null;
+	if (level >= REALTIME_LIGHTS) return null;
 	return touch ? TOUCH_LIGHT_CELL : "auto";
 }
 
@@ -982,10 +989,15 @@ export function lightGridCell(setting: string | undefined, touch = false): numbe
  * frames at Native were about ten milliseconds longer than with Ambient
  * lighting off (26 Nov 2026).
  */
-export function ambientGrid(setting: string | undefined, touch = false): boolean {
+export function ambientGrid(
+	setting: string | undefined,
+	touch = false,
+	level = STUDIO_TOP,
+): boolean {
 	if (setting === "grid") return true;
 	if (setting === "realtime") return false;
-	return touch;
+	// From Level 24 (REALTIME_AMBIENT), Realtime on any screen.
+	return touch && level < REALTIME_AMBIENT;
 }
 
 /** What a view has drawn again since it began: see WebGpuView's redrawn. */
@@ -1272,10 +1284,15 @@ export function reflectionCell(eye: readonly number[], cell: number): string {
  * computer and keeps a 64-stud grid on a touch screen, where redrawing the
  * cube as the camera moves costs a tablet most.
  */
-export function reflectionGrid(setting: string | undefined, touch: boolean): number | null {
+export function reflectionGrid(
+	setting: string | undefined,
+	touch: boolean,
+	level = STUDIO_TOP,
+): number | null {
 	if (setting === "follow") return null;
 	if (setting === "32" || setting === "64" || setting === "128") return Number(setting);
-	return touch ? 64 : null;
+	// From Level 22 (REALTIME_REFLECTIONS), Exact on any screen.
+	return touch && level < REALTIME_REFLECTIONS ? 64 : null;
 }
 
 /**

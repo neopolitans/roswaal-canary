@@ -10,7 +10,7 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 	// The Place Viewer until 1.0.0-canary.10.
 	formerIds: ["placeViewer"],
 	name: "Place Editor",
-	version: "0.89.0",
+	version: "0.90.0",
 	maturity: "preview",
 	description: "Draws your place in 3D, in a tab of its own.",
 	offNote:
@@ -49,6 +49,12 @@ export const PLACE_EDITOR: ExtensionManifest<PlaceEditorModule> = {
 		},
 	],
 	releases: [
+		{
+			version: "0.90.0",
+			roswaal: "1.1.0-canary.147",
+			date: "2026-11-28",
+			text: "Quality Levels 22 to 25 past Studio's 21 (levels.ts), each drawing as 21 and adding one of Roswaal's own, the cheapest on the author's iPads first: 22, Surface reflection accuracy's Automatic is Exact on any screen; 23, Light object grid's is Off; 24, Ambient lighting's is Realtime; 25, the fix switches on (featuresAtLevel). A setting chosen by hand is kept. Automatic stays within 21, and starts at 21 from one of them. The View menu lists them under Beyond Studio.",
+		},
 		{
 			version: "0.89.0",
 			roswaal: "1.1.0-canary.146",

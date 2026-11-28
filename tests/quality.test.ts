@@ -29,8 +29,8 @@ import {
 } from "../src/extensions/placeEditor/app/viewport/view.js";
 
 describe("quality levels", () => {
-	it("are 21, the top one everything, As Studio", () => {
-		expect(QUALITY_LEVELS).toHaveLength(21);
+	it("are Studio's 21, the top one everything, As Studio, then Roswaal's to 25", () => {
+		expect(QUALITY_LEVELS).toHaveLength(25);
 		const top = qualityLevel(21);
 		expect(top.features).toEqual(STUDIO_FEATURES);
 		expect(top.distance).toBeNull();
@@ -58,6 +58,11 @@ describe("quality levels", () => {
 			4000,
 			6000,
 			null,
+			null,
+			null,
+			null,
+			null,
+			// Roswaal's: as Level 21.
 			null,
 			null,
 			null,
@@ -108,14 +113,14 @@ describe("quality levels", () => {
 
 	it("reach as far as Studio's sharp shadows did, the stand-in further and blurred", () => {
 		expect(QUALITY_LEVELS.slice(9).map((q) => q.reach)).toEqual([
-			90, 124, 164, 209, 269, 318, 385, 430, 528, 578, 578, 578,
+			90, 124, 164, 209, 269, 318, 385, 430, 528, 578, 578, 578, 578, 578, 578, 578,
 		]);
 		expect(qualityLevel(9).reach).toBeGreaterThan(qualityLevel(10).reach);
 		expect(qualityLevel(9).blobWidth).toBeGreaterThan(0);
 	});
 
 	it("never take away what a lower level has, and reach further as they rise", () => {
-		for (let i = 1; i < QUALITY_LEVELS.length; i++) {
+		for (let i = 1; i < 21; i++) {
 			const lower = QUALITY_LEVELS[i - 1];
 			const q = QUALITY_LEVELS[i];
 			expect(changedFrom(q.features).every((k) => changedFrom(lower.features).includes(k))).toBe(
@@ -126,9 +131,28 @@ describe("quality levels", () => {
 		}
 	});
 
-	it("are held within 1–21 and named as presets", () => {
+	it("past 21, draw as Level 21 does, Roswaal's fixes on from 25 alone", () => {
+		const studio = qualityLevel(21);
+		for (const n of [22, 23, 24, 25]) {
+			const q = qualityLevel(n);
+			expect([q.distance, q.antialias, q.reach, q.shadowMap, q.blobWidth]).toEqual([
+				studio.distance,
+				studio.antialias,
+				studio.reach,
+				studio.shadowMap,
+				studio.blobWidth,
+			]);
+		}
+		for (const n of [22, 23, 24]) expect(qualityLevel(n).features).toEqual(STUDIO_FEATURES);
+		expect(changedFrom(qualityLevel(25).features).sort()).toEqual(
+			["seeThroughHighlights", "thinWallsBlockSky"].sort(),
+		);
+		expect(qualityLevel(25).features.thinWallsBlockSky).toBe(true);
+	});
+
+	it("are held within 1–25 and named as presets", () => {
 		expect(qualityLevel(0).level).toBe(1);
-		expect(qualityLevel(40).level).toBe(21);
+		expect(qualityLevel(40).level).toBe(25);
 		expect(levelPreset(7)).toBe("level-7");
 		expect(presetLevel("level-7")).toBe(7);
 		expect(presetLevel("debug-sun")).toBeNull();

@@ -3033,6 +3033,8 @@ export class ViewportController {
 		}
 		view.setShadowMap(this.shadowMapFor(q));
 		view.setQuality(this.viewQualityFor(q, this.pixelRatio()));
+		// Light objects, ambient lighting and reflections, as the level's Automatic is.
+		this.applyLampMode();
 		this.fit();
 		this.redraw();
 	}
@@ -3139,10 +3141,12 @@ export class ViewportController {
 		this.view?.setLampMode?.(this.lampModeNow());
 		this.view?.setSkyMode?.(this.skyModeNow());
 		const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
-		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid, touch));
-		this.view?.setAmbientGrid?.(ambientGrid(this.options.ambientLighting, touch));
+		// Where they are Automatic, as the quality level says past Studio's: see levels.ts.
+		const level = this.state.quality.level;
+		this.view?.setLightGrid?.(lightGridCell(this.options.lightGrid, touch, level));
+		this.view?.setAmbientGrid?.(ambientGrid(this.options.ambientLighting, touch, level));
 		this.view?.setParticleHalf?.(this.options.particleResolution === "half");
-		this.view?.setReflectionGrid?.(reflectionGrid(this.options.reflectionUpdates, touch));
+		this.view?.setReflectionGrid?.(reflectionGrid(this.options.reflectionUpdates, touch, level));
 	}
 
 	/** The sky's share as drawn now: Settings', or half where Dynamic optimization has taken that, never more pixels. */
